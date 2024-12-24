@@ -28,6 +28,7 @@ webdriver_manager
 Run the Script:
 
 bash python arxiv_processor.py
+
 Output:
 
 A detailed log file is saved in the ~/logs directory.
