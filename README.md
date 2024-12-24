@@ -27,9 +27,7 @@ selenium
 webdriver_manager
 Run the Script:
 
-bash
-Copy code
-python arxiv_processor.py
+bash python arxiv_processor.py
 Output:
 
 A detailed log file is saved in the ~/logs directory.
@@ -40,8 +38,6 @@ Edit the whitelist_title, whitelist_authors, and whitelist_affiliations lists to
 Logging:
 Logs are saved in ~/logs with filenames formatted as papers_<YYYY-MM-DD>.txt.
 ## Example Output
-yaml
-Copy code
 ===== Matched Articles (logged to ~/logs/papers_2024-12-24.txt) =====
 
 1. MATCHED PAPER
