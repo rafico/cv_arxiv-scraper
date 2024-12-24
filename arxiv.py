@@ -43,10 +43,9 @@ whitelist_authors = [
     'Guibas', 'Hammarstrand', 'Hinton', 'Ioffe', 'Ishan Misra', 'Johnson',
     'Kaiming', 'Kanade', 'Kirillov', 'LeCun', 'Leal-Taixe', 'Lior Wolf',
     'Litany', 'Malik', 'Mubarak Shah', 'Pollefeys', 'Ramanan', 'Savarese',
-    'Scaramuzza', 'Schmidhuber', 'Snavely', 'Susskind', 'Svensson', 'Torralba',
-    'Torr', 'Vedaldi', 'Zisserman'
+    'Scaramuzza', 'Schmidhuber', 'Sebastian Thrun', 'Snavely', 'Susskind',
+    'Svensson', 'Torralba', 'Torr', 'Vedaldi', 'Zisserman'
 ]
-
 
 def check_whitelist_match(text_list, whitelist):
     """
