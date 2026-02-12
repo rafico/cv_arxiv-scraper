@@ -1,67 +1,126 @@
-# ArXiv Paper Processor
-This script processes the arXiv Computer Vision RSS feed to identify and log papers that match predefined criteria based on titles, authors, or affiliations. It is designed for researchers and enthusiasts who want to streamline the discovery of relevant papers in the computer vision domain.
+# ArXiv CV Scraper
+
+A Flask app that monitors the [arXiv](https://arxiv.org) `cs.CV` RSS feed and surfaces papers that match your interests by author, affiliation, and title/abstract keywords.
+
+![Python](https://img.shields.io/badge/python-3.9+-blue)
+![Flask](https://img.shields.io/badge/flask-3.1-green)
+![License](https://img.shields.io/badge/license-MIT-gray)
 
 ## Features
-RSS Feed Parsing: Retrieves and processes papers from the arXiv RSS feed for computer vision.
-PDF Extraction: Downloads the paper's PDF and extracts text from the first page for further analysis.
-Whitelist Matching:
-Titles, authors, and affiliations are matched against a customizable whitelist to prioritize relevant content.
-Flexible regex patterns allow for enhanced matching capabilities.
-Parallel Processing: Speeds up processing using ProcessPoolExecutor to handle multiple papers concurrently.
-Prioritization:
-Matches are categorized by Author, Affiliation, or Title with configurable priority.
-Results are sorted by priority and publication date.
-Detailed Logging:
-Matched papers are logged to a daily file under ~/logs, with details such as match type, authors, and links.
-Matching terms and metadata are clearly displayed for easy reference.
-## Usage
-Dependencies:
 
-Install the required libraries using pip install -r requirements.txt.
-Ensure the following are installed:
-feedparser
-PyPDF2
-tqdm
-requests
-selenium
-webdriver_manager
-Run the Script:
+- Author, affiliation, and title/abstract matching with normalized regex logic
+- Match priority ordering: `Author > Affiliation > Title`
+- Compound matches (for example: `Author + Affiliation`)
+- Parallel PDF processing with configurable workers
+- Live scrape progress in the UI via Server-Sent Events (SSE)
+- Persistent SQLite storage with duplicate detection by arXiv link
+- YAML-based configuration + editable settings page
+- CLI mode for one-shot runs (cron-friendly)
 
-bash python arxiv_processor.py
+## Quick Start
 
-Output:
+From an existing checkout:
 
-A detailed log file is saved in the ~/logs directory.
-The script outputs the list of matched papers, sorted by relevance and date, in the console and log file.
+```bash
+cd cv_arxiv-scraper
+~/venv/bin/pip install -r requirements.txt
+~/venv/bin/python run.py
+```
+
+Open `http://127.0.0.1:5000` and click **Run Scrape**.
+
+If `~/venv` does not exist yet:
+
+```bash
+python3 -m venv ~/venv
+~/venv/bin/pip install -r requirements.txt
+```
+
+## CLI Usage
+
+```bash
+~/venv/bin/python arxiv.py
+```
+
+This runs a single scrape, stores new matches in SQLite, and prints matched papers to the terminal.
+
 ## Configuration
-Whitelist Terms:
-Edit the whitelist_title, whitelist_authors, and whitelist_affiliations lists to match specific keywords, names, or institutions.
-Logging:
-Logs are saved in ~/logs with filenames formatted as papers_<YYYY-MM-DD>.txt.
-## Example Output
-===== Matched Articles (logged to ~/logs/papers_2024-12-24.txt) =====
 
-1. MATCHED PAPER
-Match Type: Author
-Title: A Novel Approach to Few-Shot Learning
-Authors: Andrew Ng, et al.
-ArXiv Link: https://arxiv.org/abs/1234.5678
-PDF Link: https://arxiv.org/pdf/1234.5678
-Publication Date: 2024-12-20
-Matched Terms:
-  - Andrew Ng
---------------------------------------------------
+Configuration is read from `config.yaml`.
 
-2. MATCHED PAPER
-Match Type: Affiliation
-Title: Satellite Imagery Analysis with Neural Networks
-Authors: Jane Doe, John Smith
-ArXiv Link: https://arxiv.org/abs/2345.6789
-PDF Link: https://arxiv.org/pdf/2345.6789
-Publication Date: 2024-12-19
-Matched Terms:
-  - Stanford
---------------------------------------------------
-## Notes
-The script is designed for extensibility; additional RSS feeds or domains can be added by modifying the feedparser.parse() call.
-Adjust the logging level in logging.basicConfig() for more verbose output (e.g., DEBUG).
+```yaml
+scraper:
+  feed_url: "https://rss.arxiv.org/rss/cs.CV"
+  max_workers: 8
+  pdf_lines_start: 2
+  pdf_lines_end: 30
+
+whitelists:
+  titles:
+    - "Few Shot"
+    - "Remote Sensing"
+  affiliations:
+    - "Stanford"
+    - "DeepMind"
+  authors:
+    - "Fei-Fei"
+    - "Kaiming"
+```
+
+Notes:
+
+- `titles` are matched against both paper title and abstract.
+- `authors` are matched against parsed individual author names.
+- `affiliations` are matched against extracted first-page PDF text lines (`pdf_lines_start` to `pdf_lines_end`).
+
+## Web and API
+
+- Dashboard: `GET /`
+- Settings page: `GET /settings`, `POST /settings`
+- Trigger scrape (JSON): `POST /api/scrape`
+- Trigger scrape (streaming SSE): `GET /api/scrape/stream`
+
+SSE events emitted by `/api/scrape/stream`:
+
+- `status`
+- `feed`
+- `progress`
+- `match`
+- `done`
+
+## Project Structure
+
+```text
+.
+├── app/
+│   ├── __init__.py
+│   ├── models.py
+│   ├── scraper.py
+│   ├── routes/
+│   │   ├── api.py
+│   │   ├── dashboard.py
+│   │   └── settings.py
+│   └── templates/
+├── config.yaml
+├── arxiv.py
+├── run.py
+├── requirements.txt
+└── instance/                 # auto-created on first run
+    └── arxiv_papers.db       # SQLite database
+```
+
+## Validation Commands
+
+```bash
+~/venv/bin/python -m compileall app arxiv.py run.py
+```
+
+## Dependencies
+
+- Flask
+- Flask-SQLAlchemy
+- feedparser
+- PyPDF2
+- requests
+- PyYAML
+- tqdm
