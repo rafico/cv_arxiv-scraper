@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ArXiv CV Scraper{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        arxiv: { 50: '#fef2f2', 100: '#fee2e2', 500: '#b91c1c', 600: '#991b1b', 700: '#7f1d1d' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+        @keyframes barPulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.7; }
+        }
+        .animate-slide-up  { animation: slideUp 0.3s ease-out both; }
+        .animate-fade-in   { animation: fadeIn 0.2s ease-out both; }
+        .bar-pulse          { animation: barPulse 1.5s ease-in-out infinite; }
+    </style>
+</head>
+<body class="h-full">
+    <nav class="bg-white border-b border-gray-200 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-8">
+                    <a href="/" class="text-xl font-bold text-gray-900 tracking-tight">
+                        <span class="text-arxiv-500">arXiv</span> CV Scraper
+                    </a>
+                    <div class="hidden sm:flex space-x-1">
+                        <a href="/"
+                           class="px-3 py-2 rounded-md text-sm font-medium
+                                  {% if request.endpoint == 'dashboard.index' %}bg-gray-100 text-gray-900{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900{% endif %}">
+                            Dashboard
+                        </a>
+                        <a href="/settings"
+                           class="px-3 py-2 rounded-md text-sm font-medium
+                                  {% if request.endpoint and 'settings' in request.endpoint %}bg-gray-100 text-gray-900{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900{% endif %}">
+                            Settings
+                        </a>
+                    </div>
+                </div>
+                <button id="scrape-btn" onclick="startScrape()"
+                        class="inline-flex items-center px-4 py-2 bg-arxiv-500 text-white text-sm font-medium rounded-lg
+                               hover:bg-arxiv-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-arxiv-500
+                               transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg id="scrape-icon" class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                    <span id="scrape-text">Run Scrape</span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Progress overlay -->
+    <div id="progress-overlay" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-slide-up">
+            <!-- Header -->
+            <div class="px-6 pt-6 pb-4">
+                <div class="flex items-center justify-between mb-1">
+                    <h2 class="text-lg font-semibold text-gray-900" id="progress-title">Fetching RSS feed...</h2>
+                    <span class="text-xs font-mono text-gray-400" id="progress-counter"></span>
+                </div>
+                <p class="text-sm text-gray-500" id="progress-subtitle">Connecting to arXiv</p>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="px-6 pb-4">
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div id="progress-bar"
+                         class="h-full bg-gradient-to-r from-arxiv-500 to-red-400 rounded-full transition-all duration-300 ease-out bar-pulse"
+                         style="width: 2%"></div>
+                </div>
+                <div class="flex justify-between mt-2 text-xs text-gray-400">
+                    <span id="progress-pct">0%</span>
+                    <span id="progress-matches">0 matches</span>
+                </div>
+            </div>
+
+            <!-- Live feed of matched papers -->
+            <div class="border-t border-gray-100">
+                <div id="progress-feed" class="max-h-64 overflow-y-auto px-6 py-3 space-y-2">
+                    <p class="text-xs text-gray-400 text-center py-4" id="feed-placeholder">Waiting for matches...</p>
+                </div>
+            </div>
+
+            <!-- Stats (shown at end) -->
+            <div id="progress-stats" class="hidden border-t border-gray-100 px-6 py-4 bg-gray-50">
+                <div class="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                        <div class="text-2xl font-bold text-arxiv-500" id="stat-new">0</div>
+                        <div class="text-xs text-gray-500">New papers</div>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-bold text-gray-900" id="stat-matched">0</div>
+                        <div class="text-xs text-gray-500">Total matched</div>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-bold text-gray-400" id="stat-total">0</div>
+                        <div class="text-xs text-gray-500">In feed</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div id="progress-footer" class="hidden border-t border-gray-100 px-6 py-3 bg-gray-50 text-right">
+                <button onclick="closeScrapeAndReload()"
+                        class="px-4 py-2 bg-arxiv-500 text-white text-sm font-medium rounded-lg hover:bg-arxiv-600 transition-colors">
+                    View Results
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+        {% for category, message in messages %}
+        <div class="rounded-lg p-4 mb-2
+                    {% if category == 'success' %}bg-green-50 text-green-800 border border-green-200
+                    {% elif category == 'error' %}bg-red-50 text-red-800 border border-red-200
+                    {% else %}bg-blue-50 text-blue-800 border border-blue-200{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="border-t border-gray-200 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <p class="text-center text-sm text-gray-400">
+                Powered by <a href="https://arxiv.org" class="underline hover:text-gray-600" target="_blank">arXiv</a> RSS
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        const BADGE_COLORS = {
+            'Author':      'bg-blue-100 text-blue-700',
+            'Affiliation': 'bg-emerald-100 text-emerald-700',
+            'Title':       'bg-purple-100 text-purple-700',
+        };
+
+        function startScrape() {
+            const btn = document.getElementById('scrape-btn');
+            btn.disabled = true;
+            document.getElementById('scrape-icon').classList.add('animate-spin');
+            document.getElementById('scrape-text').textContent = 'Scraping...';
+
+            // Reset & show overlay
+            document.getElementById('progress-bar').style.width = '2%';
+            document.getElementById('progress-pct').textContent = '0%';
+            document.getElementById('progress-matches').textContent = '0 matches';
+            document.getElementById('progress-counter').textContent = '';
+            document.getElementById('progress-title').textContent = 'Fetching RSS feed...';
+            document.getElementById('progress-subtitle').textContent = 'Connecting to arXiv';
+            document.getElementById('progress-feed').innerHTML =
+                '<p class="text-xs text-gray-400 text-center py-4">Waiting for matches...</p>';
+            document.getElementById('progress-stats').classList.add('hidden');
+            document.getElementById('progress-footer').classList.add('hidden');
+
+            const overlay = document.getElementById('progress-overlay');
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+
+            const source = new EventSource('/api/scrape/stream');
+
+            source.addEventListener('feed', (e) => {
+                const d = JSON.parse(e.data);
+                document.getElementById('progress-title').textContent = 'Processing papers';
+                document.getElementById('progress-subtitle').textContent = `Found ${d.total} papers in feed`;
+                document.getElementById('progress-counter').textContent = `0 / ${d.total}`;
+            });
+
+            source.addEventListener('progress', (e) => {
+                const d = JSON.parse(e.data);
+                updateProgress(d);
+            });
+
+            source.addEventListener('match', (e) => {
+                const d = JSON.parse(e.data);
+                updateProgress(d);
+                addMatchToFeed(d.paper);
+            });
+
+            source.addEventListener('status', (e) => {
+                const d = JSON.parse(e.data);
+                if (d.phase === 'saving') {
+                    document.getElementById('progress-title').textContent = 'Saving results';
+                    document.getElementById('progress-subtitle').textContent = 'Writing to database...';
+                    document.getElementById('progress-bar').style.width = '100%';
+                    document.getElementById('progress-bar').classList.remove('bar-pulse');
+                }
+            });
+
+            source.addEventListener('done', (e) => {
+                const d = JSON.parse(e.data);
+                source.close();
+                showDone(d);
+            });
+
+            source.onerror = () => {
+                source.close();
+                document.getElementById('progress-title').textContent = 'Connection lost';
+                document.getElementById('progress-subtitle').textContent = 'The scrape may still be running on the server.';
+                document.getElementById('progress-footer').classList.remove('hidden');
+                btn.disabled = false;
+                document.getElementById('scrape-icon').classList.remove('animate-spin');
+                document.getElementById('scrape-text').textContent = 'Run Scrape';
+            };
+        }
+
+        function updateProgress(d) {
+            const pct = Math.round((d.processed / d.total) * 100);
+            document.getElementById('progress-bar').style.width = pct + '%';
+            document.getElementById('progress-pct').textContent = pct + '%';
+            document.getElementById('progress-matches').textContent = d.matched + ' match' + (d.matched !== 1 ? 'es' : '');
+            document.getElementById('progress-counter').textContent = `${d.processed} / ${d.total}`;
+        }
+
+        function addMatchToFeed(paper) {
+            const feed = document.getElementById('progress-feed');
+            const placeholder = document.getElementById('feed-placeholder');
+            if (placeholder) placeholder.remove();
+
+            const colors = BADGE_COLORS[paper.match_type] || 'bg-gray-100 text-gray-700';
+            const terms = paper.matched_terms.join(', ');
+
+            const el = document.createElement('div');
+            el.className = 'flex items-start gap-3 py-2 animate-slide-up';
+            el.innerHTML = `
+                <span class="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${colors}">
+                    ${paper.match_type}
+                </span>
+                <div class="min-w-0">
+                    <p class="text-sm font-medium text-gray-900 truncate">${paper.title}</p>
+                    <p class="text-xs text-gray-400 truncate">${terms}</p>
+                </div>
+            `;
+            feed.appendChild(el);
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        function showDone(d) {
+            document.getElementById('progress-title').textContent = 'Scrape complete';
+            document.getElementById('progress-subtitle').textContent =
+                d.duplicates_skipped > 0
+                    ? `${d.duplicates_skipped} duplicate${d.duplicates_skipped !== 1 ? 's' : ''} skipped`
+                    : 'All papers are new';
+            document.getElementById('progress-bar').style.width = '100%';
+            document.getElementById('progress-bar').classList.remove('bar-pulse');
+            document.getElementById('progress-bar').classList.add('bg-gradient-to-r', 'from-green-500', 'to-emerald-400');
+
+            document.getElementById('stat-new').textContent = d.new_papers;
+            document.getElementById('stat-matched').textContent = d.total_matched;
+            document.getElementById('stat-total').textContent = d.total_in_feed;
+            document.getElementById('progress-stats').classList.remove('hidden');
+            document.getElementById('progress-footer').classList.remove('hidden');
+
+            document.getElementById('scrape-icon').classList.remove('animate-spin');
+            document.getElementById('scrape-text').textContent = 'Run Scrape';
+            document.getElementById('scrape-btn').disabled = false;
+        }
+
+        function closeScrapeAndReload() {
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>
