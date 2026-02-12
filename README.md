@@ -17,6 +17,71 @@ A Flask app that monitors the [arXiv](https://arxiv.org) `cs.CV` RSS feed and su
 - YAML-based configuration + editable settings page
 - CLI mode for one-shot runs (cron-friendly)
 
+## UI Snippets
+
+These are representative snippets from the current UI (`app/templates/*.html`) you can reuse or tweak.
+
+### Match badges + paper card
+
+```html
+<div class="paper-card bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+  <div class="flex items-center gap-1.5 flex-wrap mb-3">
+    {% for mtype in paper.match_type.split(' + ') %}
+      {% if mtype == 'Author' %}
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+        Author
+      </span>
+      {% elif mtype == 'Affiliation' %}
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+        Affiliation
+      </span>
+      {% else %}
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+        Title
+      </span>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <h3 class="text-sm font-semibold text-gray-900 mb-2">{{ paper.title }}</h3>
+  <p class="text-xs text-gray-500">{{ paper.authors }}</p>
+</div>
+```
+
+### Live scrape progress (SSE)
+
+```javascript
+const source = new EventSource('/api/scrape/stream');
+
+source.addEventListener('progress', (e) => {
+  const d = JSON.parse(e.data);
+  const pct = Math.round((d.processed / d.total) * 100);
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-pct').textContent = pct + '%';
+});
+
+source.addEventListener('match', (e) => {
+  const d = JSON.parse(e.data);
+  document.getElementById('progress-matches').textContent = `${d.matched} matches`;
+});
+```
+
+### Filter/search row
+
+```html
+<form method="GET" action="/" class="mb-8">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+    <div class="flex flex-col sm:flex-row gap-3 items-end">
+      <input type="text" name="q" placeholder="Search titles, authors, terms..."
+             class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm">
+      <select name="date"
+              class="w-full sm:w-44 rounded-lg border-gray-300 border px-3 py-2 text-sm">
+        <option value="">All Dates</option>
+      </select>
+    </div>
+  </div>
+</form>
+```
+
 ## Quick Start
 
 From an existing checkout:
