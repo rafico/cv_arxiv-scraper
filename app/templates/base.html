@@ -1,21 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-gray-50">
+<html lang="en" class="h-full bg-white">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}ArXiv CV Scraper{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        arxiv: { 50: '#fef2f2', 100: '#fee2e2', 500: '#b91c1c', 600: '#991b1b', 700: '#7f1d1d' }
-                    }
-                }
-            }
-        }
-    </script>
     <style>
         @keyframes slideUp {
             from { opacity: 0; transform: translateY(12px); }
