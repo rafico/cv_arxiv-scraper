@@ -3,21 +3,21 @@
 {% block title %}Settings - ArXiv CV Scraper{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto">
-    <h1 class="text-2xl font-bold text-gray-900 mb-1">Settings</h1>
-    <p class="text-sm text-gray-500 mb-8">Edit your whitelists below. One entry per line.</p>
+<div class="max-w-2xl">
+    <h1 class="text-xl font-bold text-gray-900 mb-1">Settings</h1>
+    <p class="text-sm text-gray-500 mb-6">Edit your whitelists below. One entry per line.</p>
 
     <form method="POST" action="/settings">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="space-y-5">
             <!-- Title Keywords -->
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+            <div class="bg-white rounded-lg border border-gray-200 p-5">
                 <label for="titles" class="block text-sm font-semibold text-gray-900 mb-1">
                     Title Keywords
                 </label>
-                <p class="text-xs text-gray-500 mb-3">Papers with these terms in the title will be matched.</p>
-                <textarea name="titles" id="titles" rows="10"
-                          class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm font-mono
-                                 focus:ring-2 focus:ring-arxiv-500 focus:border-transparent outline-none resize-y">
+                <p class="text-xs text-gray-500 mb-3">Matched against paper title and abstract.</p>
+                <textarea name="titles" id="titles" rows="8"
+                          class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm font-mono bg-gray-50
+                                 focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none resize-y transition-colors">
 {%- for t in whitelists.titles %}
 {{ t }}
 {%- endfor %}
@@ -25,14 +25,14 @@
             </div>
 
             <!-- Authors -->
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+            <div class="bg-white rounded-lg border border-gray-200 p-5">
                 <label for="authors" class="block text-sm font-semibold text-gray-900 mb-1">
                     Authors
                 </label>
-                <p class="text-xs text-gray-500 mb-3">Papers by these authors will be matched (highest priority).</p>
-                <textarea name="authors" id="authors" rows="10"
-                          class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm font-mono
-                                 focus:ring-2 focus:ring-arxiv-500 focus:border-transparent outline-none resize-y">
+                <p class="text-xs text-gray-500 mb-3">Highest priority. Matched against individual author names.</p>
+                <textarea name="authors" id="authors" rows="8"
+                          class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm font-mono bg-gray-50
+                                 focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none resize-y transition-colors">
 {%- for a in whitelists.authors %}
 {{ a }}
 {%- endfor %}
@@ -40,14 +40,14 @@
             </div>
 
             <!-- Affiliations -->
-            <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+            <div class="bg-white rounded-lg border border-gray-200 p-5">
                 <label for="affiliations" class="block text-sm font-semibold text-gray-900 mb-1">
                     Affiliations
                 </label>
-                <p class="text-xs text-gray-500 mb-3">Papers from these institutions will be matched.</p>
+                <p class="text-xs text-gray-500 mb-3">Matched against first-page PDF text (institution names).</p>
                 <textarea name="affiliations" id="affiliations" rows="8"
-                          class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm font-mono
-                                 focus:ring-2 focus:ring-arxiv-500 focus:border-transparent outline-none resize-y">
+                          class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm font-mono bg-gray-50
+                                 focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none resize-y transition-colors">
 {%- for a in whitelists.affiliations %}
 {{ a }}
 {%- endfor %}
@@ -57,8 +57,8 @@
 
         <div class="mt-6 flex justify-end">
             <button type="submit"
-                    class="px-6 py-2.5 bg-arxiv-500 text-white text-sm font-medium rounded-lg
-                           hover:bg-arxiv-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-arxiv-500
+                    class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg
+                           hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900
                            transition-colors">
                 Save Settings
             </button>
