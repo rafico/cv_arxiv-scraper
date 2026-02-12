@@ -1,188 +1,247 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - ArXiv CV Scraper{% endblock %}
+{% block title %}Papers - ArXiv CV Scraper{% endblock %}
 
 {% block content %}
-<!-- Filter bar -->
-<form method="GET" action="/" class="mb-8" id="filter-form">
-    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-        <div class="flex flex-col sm:flex-row gap-3 items-end">
-            <!-- Search -->
-            <div class="flex-1 w-full">
-                <label for="q" class="block text-xs font-medium text-gray-500 mb-1">Search</label>
-                <div class="relative">
-                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                    </svg>
-                    <input type="text" name="q" id="q" value="{{ current_filters.q or '' }}"
-                           placeholder="Search titles, authors, terms..."
-                           class="w-full rounded-lg border-gray-300 border pl-10 pr-3 py-2 text-sm
-                                  focus:ring-2 focus:ring-arxiv-500 focus:border-transparent outline-none">
-                </div>
-            </div>
+<form method="GET" action="/" id="filter-form">
+    <!-- Page header -->
+    <div class="flex items-start justify-between mb-4">
+        <div>
+            <h1 class="text-xl font-bold text-gray-900">Matched Papers</h1>
+            <p class="text-sm text-gray-500 mt-0.5">Papers from arXiv cs.CV matching your interests</p>
+        </div>
+        {% if papers %}
+        <div class="text-sm text-gray-400 tabular-nums pt-1">
+            {{ papers|length }} paper{{ 's' if papers|length != 1 }}
+        </div>
+        {% endif %}
+    </div>
 
-            <!-- Match type buttons -->
-            <div class="w-full sm:w-auto">
-                <label class="block text-xs font-medium text-gray-500 mb-1">Match Type</label>
-                <input type="hidden" name="match_type" id="match_type_input" value="{{ current_filters.match_type or '' }}">
-                <div class="flex gap-1">
-                    <button type="button" onclick="setMatchType('')"
-                            class="match-type-btn px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150
-                                   {{ 'bg-gray-900 text-white border-gray-900' if not current_filters.match_type else 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50' }}">
-                        All
-                    </button>
-                    <button type="button" onclick="setMatchType('Author')"
-                            class="match-type-btn px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150
-                                   {{ 'bg-blue-600 text-white border-blue-600' if current_filters.match_type == 'Author' else 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50' }}">
-                        Author
-                    </button>
-                    <button type="button" onclick="setMatchType('Affiliation')"
-                            class="match-type-btn px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150
-                                   {{ 'bg-emerald-600 text-white border-emerald-600' if current_filters.match_type == 'Affiliation' else 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50' }}">
-                        Affiliation
-                    </button>
-                    <button type="button" onclick="setMatchType('Title')"
-                            class="match-type-btn px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150
-                                   {{ 'bg-purple-600 text-white border-purple-600' if current_filters.match_type == 'Title' else 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50' }}">
-                        Title
-                    </button>
-                </div>
-            </div>
+    <!-- Filter tabs + search row -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-gray-100">
+        <!-- Match type tabs (HF-style pill tabs) -->
+        <div class="flex items-center gap-1">
+            <input type="hidden" name="match_type" id="match_type_input" value="{{ current_filters.match_type or '' }}">
+            <button type="button" onclick="setMatchType('')"
+                    class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                           {{ 'bg-gray-900 text-white' if not current_filters.match_type else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
+                All
+                {% if papers and not current_filters.match_type %}
+                <span class="ml-1 text-xs opacity-70">{{ papers|length }}</span>
+                {% endif %}
+            </button>
+            <button type="button" onclick="setMatchType('Author')"
+                    class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                           {{ 'bg-blue-600 text-white' if current_filters.match_type == 'Author' else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
+                Author
+                {% if type_counts.Author %}
+                <span class="ml-1 text-xs opacity-70">{{ type_counts.Author }}</span>
+                {% endif %}
+            </button>
+            <button type="button" onclick="setMatchType('Affiliation')"
+                    class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                           {{ 'bg-emerald-600 text-white' if current_filters.match_type == 'Affiliation' else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
+                Affiliation
+                {% if type_counts.Affiliation %}
+                <span class="ml-1 text-xs opacity-70">{{ type_counts.Affiliation }}</span>
+                {% endif %}
+            </button>
+            <button type="button" onclick="setMatchType('Title')"
+                    class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                           {{ 'bg-purple-600 text-white' if current_filters.match_type == 'Title' else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
+                Title
+                {% if type_counts.Title %}
+                <span class="ml-1 text-xs opacity-70">{{ type_counts.Title }}</span>
+                {% endif %}
+            </button>
+        </div>
 
-            <!-- Date -->
-            <div class="w-full sm:w-44">
-                <label for="date" class="block text-xs font-medium text-gray-500 mb-1">Scrape Date</label>
-                <select name="date" id="date" onchange="document.getElementById('filter-form').submit()"
-                        class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm
-                               focus:ring-2 focus:ring-arxiv-500 focus:border-transparent outline-none">
-                    <option value="">All Dates</option>
-                    {% for d in dates %}
-                    <option value="{{ d }}" {{ 'selected' if current_filters.date == d }}>{{ d }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            {% if current_filters.q or current_filters.match_type or current_filters.date %}
-            <a href="/"
-               class="w-full sm:w-auto px-4 py-2 text-gray-500 text-sm font-medium rounded-lg border border-gray-200
-                      hover:bg-gray-50 transition-colors text-center flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-                Clear
-            </a>
-            {% endif %}
+        <!-- Search -->
+        <div class="relative w-full sm:w-64">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <input type="text" name="q" id="q" value="{{ current_filters.q or '' }}"
+                   placeholder="Search papers..."
+                   class="w-full rounded-lg border border-gray-200 bg-gray-50 pl-10 pr-3 py-2 text-sm
+                          focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
         </div>
     </div>
-</form>
 
-<!-- Results header -->
-<div class="flex items-center justify-between mb-5">
-    <p class="text-sm text-gray-500">
-        <span class="font-semibold text-gray-900" id="paper-count">{{ papers|length }}</span>
-        paper{{ 's' if papers|length != 1 }} found
-    </p>
-    {% if papers %}
-    <div class="flex items-center gap-3 text-xs text-gray-400">
-        <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-blue-400"></span> Author: {{ type_counts.Author }}
-        </span>
-        <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Affiliation: {{ type_counts.Affiliation }}
-        </span>
-        <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-purple-400"></span> Title: {{ type_counts.Title }}
-        </span>
+    <!-- Date navigation -->
+    {% if dates %}
+    <div class="flex items-center gap-2 mb-6">
+        <div class="flex items-center bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+            {% set date_list = dates %}
+            {% set current_date_idx = date_list.index(current_filters.date) if current_filters.date and current_filters.date in date_list else -1 %}
+
+            <!-- Previous date button -->
+            {% if current_date_idx >= 0 and current_date_idx < date_list|length - 1 %}
+            <a href="/?date={{ date_list[current_date_idx + 1] }}{{ '&match_type=' + current_filters.match_type if current_filters.match_type }}{{ '&q=' + current_filters.q if current_filters.q }}"
+               class="px-2.5 py-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+            </a>
+            {% else %}
+            <span class="px-2.5 py-1.5 text-gray-200">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                </svg>
+            </span>
+            {% endif %}
+
+            <!-- Date selector -->
+            <select name="date" id="date" onchange="document.getElementById('filter-form').submit()"
+                    class="appearance-none bg-transparent px-3 py-1.5 text-sm font-medium text-gray-900
+                           focus:outline-none cursor-pointer min-w-[7rem] text-center">
+                <option value="">All Dates</option>
+                {% for d in dates %}
+                <option value="{{ d }}" {{ 'selected' if current_filters.date == d }}>{{ d }}</option>
+                {% endfor %}
+            </select>
+
+            <!-- Next date button -->
+            {% if current_date_idx > 0 %}
+            <a href="/?date={{ date_list[current_date_idx - 1] }}{{ '&match_type=' + current_filters.match_type if current_filters.match_type }}{{ '&q=' + current_filters.q if current_filters.q }}"
+               class="px-2.5 py-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+            </a>
+            {% else %}
+            <span class="px-2.5 py-1.5 text-gray-200">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+            </span>
+            {% endif %}
+        </div>
+
+        {% if current_filters.q or current_filters.match_type or current_filters.date %}
+        <a href="/" class="text-xs text-gray-400 hover:text-gray-600 transition-colors">Clear filters</a>
+        {% endif %}
+
+        <!-- Grid size control -->
+        <div class="flex items-center gap-1 ml-auto">
+            <button type="button" onclick="setGridSize('lg')" data-size="lg" title="Large cards"
+                    class="grid-size-btn p-1.5 rounded-md transition-colors">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+                    <rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/>
+                    <rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/>
+                </svg>
+            </button>
+            <button type="button" onclick="setGridSize('md')" data-size="md" title="Medium cards"
+                    class="grid-size-btn p-1.5 rounded-md transition-colors">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+                    <rect x="0.5" y="0.5" width="4" height="4" rx="0.75"/><rect x="6" y="0.5" width="4" height="4" rx="0.75"/><rect x="11.5" y="0.5" width="4" height="4" rx="0.75"/>
+                    <rect x="0.5" y="6" width="4" height="4" rx="0.75"/><rect x="6" y="6" width="4" height="4" rx="0.75"/><rect x="11.5" y="6" width="4" height="4" rx="0.75"/>
+                    <rect x="0.5" y="11.5" width="4" height="4" rx="0.75"/><rect x="6" y="11.5" width="4" height="4" rx="0.75"/><rect x="11.5" y="11.5" width="4" height="4" rx="0.75"/>
+                </svg>
+            </button>
+            <button type="button" onclick="setGridSize('sm')" data-size="sm" title="Small cards"
+                    class="grid-size-btn p-1.5 rounded-md transition-colors">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+                    <rect x="0.5" y="0.5" width="3" height="3" rx="0.5"/><rect x="4.5" y="0.5" width="3" height="3" rx="0.5"/><rect x="8.5" y="0.5" width="3" height="3" rx="0.5"/><rect x="12.5" y="0.5" width="3" height="3" rx="0.5"/>
+                    <rect x="0.5" y="4.5" width="3" height="3" rx="0.5"/><rect x="4.5" y="4.5" width="3" height="3" rx="0.5"/><rect x="8.5" y="4.5" width="3" height="3" rx="0.5"/><rect x="12.5" y="4.5" width="3" height="3" rx="0.5"/>
+                    <rect x="0.5" y="8.5" width="3" height="3" rx="0.5"/><rect x="4.5" y="8.5" width="3" height="3" rx="0.5"/><rect x="8.5" y="8.5" width="3" height="3" rx="0.5"/><rect x="12.5" y="8.5" width="3" height="3" rx="0.5"/>
+                    <rect x="0.5" y="12.5" width="3" height="3" rx="0.5"/><rect x="4.5" y="12.5" width="3" height="3" rx="0.5"/><rect x="8.5" y="12.5" width="3" height="3" rx="0.5"/><rect x="12.5" y="12.5" width="3" height="3" rx="0.5"/>
+                </svg>
+            </button>
+        </div>
     </div>
     {% endif %}
-</div>
+</form>
 
 {% if papers %}
 <!-- Paper grid -->
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="paper-grid">
     {% for paper in papers %}
-    <div class="paper-card bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col
-                hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 opacity-0"
-         data-match-type="{{ paper.match_type }}"
-         style="animation: slideUp 0.3s ease-out {{ loop.index0 * 30 }}ms both">
-        <!-- Badge row (supports compound types like "Author + Affiliation") -->
-        <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-1.5 flex-wrap">
+    {% set paper_id = paper.link.split('/')[-1] %}
+    <article class="group bg-white rounded-xl border border-gray-200 overflow-hidden
+                    hover:shadow-md hover:border-gray-300 transition-all duration-200 opacity-0 flex flex-col"
+             style="animation: slideUp 0.3s ease-out {{ loop.index0 * 20 }}ms both">
+
+        <!-- Thumbnail -->
+        <a href="{{ paper.link }}" target="_blank" class="block">
+            <div class="w-full h-36 bg-gray-100 overflow-hidden">
+                <img src="https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{{ paper_id }}.png"
+                     alt=""
+                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                     onerror="this.parentElement.innerHTML='<div class=\'w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 text-gray-300\'><svg class=\'w-10 h-10\' fill=\'none\' stroke=\'currentColor\' viewBox=\'0 0 24 24\'><path stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z\'/></svg></div>'">
+            </div>
+        </a>
+
+        <!-- Content -->
+        <div class="p-4 flex flex-col flex-1">
+            <!-- Match badges + date -->
+            <div class="flex items-center gap-1.5 mb-2">
                 {% for mtype in paper.match_type.split(' + ') %}
                     {% if mtype == 'Author' %}
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
-                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/></svg>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-600">
                         Author
                     </span>
                     {% elif mtype == 'Affiliation' %}
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
-                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/></svg>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600">
                         Affiliation
                     </span>
                     {% elif mtype == 'Title' %}
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
-                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-600">
                         Title
                     </span>
                     {% endif %}
                 {% endfor %}
-            </div>
-            <span class="text-xs text-gray-400 tabular-nums">{{ paper.publication_date }}</span>
-        </div>
-
-        <!-- Title -->
-        <h3 class="text-sm font-semibold text-gray-900 mb-2 leading-snug line-clamp-3 group">
-            <a href="{{ paper.link }}" target="_blank"
-               class="hover:text-arxiv-500 transition-colors duration-150">
-                {{ paper.title }}
-            </a>
-        </h3>
-
-        <!-- Authors -->
-        <p class="text-xs text-gray-500 mb-3 line-clamp-2 leading-relaxed">{{ paper.authors }}</p>
-
-        <!-- Spacer + bottom -->
-        <div class="mt-auto pt-3 border-t border-gray-100">
-            <!-- Matched terms -->
-            <div class="flex flex-wrap gap-1.5 mb-3">
-                {% for term in paper.matched_terms.split(', ') %}
-                <span class="inline-flex items-center px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-md border border-amber-100">
-                    {{ term }}
-                </span>
-                {% endfor %}
+                <span class="text-xs text-gray-400 ml-auto tabular-nums">{{ paper.publication_date or paper.scraped_date }}</span>
             </div>
 
-            <!-- Links -->
-            <div class="flex gap-2">
-                <a href="{{ paper.link }}" target="_blank"
-                   class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200
-                          text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-all duration-150">
-                    arXiv
+            <!-- Title -->
+            <h2 class="text-sm font-semibold text-gray-900 leading-snug mb-1.5 line-clamp-2 group-hover:text-blue-600 transition-colors">
+                <a href="{{ paper.link }}" target="_blank">
+                    {{ paper.title }}
                 </a>
-                <a href="{{ paper.pdf_link }}" target="_blank"
-                   class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg bg-arxiv-500
-                          text-white hover:bg-arxiv-600 transition-all duration-150 shadow-sm hover:shadow">
-                    PDF
-                </a>
+            </h2>
+
+            <!-- Authors -->
+            <p class="text-xs text-gray-500 mb-3 line-clamp-1">{{ paper.authors }}</p>
+
+            <!-- Matched terms + links -->
+            <div class="mt-auto pt-3 border-t border-gray-100">
+                <div class="flex flex-wrap gap-1 mb-2.5">
+                    {% for term in paper.matched_terms.split(', ') %}
+                    <span class="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
+                    {% endfor %}
+                </div>
+                <div class="flex items-center gap-2">
+                    <a href="{{ paper.link }}" target="_blank"
+                       class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200
+                              text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-all">
+                        arXiv
+                    </a>
+                    <a href="{{ paper.pdf_link }}" target="_blank"
+                       class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg
+                              bg-gray-900 text-white hover:bg-gray-800 transition-all">
+                        PDF
+                    </a>
+                </div>
             </div>
         </div>
-    </div>
+    </article>
     {% endfor %}
 </div>
 {% else %}
 <!-- Empty state -->
-<div class="text-center py-20">
-    <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
-        <svg class="h-8 w-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<div class="text-center py-24">
+    <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-50 mb-4">
+        <svg class="h-8 w-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                   d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>
         </svg>
     </div>
     <h3 class="text-base font-semibold text-gray-900">No papers yet</h3>
-    <p class="mt-1 text-sm text-gray-500 mb-6">Click "Run Scrape" to fetch today's papers from arXiv.</p>
+    <p class="mt-1 text-sm text-gray-500 mb-6">Run a scrape to fetch today's papers from arXiv.</p>
     <button onclick="startScrape()"
-            class="inline-flex items-center px-5 py-2.5 bg-arxiv-500 text-white text-sm font-medium rounded-lg
-                   hover:bg-arxiv-600 transition-colors shadow-sm">
+            class="inline-flex items-center px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg
+                   hover:bg-gray-800 transition-colors">
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
@@ -198,7 +257,6 @@
         document.getElementById('filter-form').submit();
     }
 
-    // Debounced search — submit after user stops typing
     let searchTimeout;
     document.getElementById('q').addEventListener('input', function() {
         clearTimeout(searchTimeout);
@@ -207,12 +265,44 @@
         }, 500);
     });
 
-    // Enter key submits immediately
     document.getElementById('q').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             clearTimeout(searchTimeout);
             document.getElementById('filter-form').submit();
         }
     });
+
+    // Grid size control
+    const GRID_CLASSES = {
+        lg: 'grid-cols-1 md:grid-cols-2',
+        md: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
+        sm: 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
+    };
+
+    function setGridSize(size) {
+        const grid = document.getElementById('paper-grid');
+        if (!grid) return;
+
+        // Remove all grid-cols classes
+        grid.className = grid.className.replace(/\b(md:|lg:)?grid-cols-\d\b/g, '').trim();
+        // Add new ones
+        GRID_CLASSES[size].split(' ').forEach(c => grid.classList.add(c));
+
+        // Update button states
+        document.querySelectorAll('.grid-size-btn').forEach(btn => {
+            if (btn.dataset.size === size) {
+                btn.classList.add('bg-gray-100', 'text-gray-900');
+                btn.classList.remove('text-gray-400', 'hover:text-gray-600', 'hover:bg-gray-50');
+            } else {
+                btn.classList.remove('bg-gray-100', 'text-gray-900');
+                btn.classList.add('text-gray-400', 'hover:text-gray-600', 'hover:bg-gray-50');
+            }
+        });
+
+        localStorage.setItem('gridSize', size);
+    }
+
+    // Restore saved grid size on load
+    setGridSize(localStorage.getItem('gridSize') || 'md');
 </script>
 {% endblock %}
