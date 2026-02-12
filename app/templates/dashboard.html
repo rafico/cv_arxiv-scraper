@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - ArXiv CV Scraper{% endblock %}
+
+{% block content %}
+<!-- Filter bar -->
+<form method="GET" action="/" class="mb-8" id="filter-form">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+        <div class="flex flex-col sm:flex-row gap-3 items-end">
+            <!-- Search -->
+            <div class="flex-1 w-full">
+                <label for="q" class="block text-xs font-medium text-gray-500 mb-1">Search</label>
+                <div class="relative">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <input type="text" name="q" id="q" value="{{ current_filters.q or '' }}"
+                           placeholder="Search titles, authors, terms..."
+                           class="w-full rounded-lg border-gray-300 border pl-10 pr-3 py-2 text-sm
+                                  focus:ring-2 focus:ring-arxiv-500 focus:border-transparent outline-none">
+                </div>
+            </div>
+
+            <!-- Match type buttons -->
+            <div class="w-full sm:w-auto">
+                <label class="block text-xs font-medium text-gray-500 mb-1">Match Type</label>
+                <input type="hidden" name="match_type" id="match_type_input" value="{{ current_filters.match_type or '' }}">
+                <div class="flex gap-1">
+                    <button type="button" onclick="setMatchType('')"
+                            class="match-type-btn px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150
+                                   {{ 'bg-gray-900 text-white border-gray-900' if not current_filters.match_type else 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50' }}">
+                        All
+                    </button>
+                    <button type="button" onclick="setMatchType('Author')"
+                            class="match-type-btn px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150
+                                   {{ 'bg-blue-600 text-white border-blue-600' if current_filters.match_type == 'Author' else 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50' }}">
+                        Author
+                    </button>
+                    <button type="button" onclick="setMatchType('Affiliation')"
+                            class="match-type-btn px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150
+                                   {{ 'bg-emerald-600 text-white border-emerald-600' if current_filters.match_type == 'Affiliation' else 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50' }}">
+                        Affiliation
+                    </button>
+                    <button type="button" onclick="setMatchType('Title')"
+                            class="match-type-btn px-3 py-2 text-xs font-medium rounded-lg border transition-all duration-150
+                                   {{ 'bg-purple-600 text-white border-purple-600' if current_filters.match_type == 'Title' else 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50' }}">
+                        Title
+                    </button>
+                </div>
+            </div>
+
+            <!-- Date -->
+            <div class="w-full sm:w-44">
+                <label for="date" class="block text-xs font-medium text-gray-500 mb-1">Scrape Date</label>
+                <select name="date" id="date" onchange="document.getElementById('filter-form').submit()"
+                        class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm
+                               focus:ring-2 focus:ring-arxiv-500 focus:border-transparent outline-none">
+                    <option value="">All Dates</option>
+                    {% for d in dates %}
+                    <option value="{{ d }}" {{ 'selected' if current_filters.date == d }}>{{ d }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {% if current_filters.q or current_filters.match_type or current_filters.date %}
+            <a href="/"
+               class="w-full sm:w-auto px-4 py-2 text-gray-500 text-sm font-medium rounded-lg border border-gray-200
+                      hover:bg-gray-50 transition-colors text-center flex items-center justify-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+                Clear
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</form>
+
+<!-- Results header -->
+<div class="flex items-center justify-between mb-5">
+    <p class="text-sm text-gray-500">
+        <span class="font-semibold text-gray-900" id="paper-count">{{ papers|length }}</span>
+        paper{{ 's' if papers|length != 1 }} found
+    </p>
+    {% if papers %}
+    <div class="flex items-center gap-3 text-xs text-gray-400">
+        <span class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-blue-400"></span> Author: {{ type_counts.Author }}
+        </span>
+        <span class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Affiliation: {{ type_counts.Affiliation }}
+        </span>
+        <span class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-purple-400"></span> Title: {{ type_counts.Title }}
+        </span>
+    </div>
+    {% endif %}
+</div>
+
+{% if papers %}
+<!-- Paper grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="paper-grid">
+    {% for paper in papers %}
+    <div class="paper-card bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex flex-col
+                hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 opacity-0"
+         data-match-type="{{ paper.match_type }}"
+         style="animation: slideUp 0.3s ease-out {{ loop.index0 * 30 }}ms both">
+        <!-- Badge row (supports compound types like "Author + Affiliation") -->
+        <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-1.5 flex-wrap">
+                {% for mtype in paper.match_type.split(' + ') %}
+                    {% if mtype == 'Author' %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/></svg>
+                        Author
+                    </span>
+                    {% elif mtype == 'Affiliation' %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/></svg>
+                        Affiliation
+                    </span>
+                    {% elif mtype == 'Title' %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/></svg>
+                        Title
+                    </span>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            <span class="text-xs text-gray-400 tabular-nums">{{ paper.publication_date }}</span>
+        </div>
+
+        <!-- Title -->
+        <h3 class="text-sm font-semibold text-gray-900 mb-2 leading-snug line-clamp-3 group">
+            <a href="{{ paper.link }}" target="_blank"
+               class="hover:text-arxiv-500 transition-colors duration-150">
+                {{ paper.title }}
+            </a>
+        </h3>
+
+        <!-- Authors -->
+        <p class="text-xs text-gray-500 mb-3 line-clamp-2 leading-relaxed">{{ paper.authors }}</p>
+
+        <!-- Spacer + bottom -->
+        <div class="mt-auto pt-3 border-t border-gray-100">
+            <!-- Matched terms -->
+            <div class="flex flex-wrap gap-1.5 mb-3">
+                {% for term in paper.matched_terms.split(', ') %}
+                <span class="inline-flex items-center px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-md border border-amber-100">
+                    {{ term }}
+                </span>
+                {% endfor %}
+            </div>
+
+            <!-- Links -->
+            <div class="flex gap-2">
+                <a href="{{ paper.link }}" target="_blank"
+                   class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200
+                          text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-all duration-150">
+                    arXiv
+                </a>
+                <a href="{{ paper.pdf_link }}" target="_blank"
+                   class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg bg-arxiv-500
+                          text-white hover:bg-arxiv-600 transition-all duration-150 shadow-sm hover:shadow">
+                    PDF
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<!-- Empty state -->
+<div class="text-center py-20">
+    <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
+        <svg class="h-8 w-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>
+        </svg>
+    </div>
+    <h3 class="text-base font-semibold text-gray-900">No papers yet</h3>
+    <p class="mt-1 text-sm text-gray-500 mb-6">Click "Run Scrape" to fetch today's papers from arXiv.</p>
+    <button onclick="startScrape()"
+            class="inline-flex items-center px-5 py-2.5 bg-arxiv-500 text-white text-sm font-medium rounded-lg
+                   hover:bg-arxiv-600 transition-colors shadow-sm">
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Run Scrape
+    </button>
+</div>
+{% endif %}
+
+<script>
+    function setMatchType(type) {
+        document.getElementById('match_type_input').value = type;
+        document.getElementById('filter-form').submit();
+    }
+
+    // Debounced search — submit after user stops typing
+    let searchTimeout;
+    document.getElementById('q').addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            document.getElementById('filter-form').submit();
+        }, 500);
+    });
+
+    // Enter key submits immediately
+    document.getElementById('q').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            clearTimeout(searchTimeout);
+            document.getElementById('filter-form').submit();
+        }
+    });
+</script>
+{% endblock %}
