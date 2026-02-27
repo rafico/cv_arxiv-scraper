@@ -1,0 +1,66 @@
+from datetime import date, datetime, timedelta, timezone
+
+from app.models import Paper, db
+from tests.helpers import FlaskDBTestCase
+
+
+class DashboardRouteTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        today = date.today()
+
+        for idx in range(30):
+            publication_dt = today if idx < 20 else today - timedelta(days=45)
+            paper = Paper(
+                arxiv_id=f"2602.{1000 + idx}",
+                title=f"Paper {idx}",
+                authors="Author A",
+                link=f"https://arxiv.org/abs/2602.{1000 + idx}",
+                pdf_link=f"https://arxiv.org/pdf/2602.{1000 + idx}",
+                abstract_text="vision transformer segmentation",
+                summary_text="Summary text",
+                topic_tags="Segmentation, Vision",
+                categories="cs.CV",
+                resource_links="[]",
+                match_type="Title",
+                matched_terms="vision",
+                paper_score=10.0 + idx,
+                feedback_score=0,
+                is_hidden=False,
+                publication_date=publication_dt.isoformat(),
+                publication_dt=publication_dt,
+                scraped_date=today.isoformat(),
+                scraped_at=now,
+            )
+            db.session.add(paper)
+        db.session.commit()
+
+        self.client = self.app.test_client()
+
+    def test_default_daily_timeframe_filters_old_papers(self):
+        response = self.client.get("/")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Matched Papers", text)
+        self.assertNotIn("Paper 29", text)
+
+    def test_all_time_second_page_available(self):
+        response = self.client.get("/?timeframe=all&page=2")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Page 2", text)
+
+    def test_feedback_endpoint_toggles_action(self):
+        paper = Paper.query.first()
+        response = self.client.post(
+            f"/api/papers/{paper.id}/feedback",
+            json={"action": "save"},
+        )
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(data["active"])
+        self.assertEqual(data["counts"]["save"], 1)
