@@ -1,0 +1,131 @@
+"""Background scrape job orchestration and SSE streaming."""
+
+from __future__ import annotations
+
+import json
+import logging
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Iterator
+
+from app.services.scrape_engine import execute_scrape
+
+LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class ScrapeJob:
+    id: str
+    started_at: datetime
+    status: str = "running"
+    events: list[tuple[str, dict]] = field(default_factory=list)
+    finished_at: datetime | None = None
+    condition: threading.Condition = field(default_factory=threading.Condition)
+
+
+class ScrapeJobManager:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="scrape-job")
+        self._jobs: dict[str, ScrapeJob] = {}
+        self._active_job_id: str | None = None
+
+    def _trim_history(self, keep: int = 4) -> None:
+        if len(self._jobs) <= keep:
+            return
+
+        completed_jobs = sorted(
+            (job for job in self._jobs.values() if job.finished_at is not None),
+            key=lambda job: job.finished_at or job.started_at,
+        )
+        for job in completed_jobs[:-keep]:
+            self._jobs.pop(job.id, None)
+
+    def _publish(self, job_id: str, event: str, data: dict) -> None:
+        job = self._jobs.get(job_id)
+        if not job:
+            return
+
+        with job.condition:
+            job.events.append((event, data))
+            if event == "done":
+                job.status = "finished"
+                job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            elif event == "scrape_error":
+                job.status = "error"
+                job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            job.condition.notify_all()
+
+    def _run_job(self, app, job_id: str) -> None:
+        try:
+            execute_scrape(app, event_callback=lambda event, data: self._publish(job_id, event, data))
+        except Exception as exc:
+            LOGGER.exception("Background scrape job failed")
+            self._publish(job_id, "scrape_error", {"message": str(exc)})
+        finally:
+            with self._lock:
+                if self._active_job_id == job_id:
+                    self._active_job_id = None
+                self._trim_history()
+
+    def start_or_get_active(self, app) -> ScrapeJob:
+        with self._lock:
+            if self._active_job_id and self._active_job_id in self._jobs:
+                return self._jobs[self._active_job_id]
+
+            job_id = uuid.uuid4().hex
+            job = ScrapeJob(id=job_id, started_at=datetime.now(timezone.utc).replace(tzinfo=None))
+            self._jobs[job_id] = job
+            self._active_job_id = job_id
+            self._executor.submit(self._run_job, app, job_id)
+            return job
+
+    def stream_events(self, job_id: str, *, heartbeat_seconds: int = 15) -> Iterator[tuple[str, dict]]:
+        job = self._jobs.get(job_id)
+        if not job:
+            yield "scrape_error", {"message": "Job not found"}
+            return
+
+        cursor = 0
+        while True:
+            heartbeat_event: tuple[str, dict] | None = None
+            next_event: tuple[str, dict] | None = None
+            with job.condition:
+                if cursor < len(job.events):
+                    next_event = job.events[cursor]
+                    cursor += 1
+                else:
+                    if job.finished_at is not None:
+                        break
+                    job.condition.wait(timeout=heartbeat_seconds)
+                    if cursor >= len(job.events) and job.finished_at is None:
+                        heartbeat_event = (
+                            "status",
+                            {"phase": "heartbeat", "message": "Scrape still running..."},
+                        )
+                    elif cursor < len(job.events):
+                        next_event = job.events[cursor]
+                        cursor += 1
+                    else:
+                        continue
+
+            if heartbeat_event is not None:
+                yield heartbeat_event
+                continue
+
+            assert next_event is not None
+            event, data = next_event
+            yield next_event
+            if event in {"done", "scrape_error"} and cursor >= len(job.events):
+                break
+
+    def stream_for_request(self, app):
+        job = self.start_or_get_active(app)
+        for event, data in self.stream_events(job.id):
+            yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+SCRAPE_JOB_MANAGER = ScrapeJobManager()
