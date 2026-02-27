@@ -7,7 +7,7 @@ from app.scraper import run_scrape
 
 def _load_latest_matched(limit):
     return (
-        Paper.query.order_by(Paper.scraped_date.desc(), Paper.id.desc())
+        Paper.query.order_by(Paper.scraped_at.desc(), Paper.paper_score.desc(), Paper.id.desc())
         .limit(limit)
         .all()
     )
@@ -32,11 +32,19 @@ def _print_paper(index, paper):
         f"ArXiv Link: {paper.link}\n"
         f"PDF Link: {paper.pdf_link}\n"
         f"Publication Date: {paper.publication_date}\n"
+        f"Paper Score: {paper.paper_score:.2f}\n"
+        f"Summary: {paper.summary_text}\n"
         "Matched Terms:"
     )
 
     for term in paper.matched_terms.split(", "):
         print(f"  - {term}")
+
+    if paper.topic_tags:
+        print("Topics:")
+        for tag in paper.topic_tags.split(", "):
+            if tag:
+                print(f"  - {tag}")
 
     print("-" * 50)
 

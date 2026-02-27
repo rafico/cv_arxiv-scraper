@@ -1,8 +1,10 @@
 scraper:
   feed_url: "https://rss.arxiv.org/rss/cs.CV"
   max_workers: 8
+  pdf_attempts: 2
   pdf_lines_start: 2
-  pdf_lines_end: 30
+  pdf_max_header_lines: 50
+  pdf_smart_header: true
 
 whitelists:
   titles:
