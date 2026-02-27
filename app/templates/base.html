@@ -18,9 +18,9 @@
             0%, 100% { opacity: 1; }
             50%      { opacity: 0.7; }
         }
-        .animate-slide-up  { animation: slideUp 0.3s ease-out both; }
-        .animate-fade-in   { animation: fadeIn 0.2s ease-out both; }
-        .bar-pulse          { animation: barPulse 1.5s ease-in-out infinite; }
+        .animate-slide-up { animation: slideUp 0.25s ease-out both; }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out both; }
+        .bar-pulse { animation: barPulse 1.5s ease-in-out infinite; }
     </style>
 </head>
 <body class="h-full">
@@ -61,7 +61,6 @@
         </div>
     </nav>
 
-    <!-- Progress overlay -->
     <div id="progress-overlay" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-slide-up">
             <div class="px-6 pt-6 pb-4">
@@ -133,135 +132,205 @@
 
     <script>
         const BADGE_COLORS = {
-            'Author':      'bg-blue-100 text-blue-700',
-            'Affiliation': 'bg-emerald-100 text-emerald-700',
-            'Title':       'bg-purple-100 text-purple-700',
+            Author: "bg-blue-100 text-blue-700",
+            Affiliation: "bg-emerald-100 text-emerald-700",
+            Title: "bg-violet-100 text-violet-700",
         };
 
+        function renderBadges(matchTypes) {
+            const fragment = document.createDocumentFragment();
+            matchTypes.forEach((type) => {
+                const color = BADGE_COLORS[type] || "bg-gray-100 text-gray-700";
+                const badge = document.createElement("span");
+                badge.className = `shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${color}`;
+                badge.textContent = type;
+                fragment.appendChild(badge);
+            });
+            return fragment;
+        }
+
+        function handleImgError(img) {
+            if (!img || !img.parentElement) {
+                return;
+            }
+            img.parentElement.innerHTML =
+                '<div class="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 text-gray-300">' +
+                '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>' +
+                '</svg></div>';
+        }
+
         function startScrape() {
-            const btn = document.getElementById('scrape-btn');
+            const btn = document.getElementById("scrape-btn");
             btn.disabled = true;
-            document.getElementById('scrape-icon').classList.add('animate-spin');
-            document.getElementById('scrape-text').textContent = 'Scraping...';
+            document.getElementById("scrape-icon").classList.add("animate-spin");
+            document.getElementById("scrape-text").textContent = "Scraping...";
 
-            document.getElementById('progress-bar').style.width = '2%';
-            document.getElementById('progress-bar').className = 'h-full bg-gray-900 rounded-full transition-all duration-300 ease-out bar-pulse';
-            document.getElementById('progress-pct').textContent = '0%';
-            document.getElementById('progress-matches').textContent = '0 matches';
-            document.getElementById('progress-counter').textContent = '';
-            document.getElementById('progress-title').textContent = 'Fetching RSS feed...';
-            document.getElementById('progress-subtitle').textContent = 'Connecting to arXiv';
-            document.getElementById('progress-feed').innerHTML =
-                '<p class="text-xs text-gray-400 text-center py-4">Waiting for matches...</p>';
-            document.getElementById('progress-stats').classList.add('hidden');
-            document.getElementById('progress-footer').classList.add('hidden');
+            document.getElementById("progress-bar").style.width = "2%";
+            document.getElementById("progress-bar").className = "h-full bg-gray-900 rounded-full transition-all duration-300 ease-out bar-pulse";
+            document.getElementById("progress-pct").textContent = "0%";
+            document.getElementById("progress-matches").textContent = "0 matches";
+            document.getElementById("progress-counter").textContent = "";
+            document.getElementById("progress-title").textContent = "Fetching RSS feed...";
+            document.getElementById("progress-subtitle").textContent = "Connecting to arXiv";
+            document.getElementById("progress-feed").innerHTML =
+                '<p class="text-xs text-gray-400 text-center py-4" id="feed-placeholder">Waiting for matches...</p>';
+            document.getElementById("progress-stats").classList.add("hidden");
+            document.getElementById("progress-footer").classList.add("hidden");
 
-            const overlay = document.getElementById('progress-overlay');
-            overlay.classList.remove('hidden');
-            overlay.classList.add('flex');
+            const overlay = document.getElementById("progress-overlay");
+            overlay.classList.remove("hidden");
+            overlay.classList.add("flex");
 
-            const source = new EventSource('/api/scrape/stream');
+            const source = new EventSource("/api/scrape/stream");
 
-            source.addEventListener('feed', (e) => {
-                const d = JSON.parse(e.data);
-                document.getElementById('progress-title').textContent = 'Processing papers';
-                document.getElementById('progress-subtitle').textContent = `Found ${d.total} papers in feed`;
-                document.getElementById('progress-counter').textContent = `0 / ${d.total}`;
+            source.addEventListener("feed", (event) => {
+                const data = JSON.parse(event.data);
+                document.getElementById("progress-title").textContent = "Processing papers";
+                document.getElementById("progress-subtitle").textContent = `Found ${data.total} papers in feed`;
+                document.getElementById("progress-counter").textContent = `0 / ${data.total}`;
             });
 
-            source.addEventListener('progress', (e) => {
-                const d = JSON.parse(e.data);
-                updateProgress(d);
+            source.addEventListener("progress", (event) => {
+                updateProgress(JSON.parse(event.data));
             });
 
-            source.addEventListener('match', (e) => {
-                const d = JSON.parse(e.data);
-                updateProgress(d);
-                addMatchToFeed(d.paper);
+            source.addEventListener("match", (event) => {
+                const data = JSON.parse(event.data);
+                updateProgress(data);
+                addMatchToFeed(data.paper);
             });
 
-            source.addEventListener('status', (e) => {
-                const d = JSON.parse(e.data);
-                if (d.phase === 'saving') {
-                    document.getElementById('progress-title').textContent = 'Saving results';
-                    document.getElementById('progress-subtitle').textContent = 'Writing to database...';
-                    document.getElementById('progress-bar').style.width = '100%';
-                    document.getElementById('progress-bar').classList.remove('bar-pulse');
+            source.addEventListener("status", (event) => {
+                const data = JSON.parse(event.data);
+                if (data.phase === "saving") {
+                    document.getElementById("progress-title").textContent = "Saving results";
+                    document.getElementById("progress-subtitle").textContent = "Writing to database...";
+                    document.getElementById("progress-bar").style.width = "100%";
+                    document.getElementById("progress-bar").classList.remove("bar-pulse");
                 }
             });
 
-            source.addEventListener('done', (e) => {
-                const d = JSON.parse(e.data);
+            source.addEventListener("scrape_error", (event) => {
+                const data = JSON.parse(event.data);
+                document.getElementById("progress-title").textContent = "Scrape error";
+                document.getElementById("progress-subtitle").textContent = data.message || "Unexpected failure";
+                document.getElementById("progress-footer").classList.remove("hidden");
                 source.close();
-                showDone(d);
+                resetScrapeButton();
+            });
+
+            source.addEventListener("done", (event) => {
+                const data = JSON.parse(event.data);
+                source.close();
+                showDone(data);
             });
 
             source.onerror = () => {
                 source.close();
-                document.getElementById('progress-title').textContent = 'Connection lost';
-                document.getElementById('progress-subtitle').textContent = 'The scrape may still be running on the server.';
-                document.getElementById('progress-footer').classList.remove('hidden');
-                btn.disabled = false;
-                document.getElementById('scrape-icon').classList.remove('animate-spin');
-                document.getElementById('scrape-text').textContent = 'Run Scrape';
+                document.getElementById("progress-title").textContent = "Connection lost";
+                document.getElementById("progress-subtitle").textContent = "Checking if scrape is still running...";
+                pollScrapeStatus();
             };
         }
 
-        function updateProgress(d) {
-            const pct = Math.round((d.processed / d.total) * 100);
-            document.getElementById('progress-bar').style.width = pct + '%';
-            document.getElementById('progress-pct').textContent = pct + '%';
-            document.getElementById('progress-matches').textContent = d.matched + ' match' + (d.matched !== 1 ? 'es' : '');
-            document.getElementById('progress-counter').textContent = `${d.processed} / ${d.total}`;
+        function resetScrapeButton() {
+            document.getElementById("scrape-icon").classList.remove("animate-spin");
+            document.getElementById("scrape-text").textContent = "Run Scrape";
+            document.getElementById("scrape-btn").disabled = false;
+        }
+
+        function updateProgress(data) {
+            if (!data.total || !data.processed) {
+                return;
+            }
+            const pct = Math.round((data.processed / data.total) * 100);
+            document.getElementById("progress-bar").style.width = `${pct}%`;
+            document.getElementById("progress-pct").textContent = `${pct}%`;
+            document.getElementById("progress-matches").textContent = `${data.matched} match${data.matched !== 1 ? "es" : ""}`;
+            document.getElementById("progress-counter").textContent = `${data.processed} / ${data.total}`;
         }
 
         function addMatchToFeed(paper) {
-            const feed = document.getElementById('progress-feed');
-            const placeholder = document.getElementById('feed-placeholder');
-            if (placeholder) placeholder.remove();
+            const feed = document.getElementById("progress-feed");
+            const placeholder = document.getElementById("feed-placeholder");
+            if (placeholder) {
+                placeholder.remove();
+            }
 
-            const colors = BADGE_COLORS[paper.match_type] || 'bg-gray-100 text-gray-700';
-            const terms = paper.matched_terms.join(', ');
+            const types = Array.isArray(paper.match_types)
+                ? paper.match_types
+                : (paper.match_type ? paper.match_type.split(" + ") : []);
+            const terms = Array.isArray(paper.matched_terms) ? paper.matched_terms.join(", ") : "";
 
-            const el = document.createElement('div');
-            el.className = 'flex items-start gap-3 py-2 animate-slide-up';
-            el.innerHTML = `
-                <span class="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${colors}">
-                    ${paper.match_type}
-                </span>
-                <div class="min-w-0">
-                    <p class="text-sm font-medium text-gray-900 truncate">${paper.title}</p>
-                    <p class="text-xs text-gray-400 truncate">${terms}</p>
-                </div>
-            `;
-            feed.appendChild(el);
+            const item = document.createElement("div");
+            item.className = "flex items-start gap-3 py-2 animate-slide-up";
+
+            const badgeContainer = document.createElement("div");
+            badgeContainer.className = "shrink-0 flex flex-wrap gap-1";
+            badgeContainer.appendChild(renderBadges(types));
+
+            const textContainer = document.createElement("div");
+            textContainer.className = "min-w-0";
+
+            const title = document.createElement("p");
+            title.className = "text-sm font-medium text-gray-900 truncate";
+            title.textContent = paper.title || "";
+
+            const termsText = document.createElement("p");
+            termsText.className = "text-xs text-gray-400 truncate";
+            termsText.textContent = terms;
+
+            textContainer.appendChild(title);
+            textContainer.appendChild(termsText);
+            item.appendChild(badgeContainer);
+            item.appendChild(textContainer);
+
+            feed.appendChild(item);
             feed.scrollTop = feed.scrollHeight;
         }
 
-        function showDone(d) {
-            document.getElementById('progress-title').textContent = 'Scrape complete';
-            document.getElementById('progress-subtitle').textContent =
-                d.duplicates_skipped > 0
-                    ? `${d.duplicates_skipped} duplicate${d.duplicates_skipped !== 1 ? 's' : ''} skipped`
-                    : 'All papers are new';
-            document.getElementById('progress-bar').style.width = '100%';
-            document.getElementById('progress-bar').classList.remove('bar-pulse');
-            document.getElementById('progress-bar').className = 'h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out';
+        function showDone(data) {
+            document.getElementById("progress-title").textContent = "Scrape complete";
+            document.getElementById("progress-subtitle").textContent =
+                data.duplicates_skipped > 0
+                    ? `${data.duplicates_skipped} duplicate${data.duplicates_skipped !== 1 ? "s" : ""} skipped`
+                    : "All papers are new";
+            document.getElementById("progress-bar").style.width = "100%";
+            document.getElementById("progress-bar").className = "h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out";
 
-            document.getElementById('stat-new').textContent = d.new_papers;
-            document.getElementById('stat-matched').textContent = d.total_matched;
-            document.getElementById('stat-total').textContent = d.total_in_feed;
-            document.getElementById('progress-stats').classList.remove('hidden');
-            document.getElementById('progress-footer').classList.remove('hidden');
+            document.getElementById("stat-new").textContent = data.new_papers;
+            document.getElementById("stat-matched").textContent = data.total_matched;
+            document.getElementById("stat-total").textContent = data.total_in_feed;
+            document.getElementById("progress-stats").classList.remove("hidden");
+            document.getElementById("progress-footer").classList.remove("hidden");
+            resetScrapeButton();
+        }
 
-            document.getElementById('scrape-icon').classList.remove('animate-spin');
-            document.getElementById('scrape-text').textContent = 'Run Scrape';
-            document.getElementById('scrape-btn').disabled = false;
+        function pollScrapeStatus() {
+            fetch("/api/scrape/status")
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (data.running) {
+                        document.getElementById("progress-subtitle").textContent = "Scrape is still running. Waiting...";
+                        setTimeout(pollScrapeStatus, 5000);
+                    } else {
+                        document.getElementById("progress-subtitle").textContent = "Scrape finished. Click below to see results.";
+                        document.getElementById("progress-footer").classList.remove("hidden");
+                        resetScrapeButton();
+                    }
+                })
+                .catch(function () {
+                    document.getElementById("progress-subtitle").textContent = "Unable to reach server.";
+                    document.getElementById("progress-footer").classList.remove("hidden");
+                    resetScrapeButton();
+                });
         }
 
         function closeScrapeAndReload() {
-            window.location.href = '/';
+            window.location.href = "/";
         }
     </script>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

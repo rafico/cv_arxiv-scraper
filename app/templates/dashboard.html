@@ -2,234 +2,219 @@
 
 {% block title %}Papers - ArXiv CV Scraper{% endblock %}
 
+{# ── Badge color map ── #}
+{% set BADGE = {
+    'Author':      {'bg': 'bg-blue-50',    'text': 'text-blue-600',    'active_bg': 'bg-blue-600'},
+    'Affiliation': {'bg': 'bg-emerald-50', 'text': 'text-emerald-600', 'active_bg': 'bg-emerald-600'},
+    'Title':       {'bg': 'bg-violet-50',  'text': 'text-violet-600',  'active_bg': 'bg-violet-600'},
+} %}
+
+{% set FEEDBACK = {
+    'upvote': {'label': 'Upvote', 'active': 'bg-blue-50 text-blue-700 border-blue-200'},
+    'save':   {'label': 'Save',   'active': 'bg-emerald-50 text-emerald-700 border-emerald-200'},
+    'skip':   {'label': 'Skip',   'active': 'bg-rose-50 text-rose-700 border-rose-200'},
+} %}
+
+{% set TIMEFRAMES = [('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly'), ('all', 'All Time')] %}
+
 {% block content %}
 <form method="GET" action="/" id="filter-form">
-    <!-- Page header -->
+    <input type="hidden" name="match_type" id="match_type_input" value="{{ current_filters.match_type or '' }}">
+    <input type="hidden" name="timeframe" id="timeframe_input" value="{{ current_filters.timeframe }}">
+    <input type="hidden" name="sort" id="sort_input" value="{{ current_filters.sort }}">
+    {% if current_filters.include_hidden %}
+    <input type="hidden" name="include_hidden" value="1">
+    {% endif %}
+
     <div class="flex items-start justify-between mb-4">
         <div>
             <h1 class="text-xl font-bold text-gray-900">Matched Papers</h1>
-            <p class="text-sm text-gray-500 mt-0.5">Papers from arXiv cs.CV matching your interests</p>
+            <p class="text-sm text-gray-500 mt-0.5">Daily triage with ranking, metadata, and related papers</p>
         </div>
-        {% if papers %}
+        {% if pagination.total %}
         <div class="text-sm text-gray-400 tabular-nums pt-1">
-            {{ papers|length }} paper{{ 's' if papers|length != 1 }}
+            {{ pagination.total }} paper{{ 's' if pagination.total != 1 }}
         </div>
         {% endif %}
     </div>
 
-    <!-- Filter tabs + search row -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-gray-100">
-        <!-- Match type tabs (HF-style pill tabs) -->
-        <div class="flex items-center gap-1">
-            <input type="hidden" name="match_type" id="match_type_input" value="{{ current_filters.match_type or '' }}">
-            <button type="button" onclick="setMatchType('')"
+    {# ── Timeframe pills ── #}
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+        {% for value, label in TIMEFRAMES %}
+        <button type="button" onclick="setFilter('timeframe_input','{{ value }}')"
+                class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                       {{ 'bg-gray-900 text-white' if current_filters.timeframe == value else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+            {{ label }}
+        </button>
+        {% endfor %}
+    </div>
+
+    {# ── Match-type pills + search ── #}
+    <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 mb-4">
+        <div class="flex items-center gap-1 flex-wrap">
+            <button type="button" onclick="setFilter('match_type_input','')"
                     class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
                            {{ 'bg-gray-900 text-white' if not current_filters.match_type else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
                 All
-                {% if papers and not current_filters.match_type %}
-                <span class="ml-1 text-xs opacity-70">{{ papers|length }}</span>
-                {% endif %}
             </button>
-            <button type="button" onclick="setMatchType('Author')"
+            {% for mtype in ['Author', 'Affiliation', 'Title'] %}
+            <button type="button" onclick="setFilter('match_type_input','{{ mtype }}')"
                     class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-                           {{ 'bg-blue-600 text-white' if current_filters.match_type == 'Author' else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
-                Author
-                {% if type_counts.Author %}
-                <span class="ml-1 text-xs opacity-70">{{ type_counts.Author }}</span>
-                {% endif %}
+                           {{ BADGE[mtype].active_bg ~ ' text-white' if current_filters.match_type == mtype else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
+                {{ mtype }} {{ type_counts[mtype] }}
             </button>
-            <button type="button" onclick="setMatchType('Affiliation')"
-                    class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-                           {{ 'bg-emerald-600 text-white' if current_filters.match_type == 'Affiliation' else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
-                Affiliation
-                {% if type_counts.Affiliation %}
-                <span class="ml-1 text-xs opacity-70">{{ type_counts.Affiliation }}</span>
-                {% endif %}
-            </button>
-            <button type="button" onclick="setMatchType('Title')"
-                    class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-                           {{ 'bg-purple-600 text-white' if current_filters.match_type == 'Title' else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
-                Title
-                {% if type_counts.Title %}
-                <span class="ml-1 text-xs opacity-70">{{ type_counts.Title }}</span>
-                {% endif %}
-            </button>
+            {% endfor %}
         </div>
 
-        <!-- Search -->
-        <div class="relative w-full sm:w-64">
-            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-            </svg>
-            <input type="text" name="q" id="q" value="{{ current_filters.q or '' }}"
-                   placeholder="Search papers..."
-                   class="w-full rounded-lg border border-gray-200 bg-gray-50 pl-10 pr-3 py-2 text-sm
-                          focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
-        </div>
-    </div>
-
-    <!-- Date navigation -->
-    {% if dates %}
-    <div class="flex items-center gap-2 mb-6">
-        <div class="flex items-center bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
-            {% set date_list = dates %}
-            {% set current_date_idx = date_list.index(current_filters.date) if current_filters.date and current_filters.date in date_list else -1 %}
-
-            <!-- Previous date button -->
-            {% if current_date_idx >= 0 and current_date_idx < date_list|length - 1 %}
-            <a href="/?date={{ date_list[current_date_idx + 1] }}{{ '&match_type=' + current_filters.match_type if current_filters.match_type }}{{ '&q=' + current_filters.q if current_filters.q }}"
-               class="px-2.5 py-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        <div class="flex items-center gap-2 w-full lg:w-auto">
+            <div class="relative w-full sm:w-72">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
-            </a>
-            {% else %}
-            <span class="px-2.5 py-1.5 text-gray-200">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-                </svg>
-            </span>
-            {% endif %}
-
-            <!-- Date selector -->
-            <select name="date" id="date" onchange="document.getElementById('filter-form').submit()"
-                    class="appearance-none bg-transparent px-3 py-1.5 text-sm font-medium text-gray-900
-                           focus:outline-none cursor-pointer min-w-[7rem] text-center">
-                <option value="">All Dates</option>
-                {% for d in dates %}
-                <option value="{{ d }}" {{ 'selected' if current_filters.date == d }}>{{ d }}</option>
-                {% endfor %}
+                <input type="text" name="q" id="q" value="{{ current_filters.q or '' }}"
+                       placeholder="Search title, author, topics..."
+                       class="w-full rounded-lg border border-gray-200 bg-gray-50 pl-10 pr-3 py-2 text-sm
+                              focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
+            </div>
+            <select name="sort" id="sort"
+                    onchange="document.getElementById('sort_input').value=this.value; document.getElementById('filter-form').submit();"
+                    class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                <option value="trending" {{ 'selected' if current_filters.sort == 'trending' }}>Trending</option>
+                <option value="newest" {{ 'selected' if current_filters.sort == 'newest' }}>Newest</option>
             </select>
-
-            <!-- Next date button -->
-            {% if current_date_idx > 0 %}
-            <a href="/?date={{ date_list[current_date_idx - 1] }}{{ '&match_type=' + current_filters.match_type if current_filters.match_type }}{{ '&q=' + current_filters.q if current_filters.q }}"
-               class="px-2.5 py-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                </svg>
-            </a>
-            {% else %}
-            <span class="px-2.5 py-1.5 text-gray-200">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                </svg>
-            </span>
-            {% endif %}
-        </div>
-
-        {% if current_filters.q or current_filters.match_type or current_filters.date %}
-        <a href="/" class="text-xs text-gray-400 hover:text-gray-600 transition-colors">Clear filters</a>
-        {% endif %}
-
-        <!-- Grid size control -->
-        <div class="flex items-center gap-1 ml-auto">
-            <button type="button" onclick="setGridSize('lg')" data-size="lg" title="Large cards"
-                    class="grid-size-btn p-1.5 rounded-md transition-colors">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
-                    <rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/>
-                    <rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/>
-                </svg>
-            </button>
-            <button type="button" onclick="setGridSize('md')" data-size="md" title="Medium cards"
-                    class="grid-size-btn p-1.5 rounded-md transition-colors">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
-                    <rect x="0.5" y="0.5" width="4" height="4" rx="0.75"/><rect x="6" y="0.5" width="4" height="4" rx="0.75"/><rect x="11.5" y="0.5" width="4" height="4" rx="0.75"/>
-                    <rect x="0.5" y="6" width="4" height="4" rx="0.75"/><rect x="6" y="6" width="4" height="4" rx="0.75"/><rect x="11.5" y="6" width="4" height="4" rx="0.75"/>
-                    <rect x="0.5" y="11.5" width="4" height="4" rx="0.75"/><rect x="6" y="11.5" width="4" height="4" rx="0.75"/><rect x="11.5" y="11.5" width="4" height="4" rx="0.75"/>
-                </svg>
-            </button>
-            <button type="button" onclick="setGridSize('sm')" data-size="sm" title="Small cards"
-                    class="grid-size-btn p-1.5 rounded-md transition-colors">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
-                    <rect x="0.5" y="0.5" width="3" height="3" rx="0.5"/><rect x="4.5" y="0.5" width="3" height="3" rx="0.5"/><rect x="8.5" y="0.5" width="3" height="3" rx="0.5"/><rect x="12.5" y="0.5" width="3" height="3" rx="0.5"/>
-                    <rect x="0.5" y="4.5" width="3" height="3" rx="0.5"/><rect x="4.5" y="4.5" width="3" height="3" rx="0.5"/><rect x="8.5" y="4.5" width="3" height="3" rx="0.5"/><rect x="12.5" y="4.5" width="3" height="3" rx="0.5"/>
-                    <rect x="0.5" y="8.5" width="3" height="3" rx="0.5"/><rect x="4.5" y="8.5" width="3" height="3" rx="0.5"/><rect x="8.5" y="8.5" width="3" height="3" rx="0.5"/><rect x="12.5" y="8.5" width="3" height="3" rx="0.5"/>
-                    <rect x="0.5" y="12.5" width="3" height="3" rx="0.5"/><rect x="4.5" y="12.5" width="3" height="3" rx="0.5"/><rect x="8.5" y="12.5" width="3" height="3" rx="0.5"/><rect x="12.5" y="12.5" width="3" height="3" rx="0.5"/>
-                </svg>
-            </button>
         </div>
     </div>
-    {% endif %}
+
+    <div class="flex items-center justify-between text-xs mb-6">
+        <label class="inline-flex items-center gap-2 text-gray-500 cursor-pointer">
+            <input type="checkbox" id="include_hidden_toggle" {{ 'checked' if current_filters.include_hidden }}
+                   onchange="toggleHidden(this)"
+                   class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+            Show skipped papers
+        </label>
+        {% if current_filters.q or current_filters.match_type or current_filters.timeframe != 'daily' or current_filters.sort != 'trending' or current_filters.include_hidden %}
+        <a href="/" class="text-gray-500 hover:text-gray-700">Reset filters</a>
+        {% endif %}
+    </div>
 </form>
 
 {% if papers %}
-<!-- Paper grid -->
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="paper-grid">
     {% for paper in papers %}
-    {% set paper_id = paper.link.split('/')[-1] %}
-    <article class="group bg-white rounded-xl border border-gray-200 overflow-hidden
-                    hover:shadow-md hover:border-gray-300 transition-all duration-200 opacity-0 flex flex-col"
-             style="animation: slideUp 0.3s ease-out {{ loop.index0 * 20 }}ms both">
-
-        <!-- Thumbnail -->
+    {% set paper_id = paper.arxiv_id or paper.link.split('/')[-1] %}
+    <article class="group bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md hover:border-gray-300 transition-all duration-200 flex flex-col paper-card"
+             data-paper-id="{{ paper.id }}">
         <a href="{{ paper.link }}" target="_blank" class="block">
             <div class="w-full h-36 bg-gray-100 overflow-hidden">
                 <img src="https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{{ paper_id }}.png"
-                     alt=""
+                     alt="" loading="lazy"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                     onerror="this.parentElement.innerHTML='<div class=\'w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 text-gray-300\'><svg class=\'w-10 h-10\' fill=\'none\' stroke=\'currentColor\' viewBox=\'0 0 24 24\'><path stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z\'/></svg></div>'">
+                     onerror="handleImgError(this)">
             </div>
         </a>
-
-        <!-- Content -->
         <div class="p-4 flex flex-col flex-1">
-            <!-- Match badges + date -->
-            <div class="flex items-center gap-1.5 mb-2">
+            {# ── Badges + date ── #}
+            <div class="flex items-center gap-1.5 mb-2 flex-wrap">
                 {% for mtype in paper.match_type.split(' + ') %}
-                    {% if mtype == 'Author' %}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-600">
-                        Author
-                    </span>
-                    {% elif mtype == 'Affiliation' %}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600">
-                        Affiliation
-                    </span>
-                    {% elif mtype == 'Title' %}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-600">
-                        Title
-                    </span>
-                    {% endif %}
+                {% if mtype in BADGE %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold {{ BADGE[mtype].bg }} {{ BADGE[mtype].text }}">{{ mtype }}</span>
+                {% endif %}
                 {% endfor %}
-                <span class="text-xs text-gray-400 ml-auto tabular-nums">{{ paper.publication_date or paper.scraped_date }}</span>
+                <span class="text-[11px] text-gray-400 ml-auto tabular-nums">
+                    {{ paper.publication_dt or paper.scraped_date }}
+                </span>
             </div>
 
-            <!-- Title -->
+            {# ── Title + authors ── #}
             <h2 class="text-sm font-semibold text-gray-900 leading-snug mb-1.5 line-clamp-2 group-hover:text-blue-600 transition-colors">
-                <a href="{{ paper.link }}" target="_blank">
-                    {{ paper.title }}
-                </a>
+                <a href="{{ paper.link }}" target="_blank">{{ paper.title }}</a>
             </h2>
+            <p class="text-xs text-gray-500 mb-2 line-clamp-1">{{ paper.authors }}</p>
 
-            <!-- Authors -->
-            <p class="text-xs text-gray-500 mb-3 line-clamp-1">{{ paper.authors }}</p>
+            {# ── Summary ── #}
+            <p class="text-xs text-gray-600 leading-relaxed mb-2 line-clamp-3">{{ paper.summary_text }}</p>
 
-            <!-- Matched terms + links -->
-            <div class="mt-auto pt-3 border-t border-gray-100">
-                <div class="flex flex-wrap gap-1 mb-2.5">
-                    {% for term in paper.matched_terms.split(', ') %}
-                    <span class="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
+            {# ── Topic tags ── #}
+            {% if paper.topic_tags_list %}
+            <div class="flex flex-wrap gap-1 mb-2">
+                {% for tag in paper.topic_tags_list %}
+                <span class="text-[11px] text-gray-700 bg-gray-100 px-2 py-0.5 rounded">{{ tag }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {# ── Matched terms ── #}
+            {% if paper.matched_terms_list %}
+            <div class="flex flex-wrap gap-1 mb-3">
+                {% for term in paper.matched_terms_list %}
+                <span class="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {# ── Feedback buttons ── #}
+            <div class="flex items-center gap-2 mb-3">
+                {% for action, meta in FEEDBACK.items() %}
+                <button type="button"
+                        onclick="sendFeedback({{ paper.id }}, '{{ action }}', this)"
+                        data-action="{{ action }}"
+                        class="feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border
+                               {{ meta.active if action in paper.active_actions else 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50' }}">
+                    {{ meta.label }} <span class="count">{{ paper.feedback_counts[action] }}</span>
+                </button>
+                {% endfor %}
+            </div>
+
+            {# ── Related papers ── #}
+            {% if paper.related_papers %}
+            <div class="mb-3">
+                <div class="text-[11px] text-gray-500 mb-1">Related</div>
+                <div class="space-y-1">
+                    {% for related in paper.related_papers %}
+                    <a href="{{ related.link }}" target="_blank" class="block text-[11px] text-gray-600 hover:text-blue-600 line-clamp-1">
+                        {{ related.title }}
+                    </a>
                     {% endfor %}
                 </div>
-                <div class="flex items-center gap-2">
-                    <a href="{{ paper.link }}" target="_blank"
-                       class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200
-                              text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-all">
-                        arXiv
-                    </a>
-                    <a href="{{ paper.pdf_link }}" target="_blank"
-                       class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg
-                              bg-gray-900 text-white hover:bg-gray-800 transition-all">
-                        PDF
-                    </a>
-                </div>
+            </div>
+            {% endif %}
+
+            {# ── Footer links ── #}
+            <div class="mt-auto pt-3 border-t border-gray-100 flex items-center gap-2">
+                <a href="{{ paper.link }}" target="_blank"
+                   class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300">
+                    arXiv
+                </a>
+                <a href="{{ paper.pdf_link }}" target="_blank"
+                   class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
+                    PDF
+                </a>
             </div>
         </div>
     </article>
     {% endfor %}
 </div>
+
+{# ── Pagination ── #}
+<div class="flex items-center justify-between mt-8">
+    <div class="text-sm text-gray-500">
+        Page {{ pagination.page }} of {{ pagination.pages or 1 }}
+    </div>
+    <div class="flex items-center gap-2">
+        {% for dir, has, num, label in [
+            ('prev', pagination.has_prev, pagination.prev_num, 'Previous'),
+            ('next', pagination.has_next, pagination.next_num, 'Next'),
+        ] %}
+            {% if has %}
+            <a href="{{ url_for('dashboard.index', page=num, q=current_filters.q, match_type=current_filters.match_type, timeframe=current_filters.timeframe, sort=current_filters.sort, include_hidden='1' if current_filters.include_hidden else None) }}"
+               class="px-3 py-1.5 text-sm rounded border border-gray-200 text-gray-600 hover:bg-gray-50">{{ label }}</a>
+            {% else %}
+            <span class="px-3 py-1.5 text-sm rounded border border-gray-100 text-gray-300">{{ label }}</span>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
 {% else %}
-<!-- Empty state -->
 <div class="text-center py-24">
     <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-50 mb-4">
         <svg class="h-8 w-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -237,72 +222,92 @@
                   d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>
         </svg>
     </div>
-    <h3 class="text-base font-semibold text-gray-900">No papers yet</h3>
-    <p class="mt-1 text-sm text-gray-500 mb-6">Run a scrape to fetch today's papers from arXiv.</p>
+    <h3 class="text-base font-semibold text-gray-900">No papers for this filter</h3>
+    <p class="mt-1 text-sm text-gray-500 mb-6">Try widening the timeframe or running a fresh scrape.</p>
     <button onclick="startScrape()"
-            class="inline-flex items-center px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg
-                   hover:bg-gray-800 transition-colors">
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-        </svg>
+            class="inline-flex items-center px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
         Run Scrape
     </button>
 </div>
 {% endif %}
+{% endblock %}
 
+{% block scripts %}
 <script>
-    function setMatchType(type) {
-        document.getElementById('match_type_input').value = type;
-        document.getElementById('filter-form').submit();
+    function setFilter(inputId, value) {
+        document.getElementById(inputId).value = value;
+        document.getElementById("filter-form").submit();
+    }
+
+    function toggleHidden(checkbox) {
+        const form = document.getElementById("filter-form");
+        const existing = form.querySelector('input[name="include_hidden"]');
+        if (existing) existing.remove();
+        if (checkbox.checked) {
+            const hidden = document.createElement("input");
+            hidden.type = "hidden";
+            hidden.name = "include_hidden";
+            hidden.value = "1";
+            form.appendChild(hidden);
+        }
+        form.submit();
     }
 
     let searchTimeout;
-    document.getElementById('q').addEventListener('input', function() {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            document.getElementById('filter-form').submit();
-        }, 500);
-    });
-
-    document.getElementById('q').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
+    const searchInput = document.getElementById("q");
+    if (searchInput) {
+        searchInput.addEventListener("input", () => {
             clearTimeout(searchTimeout);
-            document.getElementById('filter-form').submit();
-        }
-    });
-
-    // Grid size control
-    const GRID_CLASSES = {
-        lg: 'grid-cols-1 md:grid-cols-2',
-        md: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
-        sm: 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
-    };
-
-    function setGridSize(size) {
-        const grid = document.getElementById('paper-grid');
-        if (!grid) return;
-
-        // Remove all grid-cols classes
-        grid.className = grid.className.replace(/\b(md:|lg:)?grid-cols-\d\b/g, '').trim();
-        // Add new ones
-        GRID_CLASSES[size].split(' ').forEach(c => grid.classList.add(c));
-
-        // Update button states
-        document.querySelectorAll('.grid-size-btn').forEach(btn => {
-            if (btn.dataset.size === size) {
-                btn.classList.add('bg-gray-100', 'text-gray-900');
-                btn.classList.remove('text-gray-400', 'hover:text-gray-600', 'hover:bg-gray-50');
-            } else {
-                btn.classList.remove('bg-gray-100', 'text-gray-900');
-                btn.classList.add('text-gray-400', 'hover:text-gray-600', 'hover:bg-gray-50');
+            searchTimeout = setTimeout(() => document.getElementById("filter-form").submit(), 450);
+        });
+        searchInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                clearTimeout(searchTimeout);
+                document.getElementById("filter-form").submit();
             }
         });
-
-        localStorage.setItem('gridSize', size);
     }
 
-    // Restore saved grid size on load
-    setGridSize(localStorage.getItem('gridSize') || 'md');
+    const FEEDBACK_STYLES = {
+        upvote: { active: ["bg-blue-50", "text-blue-700", "border-blue-200"] },
+        save:   { active: ["bg-emerald-50", "text-emerald-700", "border-emerald-200"] },
+        skip:   { active: ["bg-rose-50", "text-rose-700", "border-rose-200"] },
+    };
+    const INACTIVE_STYLES = ["bg-white", "text-gray-600", "border-gray-200", "hover:bg-gray-50"];
+
+    function updateFeedbackButton(button, isActive, action, count) {
+        const countEl = button.querySelector(".count");
+        if (countEl) countEl.textContent = String(count);
+
+        const styles = FEEDBACK_STYLES[action];
+        button.className = "feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border";
+        button.classList.add(...(isActive ? styles.active : INACTIVE_STYLES));
+    }
+
+    async function sendFeedback(paperId, action, button) {
+        const card = button.closest(".paper-card");
+        if (!card) return;
+
+        try {
+            const response = await fetch(`/api/papers/${paperId}/feedback`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action }),
+            });
+            const data = await response.json();
+            if (!response.ok) return;
+
+            card.querySelectorAll(".feedback-btn").forEach((btn) => {
+                const btnAction = btn.dataset.action;
+                updateFeedbackButton(btn, (data.active_actions || []).includes(btnAction), btnAction, data.counts[btnAction] || 0);
+            });
+
+            if (action === "skip" && data.active && !document.getElementById("include_hidden_toggle").checked) {
+                card.remove();
+            }
+        } catch (error) {
+            console.error("Feedback request failed", error);
+        }
+    }
 </script>
 {% endblock %}

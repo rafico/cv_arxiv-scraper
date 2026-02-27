@@ -7,62 +7,46 @@
     <h1 class="text-xl font-bold text-gray-900 mb-1">Settings</h1>
     <p class="text-sm text-gray-500 mb-6">Edit your whitelists below. One entry per line.</p>
 
-    <form method="POST" action="/settings">
+    {% macro whitelist_field(name, label, help_text, items) %}
+    <div class="bg-white rounded-lg border border-gray-200 p-5">
+        <label for="{{ name }}" class="block text-sm font-semibold text-gray-900 mb-1">{{ label }}</label>
+        <p class="text-xs text-gray-500 mb-3">{{ help_text }}</p>
+        <textarea name="{{ name }}" id="{{ name }}" rows="8"
+                  class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm font-mono bg-gray-50
+                         focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none resize-y transition-colors">
+{%- for item in items %}
+{{ item }}
+{%- endfor %}
+</textarea>
+    </div>
+    {% endmacro %}
+
+    <form method="POST" action="/settings" id="settings-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="space-y-5">
-            <!-- Title Keywords -->
-            <div class="bg-white rounded-lg border border-gray-200 p-5">
-                <label for="titles" class="block text-sm font-semibold text-gray-900 mb-1">
-                    Title Keywords
-                </label>
-                <p class="text-xs text-gray-500 mb-3">Matched against paper title and abstract.</p>
-                <textarea name="titles" id="titles" rows="8"
-                          class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm font-mono bg-gray-50
-                                 focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none resize-y transition-colors">
-{%- for t in whitelists.titles %}
-{{ t }}
-{%- endfor %}
-</textarea>
-            </div>
-
-            <!-- Authors -->
-            <div class="bg-white rounded-lg border border-gray-200 p-5">
-                <label for="authors" class="block text-sm font-semibold text-gray-900 mb-1">
-                    Authors
-                </label>
-                <p class="text-xs text-gray-500 mb-3">Highest priority. Matched against individual author names.</p>
-                <textarea name="authors" id="authors" rows="8"
-                          class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm font-mono bg-gray-50
-                                 focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none resize-y transition-colors">
-{%- for a in whitelists.authors %}
-{{ a }}
-{%- endfor %}
-</textarea>
-            </div>
-
-            <!-- Affiliations -->
-            <div class="bg-white rounded-lg border border-gray-200 p-5">
-                <label for="affiliations" class="block text-sm font-semibold text-gray-900 mb-1">
-                    Affiliations
-                </label>
-                <p class="text-xs text-gray-500 mb-3">Matched against first-page PDF text (institution names).</p>
-                <textarea name="affiliations" id="affiliations" rows="8"
-                          class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm font-mono bg-gray-50
-                                 focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none resize-y transition-colors">
-{%- for a in whitelists.affiliations %}
-{{ a }}
-{%- endfor %}
-</textarea>
-            </div>
+            {{ whitelist_field('titles', 'Title Keywords', 'Matched against paper title and abstract.', whitelists.titles) }}
+            {{ whitelist_field('authors', 'Authors', 'Highest priority. Matched against individual author names.', whitelists.authors) }}
+            {{ whitelist_field('affiliations', 'Affiliations', 'Matched against first-page PDF text (institution names).', whitelists.affiliations) }}
         </div>
 
         <div class="mt-6 flex justify-end">
-            <button type="submit"
+            <button type="submit" id="save-btn"
                     class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg
                            hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900
-                           transition-colors">
+                           transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                 Save Settings
             </button>
         </div>
     </form>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById("settings-form").addEventListener("submit", function () {
+        var btn = document.getElementById("save-btn");
+        btn.disabled = true;
+        btn.textContent = "Saving...";
+    });
+</script>
 {% endblock %}
