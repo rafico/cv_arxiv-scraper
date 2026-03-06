@@ -50,10 +50,12 @@ def _validate_config(config: dict) -> None:
 def _register_blueprints(app: Flask) -> None:
     from app.routes.api import api_bp
     from app.routes.dashboard import dashboard_bp
+    from app.routes.handoff import handoff_bp
     from app.routes.settings import settings_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(handoff_bp)
     app.register_blueprint(api_bp)
 
 

@@ -45,6 +45,11 @@
                                   {% if request.endpoint and 'settings' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900 hover:bg-gray-50{% endif %}">
                             Settings
                         </a>
+                        <a href="/handoff"
+                           class="px-3 py-1.5 rounded-md font-medium
+                                  {% if request.endpoint and 'handoff' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900 hover:bg-gray-50{% endif %}">
+                            Handoff
+                        </a>
                     </div>
                 </div>
                 <button id="scrape-btn" onclick="startScrape()"
