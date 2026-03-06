@@ -180,10 +180,13 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
             existing_rows = db.session.query(Paper.link).filter(Paper.link.in_(links)).all()
             existing_links = {link for (link,) in existing_rows}
 
+        seen: set[str] = set()
         for result in results:
-            if result["link"] in existing_links:
+            link = result["link"]
+            if link in existing_links or link in seen:
                 skipped += 1
                 continue
+            seen.add(link)
 
             db.session.add(
                 Paper(
@@ -248,9 +251,10 @@ def execute_scrape(app, event_callback: EventCallback = None) -> dict:
 
     # Skip entries already in the database before doing any heavy work.
     existing_links = _get_existing_links(app, entries)
+    pre_filtered = len(existing_links)
     if existing_links:
         entries = [e for e in entries if e["link"] not in existing_links]
-        LOGGER.info("Skipped %d already-stored papers, %d new to process", len(existing_links), len(entries))
+        LOGGER.info("Skipped %d already-stored papers, %d new to process", pre_filtered, len(entries))
 
     _emit(
         event_callback,
@@ -289,7 +293,7 @@ def execute_scrape(app, event_callback: EventCallback = None) -> dict:
     _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
     _sort_results(results)
     new_count, skipped = _save_results(app, results)
-    summary = _build_summary(new_count, skipped, len(results), total_entries)
+    summary = _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
     _emit(event_callback, "done", summary)
 
     LOGGER.info(
