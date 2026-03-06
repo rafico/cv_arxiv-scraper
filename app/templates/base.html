@@ -314,6 +314,11 @@
                     if (data.running) {
                         document.getElementById("progress-subtitle").textContent = "Scrape is still running. Waiting...";
                         setTimeout(pollScrapeStatus, 5000);
+                    } else if (data.terminal_status === "error") {
+                        document.getElementById("progress-subtitle").textContent = "Scrape failed. Please try again.";
+                        document.getElementById("progress-bar").className = "h-full bg-red-500 rounded-full transition-all duration-300 ease-out";
+                        document.getElementById("progress-footer").classList.remove("hidden");
+                        resetScrapeButton();
                     } else {
                         document.getElementById("progress-subtitle").textContent = "Scrape finished. Click below to see results.";
                         document.getElementById("progress-footer").classList.remove("hidden");

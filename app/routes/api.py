@@ -20,13 +20,7 @@ def trigger_scrape():
 
 @api_bp.route("/scrape/status", methods=["GET"])
 def scrape_status():
-    job_id = SCRAPE_JOB_MANAGER._active_job_id
-    if not job_id:
-        return jsonify({"running": False})
-    job = SCRAPE_JOB_MANAGER._jobs.get(job_id)
-    if not job or job.finished_at is not None:
-        return jsonify({"running": False})
-    return jsonify({"running": True, "status": job.status})
+    return jsonify(SCRAPE_JOB_MANAGER.get_status_snapshot())
 
 
 @api_bp.route("/scrape/stream", methods=["GET"])

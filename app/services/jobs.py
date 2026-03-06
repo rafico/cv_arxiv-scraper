@@ -83,6 +83,33 @@ class ScrapeJobManager:
             self._executor.submit(self._run_job, app, job_id)
             return job
 
+    def get_status_snapshot(self) -> dict:
+        """Thread-safe status snapshot for the polling endpoint."""
+        with self._lock:
+            if self._active_job_id and self._active_job_id in self._jobs:
+                job = self._jobs[self._active_job_id]
+                # A job can be marked finished/error before _active_job_id is cleared
+                # in the worker's finally block; treat it as terminal immediately.
+                if job.finished_at is not None or job.status in {"finished", "error"}:
+                    return {
+                        "running": False,
+                        "terminal_status": job.status,
+                        "job_id": job.id,
+                    }
+                return {"running": True, "status": job.status}
+
+            # Check the most recently finished job for terminal state.
+            completed = [j for j in self._jobs.values() if j.finished_at is not None]
+            if completed:
+                latest = max(completed, key=lambda j: j.finished_at)
+                return {
+                    "running": False,
+                    "terminal_status": latest.status,
+                    "job_id": latest.id,
+                }
+
+            return {"running": False}
+
     def stream_events(self, job_id: str, *, heartbeat_seconds: int = 15) -> Iterator[tuple[str, dict]]:
         job = self._jobs.get(job_id)
         if not job:
