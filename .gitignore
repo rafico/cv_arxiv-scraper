@@ -15,9 +15,6 @@ instance/
 .DS_Store
 *.log
 
-AGENT_HANDOFF.md
-handoff.json
-
 codex-claude-bridge/
 
 .continue/checks/

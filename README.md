@@ -61,56 +61,12 @@ whitelists:
 
 Settings can also be edited in the web UI at `/settings`.
 
-## Agent Collaboration
-
-If you are alternating between Codex and the Claude VS Code extension, use
-`AGENT_HANDOFF.md` as the source of truth for in-progress work.
-
-- Read the latest entry before starting.
-- Append a new top entry after each work chunk.
-- Record files touched, commands/tests run, decisions, and the next step.
-
-### Interactive handoff CLI
-
-Use the helper script for faster turn-taking updates:
-
-```bash
-# default: show snapshot + newest turn
-make handoff
-
-# Quick snapshot + latest turn
-make handoff ARGS="next"
-
-# Claim the handoff and set snapshot to in-progress
-make handoff ARGS="claim --agent Codex"
-
-# Add a new turn entry (interactive prompts)
-make handoff ARGS="log"
-
-# Mark snapshot complete / hand back to human
-make handoff ARGS="close --owner Human"
-
-# Validate format + required snapshot fields
-make handoff ARGS="validate"
-```
-
 ### Continue checks
 
 This repo now includes project-specific Continue checks in `.continue/checks/`:
 
 - `api-contract-safety.md` — guards Flask JSON/SSE contract regressions.
-- `handoff-state-robustness.md` — reviews handoff state safety (validation, persistence, concurrency).
 - `schema-compatibility-guard.md` — catches SQLite/model migration compatibility risks.
-
-### Interactive handoff dashboard
-
-Open `/handoff` for a browser-based handoff UI. It includes:
-
-- editable current snapshot (owner, status, active goal, blockers, last test command)
-- quick owner handoff buttons (`Human`, `Claude`, `Codex`)
-- add/delete turn entries via API-backed actions
-
-State is stored in `handoff.json` in the same directory as your `config.yaml`.
 
 ## API
 
@@ -118,15 +74,9 @@ State is stored in `handoff.json` in the same directory as your `config.yaml`.
 |---|---|---|
 | `/` | GET | Dashboard with search/filters/pagination |
 | `/settings` | GET/POST | Whitelist editor |
-| `/handoff` | GET | Interactive handoff dashboard |
 | `/api/scrape` | POST | Start (or join) background scrape job |
 | `/api/scrape/stream` | GET | SSE events from active scrape job |
 | `/api/papers/<id>/feedback` | POST | Toggle `upvote`/`save`/`skip` |
-| `/api/handoff` | GET | Read handoff dashboard state (`snapshot` + `turns`) |
-| `/api/handoff/snapshot` | POST | Update handoff snapshot fields |
-| `/api/handoff/turn` | POST | Add a new handoff turn entry |
-| `/api/handoff/turn/<index>` | DELETE | Delete a handoff turn entry by index |
-
 SSE events: `status`, `feed`, `progress`, `match`, `done`, `scrape_error`
 
 ## Project Structure
