@@ -7,7 +7,7 @@ import io
 import logging
 import re
 import time
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 from datetime import date, datetime, timezone
 
 import feedparser
@@ -104,7 +104,7 @@ def _categorize_resource(url: str) -> tuple[str, str]:
         return "dataset", "Dataset"
     if "huggingface.co/spaces" in normalized:
         return "demo", "Demo"
-    if "/project" in normalized or "project" in normalized:
+    if "/project/" in normalized or normalized.endswith("/project"):
         return "project", "Project"
     if "youtube.com" in normalized or "youtu.be" in normalized:
         return "video", "Video"

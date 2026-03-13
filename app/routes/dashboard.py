@@ -97,14 +97,15 @@ def index():
 
     q = request.args.get("q", "").strip()
     if q:
-        search = f"%{q}%"
+        escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        search = f"%{escaped_q}%"
         query = query.filter(
             db.or_(
-                Paper.title.ilike(search),
-                Paper.authors.ilike(search),
-                Paper.matched_terms.ilike(search),
-                Paper.summary_text.ilike(search),
-                Paper.topic_tags.ilike(search),
+                Paper.title.ilike(search, escape="\\"),
+                Paper.authors.ilike(search, escape="\\"),
+                Paper.matched_terms.ilike(search, escape="\\"),
+                Paper.summary_text.ilike(search, escape="\\"),
+                Paper.topic_tags.ilike(search, escape="\\"),
             )
         )
 
