@@ -5,9 +5,36 @@ from __future__ import annotations
 import json
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.types import TypeDecorator, TEXT
 
 db = SQLAlchemy()
 
+class JSONList(TypeDecorator):
+    """Custom JSON list type since SQLite driver chokes on python lists via db.JSON directly."""
+    impl = TEXT
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return "[]"
+        if not isinstance(value, list):
+            raise ValueError(f"JSONList expected a list, got {type(value).__name__}: {value!r}")
+        return json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if not value:
+            return []
+        try:
+            val = json.loads(value)
+            if isinstance(val, list):
+                return val
+            # Legacy: bare JSON string — split on commas for old comma-separated rows.
+            if isinstance(val, str):
+                return [item.strip() for item in val.split(",") if item.strip()]
+            return []
+        except (json.JSONDecodeError, TypeError):
+            # Legacy: raw comma-separated text that isn't valid JSON at all.
+            return [item.strip() for item in str(value).split(",") if item.strip()]
 
 class Paper(db.Model):
     __tablename__ = "papers"
@@ -27,12 +54,12 @@ class Paper(db.Model):
 
     abstract_text = db.Column(db.Text, nullable=False, default="")
     summary_text = db.Column(db.Text, nullable=False, default="")
-    topic_tags = db.Column(db.Text, nullable=False, default="")
-    categories = db.Column(db.Text, nullable=False, default="")
-    resource_links = db.Column(db.Text, nullable=False, default="[]")
+    topic_tags = db.Column(JSONList, nullable=False, default=list)
+    categories = db.Column(JSONList, nullable=False, default=list)
+    resource_links = db.Column(JSONList, nullable=False, default=list)
 
     match_type = db.Column(db.Text, nullable=False)
-    matched_terms = db.Column(db.Text, nullable=False)
+    matched_terms = db.Column(JSONList, nullable=False, default=list)
     paper_score = db.Column(db.Float, nullable=False, default=0.0)
     feedback_score = db.Column(db.Integer, nullable=False, default=0)
     is_hidden = db.Column(db.Boolean, nullable=False, default=False)
@@ -44,34 +71,23 @@ class Paper(db.Model):
     publication_dt = db.Column(db.Date, index=True)
     scraped_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False, index=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
-
     feedback = db.relationship("PaperFeedback", back_populates="paper", cascade="all, delete-orphan")
-
-    @staticmethod
-    def _parse_comma_list(value: str | None) -> list[str]:
-        return [item.strip() for item in (value or "").split(",") if item.strip()]
 
     @property
     def matched_terms_list(self) -> list[str]:
-        return self._parse_comma_list(self.matched_terms)
+        return self.matched_terms or []
 
     @property
     def topic_tags_list(self) -> list[str]:
-        return self._parse_comma_list(self.topic_tags)
+        return self.topic_tags or []
 
     @property
     def categories_list(self) -> list[str]:
-        return self._parse_comma_list(self.categories)
+        return self.categories or []
 
     @property
     def resource_links_list(self) -> list[dict]:
-        try:
-            data = json.loads(self.resource_links or "[]")
-            if isinstance(data, list):
-                return data
-            return []
-        except json.JSONDecodeError:
-            return []
+        return self.resource_links or []
 
     @property
     def rank_score(self) -> float:

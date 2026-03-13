@@ -58,7 +58,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
                     paper.title or "",
                     paper.summary_text or "",
                     paper.abstract_text or "",
-                    paper.topic_tags or "",
+                    " ".join(paper.topic_tags or []),
                 ]
             )
         )
@@ -103,9 +103,11 @@ def index():
             db.or_(
                 Paper.title.ilike(search, escape="\\"),
                 Paper.authors.ilike(search, escape="\\"),
-                Paper.matched_terms.ilike(search, escape="\\"),
+                # cast() is a no-op on SQLite (underlying storage is TEXT);
+                # revisit if migrating to PostgreSQL.
+                db.cast(Paper.matched_terms, db.Text).ilike(search, escape="\\"),
                 Paper.summary_text.ilike(search, escape="\\"),
-                Paper.topic_tags.ilike(search, escape="\\"),
+                db.cast(Paper.topic_tags, db.Text).ilike(search, escape="\\"),
             )
         )
 

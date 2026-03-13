@@ -135,18 +135,23 @@ def _process_entries_parallel(entries: list[dict], whitelists: dict, scraper_con
     matched = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(_process_paper_entry, entry, whitelists, scraper_config)
+        futures = {
+            executor.submit(_process_paper_entry, entry, whitelists, scraper_config): entry
             for entry in entries
-        ]
+        }
 
         for future in as_completed(futures):
+            entry = futures[future]
             processed += 1
             result = None
             try:
                 result = future.result()
             except Exception:
-                LOGGER.exception("Unhandled worker exception while processing paper")
+                LOGGER.exception(
+                    "Unhandled worker exception while processing paper: %s (%s)",
+                    entry.get("title"),
+                    entry.get("link"),
+                )
 
             if result:
                 matched += 1
@@ -169,8 +174,8 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
 
     now = now_utc()
     today_str = now.date().isoformat()
-    new_count = 0
     skipped = 0
+    new_papers = []
 
     with app.app_context():
         # Check DB for links that slipped through pre-filter (race / direct call).
@@ -188,7 +193,7 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 continue
             seen.add(link)
 
-            db.session.add(
+            new_papers.append(
                 Paper(
                     arxiv_id=result.get("arxiv_id"),
                     title=result["title"],
@@ -197,11 +202,11 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                     pdf_link=result["pdf_link"],
                     abstract_text=result.get("abstract_text", ""),
                     summary_text=result.get("summary_text", ""),
-                    topic_tags=", ".join(result.get("topic_tags", [])),
-                    categories=", ".join(result.get("categories", [])),
-                    resource_links=json.dumps(result.get("resource_links", [])),
+                    topic_tags=result.get("topic_tags", []),
+                    categories=result.get("categories", []),
+                    resource_links=result.get("resource_links", []),
                     match_type=result["match_type"],
-                    matched_terms=", ".join(result["matches"]),
+                    matched_terms=result["matches"],
                     paper_score=float(result.get("paper_score", 0.0)),
                     publication_date=result["publication_date"],
                     publication_dt=result.get("publication_dt"),
@@ -209,12 +214,12 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                     scraped_at=now,
                 )
             )
-            new_count += 1
 
-        if new_count:
+        if new_papers:
+            db.session.add_all(new_papers)
             db.session.commit()
 
-    return new_count, skipped
+    return len(new_papers), skipped
 
 
 def _build_summary(new_count: int, skipped: int, total_matched: int, total_in_feed: int) -> dict:
