@@ -1,3 +1,7 @@
+email:
+  recipient: ""              # Destination address (defaults to GMAIL_ADDRESS if empty)
+  subject_prefix: "ArXiv Digest"
+
 scraper:
   feed_url: "https://rss.arxiv.org/rss/cs.CV"
   max_workers: 8

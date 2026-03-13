@@ -2,6 +2,10 @@ flask==3.1.0
 flask-sqlalchemy==3.1.1
 pyyaml==6.0.2
 feedparser==6.0.11
+defusedxml>=0.7.1
 pdfplumber>=0.10.0
 requests==2.32.3
 tqdm==4.67.1
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.127.0

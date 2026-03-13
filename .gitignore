@@ -15,6 +15,10 @@ instance/
 .DS_Store
 *.log
 
+# Gmail OAuth2 secrets — NEVER commit these
+credentials.json
+token.json
+
 codex-claude-bridge/
 
 .continue/checks/

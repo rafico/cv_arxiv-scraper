@@ -18,6 +18,7 @@ Stop drowning in the arXiv firehose. This tool scrapes the [arXiv cs.CV](https:/
 - **Auto-generated summaries & tags** — Each matched paper gets a short plain-language summary and topic tags so you can scan faster.
 - **Related paper recommendations** — Lightweight embedding similarity finds related work you might have missed.
 - **Flexible time windows** — Browse today's papers, this week's, this month's, or everything.
+- **Daily email digest** — Get matched papers delivered to your inbox via Gmail (OAuth2, send-only scope).
 
 ---
 
@@ -82,6 +83,47 @@ scraper:
 
 ---
 
+## Daily Email Digest
+
+Get a daily email with your matched papers — no need to open the dashboard.
+
+### Setup
+
+1. **Create a Google Cloud OAuth client** — Go to the [Google Cloud Console](https://console.cloud.google.com/), create a project, enable the **Gmail API**, and create an **OAuth 2.0 Client ID** (type: Desktop app). Download the JSON file and save it as `credentials.json` in the project root.
+
+2. **Run the one-time auth flow:**
+   ```bash
+   python gmail_auth_setup.py
+   ```
+   This opens a browser for Google consent. The resulting `token.json` is saved locally with restricted file permissions (`600`). The app requests only the `gmail.send` scope — it **cannot** read, list, or delete your emails.
+
+3. **Set your recipient in `config.yaml`:**
+   ```yaml
+   email:
+     recipient: "you@example.com"
+     subject_prefix: "ArXiv Digest"   # optional
+   ```
+
+4. **Test it:**
+   ```bash
+   python email_digest.py --dry-run   # preview without sending
+   python email_digest.py             # send now
+   ```
+
+5. **Schedule with cron** (e.g. every day at 8 AM):
+   ```
+   0 8 * * * cd /path/to/cv_arxiv-scraper && ~/venv/bin/python email_digest.py
+   ```
+
+### Security notes
+
+- Uses **OAuth2** (not app passwords) — Google's recommended approach.
+- Token scope is limited to `gmail.send` only.
+- `credentials.json` and `token.json` are gitignored and stored with `chmod 600`.
+- All paper content is HTML-escaped before rendering in email bodies.
+
+---
+
 ## How ranking works
 
 Each paper receives a composite score based on:
@@ -141,10 +183,13 @@ Multiple matches stack — a paper by a tracked author at a tracked lab on a tra
 │   │   ├── feedback.py          # User feedback handling
 │   │   ├── enrichment.py        # Metadata enrichment (DOI, categories)
 │   │   ├── summary.py           # Auto-generated summaries & tags
-│   │   └── related.py           # Related-paper recommendations
+│   │   ├── related.py           # Related-paper recommendations
+│   │   └── email_digest.py     # Gmail digest (build + send)
 │   ├── routes/                  # Flask blueprints
 │   └── templates/               # Jinja2 HTML templates
 ├── arxiv.py                     # CLI entry point
+├── email_digest.py              # Email digest CLI (for cron)
+├── gmail_auth_setup.py          # One-time Gmail OAuth setup
 ├── config.yaml                  # Your interests & scraper settings
 ├── run.py                       # Web server entry point
 └── tests/
