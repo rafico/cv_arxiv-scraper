@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -11,7 +12,6 @@ from app.models import db
 from app.schema import ensure_schema
 
 DEFAULT_DATABASE_URI = "sqlite:///arxiv_papers.db"
-DEFAULT_SECRET_KEY = "dev"
 
 
 def _load_config(path: Path) -> dict:
@@ -62,7 +62,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     app.config.update(
         SQLALCHEMY_DATABASE_URI=DEFAULT_DATABASE_URI,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        SECRET_KEY=DEFAULT_SECRET_KEY,
+        SECRET_KEY=os.environ.get("SECRET_KEY") or os.urandom(32).hex(),
     )
 
     if config_overrides:

@@ -1,3 +1,4 @@
+import os
 from threading import Timer
 import webbrowser
 
@@ -15,4 +16,4 @@ def _open_browser():
 
 if __name__ == "__main__":
     Timer(1.0, _open_browser).start()
-    app.run(debug=True)
+    app.run(debug=os.environ.get("FLASK_DEBUG", "0") == "1")
