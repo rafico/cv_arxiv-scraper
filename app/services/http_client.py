@@ -44,5 +44,4 @@ def request_with_backoff(
             )
             time.sleep(delay)
 
-    assert last_exc is not None
-    raise last_exc
+    raise last_exc  # type: ignore[misc]  # guaranteed non-None by loop logic

@@ -75,8 +75,8 @@ class Paper(db.Model):
 
     @property
     def rank_score(self) -> float:
-        from app.services.ranking import FEEDBACK_BOOST
-        return round(float(self.paper_score or 0.0) + (int(self.feedback_score or 0) * FEEDBACK_BOOST), 3)
+        from app.services.ranking import combined_rank_score
+        return combined_rank_score(float(self.paper_score or 0.0), int(self.feedback_score or 0))
 
 
 class PaperFeedback(db.Model):

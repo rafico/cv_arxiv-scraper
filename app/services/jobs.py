@@ -144,7 +144,8 @@ class ScrapeJobManager:
                 yield heartbeat_event
                 continue
 
-            assert next_event is not None
+            if next_event is None:
+                raise RuntimeError("Expected event but got None")
             event, data = next_event
             yield next_event
             if event in {"done", "scrape_error"} and cursor >= len(job.events):

@@ -37,14 +37,13 @@ def _print_paper(index, paper):
         "Matched Terms:"
     )
 
-    for term in paper.matched_terms.split(", "):
+    for term in paper.matched_terms_list:
         print(f"  - {term}")
 
     if paper.topic_tags:
         print("Topics:")
-        for tag in paper.topic_tags.split(", "):
-            if tag:
-                print(f"  - {tag}")
+        for tag in paper.topic_tags_list:
+            print(f"  - {tag}")
 
     print("-" * 50)
 

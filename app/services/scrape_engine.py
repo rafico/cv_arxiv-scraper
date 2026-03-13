@@ -173,9 +173,9 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
     skipped = 0
 
     with app.app_context():
-        links = [result["link"] for result in results]
+        # Check DB for links that slipped through pre-filter (race / direct call).
+        links = [r["link"] for r in results]
         existing_links: set[str] = set()
-
         if links:
             existing_rows = db.session.query(Paper.link).filter(Paper.link.in_(links)).all()
             existing_links = {link for (link,) in existing_rows}
