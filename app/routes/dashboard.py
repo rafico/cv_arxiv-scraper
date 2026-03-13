@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from flask import Blueprint, render_template, request
 from flask_sqlalchemy.query import Query
@@ -10,6 +10,7 @@ from app.services.feedback import get_feedback_snapshot
 from app.services.related import build_vector, top_related_papers
 from app.constants import DASHBOARD_PER_PAGE
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score
+from app.services.text import now_utc
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -36,7 +37,7 @@ def _apply_timeframe(query: Query, timeframe: str) -> Query:
     if days is None:
         return query
 
-    cutoff_dt = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    cutoff_dt = now_utc() - timedelta(days=days)
     cutoff_date = cutoff_dt.date()
     return query.filter(
         db.or_(

@@ -253,4 +253,7 @@ def extract_affiliation_text(
 
 
 def now_utc() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    # Kept for backward compatibility; canonical version is in app.services.text.
+    from app.services.text import now_utc as _now_utc
+
+    return _now_utc()

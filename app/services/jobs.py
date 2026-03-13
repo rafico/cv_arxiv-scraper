@@ -8,10 +8,11 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Iterator
 
 from app.services.scrape_engine import execute_scrape
+from app.services.text import now_utc
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,10 +54,10 @@ class ScrapeJobManager:
             job.events.append((event, data))
             if event == "done":
                 job.status = "finished"
-                job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                job.finished_at = now_utc()
             elif event == "scrape_error":
                 job.status = "error"
-                job.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                job.finished_at = now_utc()
             job.condition.notify_all()
 
     def _run_job(self, app, job_id: str) -> None:
@@ -77,7 +78,7 @@ class ScrapeJobManager:
                 return self._jobs[self._active_job_id]
 
             job_id = uuid.uuid4().hex
-            job = ScrapeJob(id=job_id, started_at=datetime.now(timezone.utc).replace(tzinfo=None))
+            job = ScrapeJob(id=job_id, started_at=now_utc())
             self._jobs[job_id] = job
             self._active_job_id = job_id
             self._executor.submit(self._run_job, app, job_id)

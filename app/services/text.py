@@ -103,3 +103,10 @@ def tokenize(text: str | None) -> list[str]:
         return []
     normalized = normalize(text).lower()
     return _TOKEN_RE.findall(normalized)
+
+
+def now_utc():
+    """Return the current UTC time as a naive datetime (for SQLite storage)."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).replace(tzinfo=None)
