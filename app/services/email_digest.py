@@ -9,10 +9,11 @@ Security model:
 
 Setup (one-time):
     1. Create a Google Cloud project and enable the Gmail API.
-    2. Create OAuth Client ID credentials (Desktop app type).
-    3. Download ``credentials.json`` to the project root.
-    4. Run ``python gmail_auth_setup.py`` — this opens a browser for consent.
-    5. A ``token.json`` file is saved with 600 permissions. Guard it like a password.
+    2. Create OAuth Client ID credentials (Web application type).
+    3. Add the app's ``/settings/gmail-callback`` URL as an authorized redirect URI.
+    4. Download ``credentials.json`` to the project root.
+    5. Click **Authorize Gmail** in the web UI settings page.
+    6. A ``token.json`` file is saved with 600 permissions. Guard it like a password.
 """
 
 from __future__ import annotations
@@ -40,15 +41,193 @@ DEFAULT_CREDENTIALS_PATH = _PROJECT_ROOT / "credentials.json"
 DEFAULT_TOKEN_PATH = _PROJECT_ROOT / "token.json"
 
 
+def check_gmail_auth_status(
+    credentials_path: Path | None = None,
+    token_path: Path | None = None,
+) -> dict:
+    """Check Gmail OAuth status without side effects.
+
+    Returns a dict with keys: ``status``, ``message``.
+    Possible statuses: ``connected``, ``no_credentials``, ``no_token``,
+    ``expired``, ``invalid``.
+    """
+    if credentials_path is None:
+        credentials_path = DEFAULT_CREDENTIALS_PATH
+    if token_path is None:
+        token_path = DEFAULT_TOKEN_PATH
+
+    if not credentials_path.exists():
+        return {
+            "status": "no_credentials",
+            "message": (
+                "credentials.json not found. Download it from the "
+                "Google Cloud Console (OAuth 2.0 Client ID → Web application) "
+                "and place it in the project root."
+            ),
+        }
+
+    if not token_path.exists():
+        return {
+            "status": "no_token",
+            "message": (
+                "Gmail not authorized yet. Click 'Authorize Gmail' to "
+                "start the OAuth flow."
+            ),
+        }
+
+    try:
+        from google.oauth2.credentials import Credentials
+
+        creds = Credentials.from_authorized_user_file(
+            str(token_path), scopes=[GMAIL_SEND_SCOPE]
+        )
+    except Exception:
+        return {
+            "status": "invalid",
+            "message": "token.json is corrupted or unreadable. Re-authorize Gmail.",
+        }
+
+    if creds.expired and creds.refresh_token:
+        return {
+            "status": "expired",
+            "message": (
+                "Access token expired. It will auto-refresh on next send, "
+                "or click 'Re-authorize' to refresh now."
+            ),
+        }
+
+    if not creds.valid and not creds.refresh_token:
+        return {
+            "status": "invalid",
+            "message": "Token is invalid and cannot be refreshed. Re-authorize Gmail.",
+        }
+
+    return {
+        "status": "connected",
+        "message": "Gmail is connected and ready to send.",
+    }
+
+
+def start_oauth_flow(
+    redirect_uri: str,
+    credentials_path: Path | None = None,
+) -> dict:
+    """Build a Google OAuth2 authorization URL for the web redirect flow.
+
+    Returns a dict with ``success``, ``auth_url``, ``state``, and ``message``.
+    The caller must store ``state`` in the session and redirect the user to
+    ``auth_url``.  After consent Google will redirect back to *redirect_uri*
+    with a ``code`` and ``state`` query parameter.
+    """
+    if credentials_path is None:
+        credentials_path = DEFAULT_CREDENTIALS_PATH
+
+    if not credentials_path.exists():
+        return {
+            "success": False,
+            "auth_url": None,
+            "state": None,
+            "message": (
+                "credentials.json not found. Download it from Google Cloud Console first."
+            ),
+        }
+
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return {
+            "success": False,
+            "auth_url": None,
+            "state": None,
+            "message": (
+                "google-auth-oauthlib is not installed. "
+                "Run: pip install google-auth google-auth-oauthlib google-api-python-client"
+            ),
+        }
+
+    try:
+        flow = Flow.from_client_secrets_file(
+            str(credentials_path),
+            scopes=[GMAIL_SEND_SCOPE],
+            redirect_uri=redirect_uri,
+        )
+        auth_url, state = flow.authorization_url(
+            access_type="offline",
+            prompt="consent",
+        )
+        return {
+            "success": True,
+            "auth_url": auth_url,
+            "state": state,
+            "message": "Redirecting to Google for authorization.",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "auth_url": None,
+            "state": None,
+            "message": f"Failed to start OAuth flow: {exc}",
+        }
+
+
+def finish_oauth_flow(
+    authorization_response_url: str,
+    redirect_uri: str,
+    credentials_path: Path | None = None,
+    token_path: Path | None = None,
+) -> dict:
+    """Exchange the authorization code for credentials and save the token.
+
+    *authorization_response_url* is the full URL the user was redirected to
+    (including the ``code`` and ``state`` query parameters).
+
+    Returns a dict with ``success`` (bool) and ``message``.
+    """
+    if credentials_path is None:
+        credentials_path = DEFAULT_CREDENTIALS_PATH
+    if token_path is None:
+        token_path = DEFAULT_TOKEN_PATH
+
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return {
+            "success": False,
+            "message": (
+                "google-auth-oauthlib is not installed. "
+                "Run: pip install google-auth google-auth-oauthlib google-api-python-client"
+            ),
+        }
+
+    try:
+        flow = Flow.from_client_secrets_file(
+            str(credentials_path),
+            scopes=[GMAIL_SEND_SCOPE],
+            redirect_uri=redirect_uri,
+        )
+        flow.fetch_token(authorization_response=authorization_response_url)
+        creds = flow.credentials
+        token_path.write_text(creds.to_json())
+        os.chmod(token_path, 0o600)
+        return {"success": True, "message": "Gmail authorized successfully."}
+    except Exception as exc:
+        return {"success": False, "message": f"OAuth flow failed: {exc}"}
+
+
 def _load_gmail_credentials(
-    credentials_path: Path = DEFAULT_CREDENTIALS_PATH,
-    token_path: Path = DEFAULT_TOKEN_PATH,
+    credentials_path: Path | None = None,
+    token_path: Path | None = None,
 ):
     """Load and refresh OAuth2 credentials for the Gmail API.
 
     Raises ``FileNotFoundError`` if ``token.json`` is missing (run setup first).
     Raises ``RuntimeError`` if the token cannot be refreshed.
     """
+    if credentials_path is None:
+        credentials_path = DEFAULT_CREDENTIALS_PATH
+    if token_path is None:
+        token_path = DEFAULT_TOKEN_PATH
+
     if not token_path.exists():
         raise FileNotFoundError(
             f"Token file not found: {token_path}\n"

@@ -5,7 +5,144 @@
 {% block content %}
 <div class="max-w-2xl">
     <h1 class="text-xl font-bold text-gray-900 mb-1">Settings</h1>
-    <p class="text-sm text-gray-500 mb-6">Edit your whitelists below. One entry per line.</p>
+    <p class="text-sm text-gray-500 mb-6">Manage your email digest and whitelists.</p>
+
+    {# ══════════ Email & Gmail Section ══════════ #}
+    <div class="mb-8">
+        <h2 class="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            Email & Gmail
+        </h2>
+
+        {# ── Gmail Auth Status Card ── #}
+        <div class="bg-white rounded-lg border border-gray-200 p-5 mb-4">
+            <div class="flex items-start justify-between">
+                <div class="flex items-start gap-3">
+                    {% if gmail_status.status == 'connected' %}
+                    <div class="mt-0.5 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+                    {% elif gmail_status.status == 'expired' %}
+                    <div class="mt-0.5 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-amber-400"></div>
+                    {% else %}
+                    <div class="mt-0.5 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-red-400"></div>
+                    {% endif %}
+                    <div>
+                        <p class="text-sm font-medium text-gray-900">
+                            {% if gmail_status.status == 'connected' %}
+                                Gmail Connected
+                            {% elif gmail_status.status == 'expired' %}
+                                Token Expired
+                            {% elif gmail_status.status == 'no_credentials' %}
+                                Missing credentials.json
+                            {% elif gmail_status.status == 'no_token' %}
+                                Gmail Not Authorized
+                            {% else %}
+                                Invalid Token
+                            {% endif %}
+                        </p>
+                        <p class="text-xs text-gray-500 mt-0.5">{{ gmail_status.message }}</p>
+                    </div>
+                </div>
+
+                {% if gmail_status.status != 'no_credentials' %}
+                <form method="POST" action="/settings/gmail-auth" class="ml-4 flex-shrink-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit"
+                            class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+                                   {% if gmail_status.status == 'connected' %}
+                                       bg-gray-100 text-gray-600 hover:bg-gray-200
+                                   {% else %}
+                                       bg-gray-900 text-white hover:bg-gray-800
+                                   {% endif %}">
+                        <svg class="w-3.5 h-3.5 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                        </svg>
+                        {% if gmail_status.status == 'connected' %}Re-authorize{% else %}Authorize Gmail{% endif %}
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+
+            {% if gmail_status.status == 'no_credentials' %}
+            <div class="mt-4 bg-gray-50 rounded-lg p-4">
+                <p class="text-xs font-medium text-gray-700 mb-2">Setup steps:</p>
+                <ol class="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
+                    <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-blue-600 hover:underline">Google Cloud Console &rarr; Credentials</a></li>
+                    <li>Enable the <strong>Gmail API</strong> for your project</li>
+                    <li>Create an <strong>OAuth 2.0 Client ID</strong> (Web application type)</li>
+                    <li>Under <strong>Authorized redirect URIs</strong>, add:<br>
+                        <code class="bg-gray-200 px-1 py-0.5 rounded text-[11px] select-all">{{ callback_uri }}</code>
+                    </li>
+                    <li>Download the JSON file and save it as <code class="bg-gray-200 px-1 py-0.5 rounded text-[11px]">credentials.json</code> in the project root</li>
+                    <li>Come back here and click <strong>Authorize Gmail</strong></li>
+                </ol>
+            </div>
+            {% endif %}
+        </div>
+
+        {# ── Email Settings Form ── #}
+        <form method="POST" action="/settings/email" id="email-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="bg-white rounded-lg border border-gray-200 p-5">
+                <div class="space-y-4">
+                    <div>
+                        <label for="email_recipient" class="block text-sm font-semibold text-gray-900 mb-1">Recipient Email</label>
+                        <p class="text-xs text-gray-500 mb-2">Digest emails will be sent to this address.</p>
+                        <input type="email" name="email_recipient" id="email_recipient"
+                               value="{{ email_config.recipient }}"
+                               placeholder="you@example.com"
+                               class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm bg-gray-50
+                                      focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
+                    </div>
+                    <div>
+                        <label for="email_subject_prefix" class="block text-sm font-semibold text-gray-900 mb-1">Subject Prefix</label>
+                        <p class="text-xs text-gray-500 mb-2">Prepended to the digest email subject line.</p>
+                        <input type="text" name="email_subject_prefix" id="email_subject_prefix"
+                               value="{{ email_config.subject_prefix }}"
+                               placeholder="ArXiv Digest"
+                               class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm bg-gray-50
+                                      focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
+                    </div>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button type="submit" id="email-save-btn"
+                            class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg
+                                   hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900
+                                   transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        Save Email Settings
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        {# ── Send Test Digest (separate form) ── #}
+        <form method="POST" action="/settings/send-test-digest" class="mt-3" id="test-digest-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" id="test-digest-btn"
+                    {% if gmail_status.status != 'connected' or not email_config.recipient %}disabled{% endif %}
+                    class="w-full inline-flex items-center justify-center px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-200
+                           text-gray-700 bg-white hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                </svg>
+                Send Test Digest
+            </button>
+        </form>
+    </div>
+
+    {# ══════════ Whitelists Section ══════════ #}
+    <h2 class="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        Whitelists
+    </h2>
+    <p class="text-sm text-gray-500 mb-4">Edit your whitelists below. One entry per line.</p>
 
     {% macro whitelist_field(name, label, help_text, items) %}
     <div class="bg-white rounded-lg border border-gray-200 p-5">
@@ -34,7 +171,7 @@
                     class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg
                            hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900
                            transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                Save Settings
+                Save Whitelists
             </button>
         </div>
     </form>
@@ -48,5 +185,19 @@
         btn.disabled = true;
         btn.textContent = "Saving...";
     });
+
+    document.getElementById("email-form").addEventListener("submit", function () {
+        var btn = document.getElementById("email-save-btn");
+        btn.disabled = true;
+        btn.textContent = "Saving...";
+    });
+
+    var testBtn = document.getElementById("test-digest-btn");
+    if (testBtn && !testBtn.disabled) {
+        testBtn.addEventListener("click", function () {
+            testBtn.disabled = true;
+            testBtn.textContent = "Sending...";
+        });
+    }
 </script>
 {% endblock %}

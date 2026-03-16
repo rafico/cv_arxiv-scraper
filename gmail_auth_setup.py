@@ -1,6 +1,9 @@
-"""One-time OAuth2 setup for Gmail API access.
+"""One-time OAuth2 setup for Gmail API access (CLI fallback).
 
-Run this interactively on a machine with a browser. It will:
+For most users, the web UI at /settings handles Gmail authorization
+automatically via browser redirect — no need to run this script.
+
+This script is a fallback for headless / CLI-only environments. It will:
   1. Read your ``credentials.json`` (downloaded from Google Cloud Console).
   2. Open a browser for you to grant the ``gmail.send`` scope.
   3. Save a ``token.json`` file with restrictive (600) permissions.
@@ -8,7 +11,7 @@ Run this interactively on a machine with a browser. It will:
 Prerequisites:
   - Create a Google Cloud project: https://console.cloud.google.com/
   - Enable the Gmail API for the project.
-  - Create OAuth Client ID credentials (Desktop application type).
+  - Create OAuth Client ID credentials (Web application type).
   - Download the JSON file and save it as ``credentials.json`` in the project root.
   - Set the OAuth consent screen publishing status to "In production"
     so the refresh token does not expire after 7 days.
