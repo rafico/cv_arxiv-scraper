@@ -8,13 +8,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from typing import Callable
 
+import requests
+
 from app.services.enrichment import (
     enrich_entries_with_api_metadata,
     extract_affiliation_text,
     now_utc,
     parse_feed_entries,
 )
-from app.services.http_client import request_with_backoff
+from app.services.http_client import create_session, request_with_backoff
 from app.services.matching import (
     MATCH_PRIORITY,
     check_author_match,
@@ -85,11 +87,16 @@ def _check_fast_matches(entry_data: dict, whitelists: dict) -> dict[str, list[st
     }
 
 
-def _process_paper_entry(entry_data: dict, whitelists: dict, scraper_config: dict) -> dict | None:
+def _process_paper_entry(
+    entry_data: dict,
+    whitelists: dict,
+    scraper_config: dict,
+    session: requests.Session | None = None,
+) -> dict | None:
     # Phase 1: fast check — title and author (no PDF download).
     fast_matches = _check_fast_matches(entry_data, whitelists)
 
-    # Phase 2: download PDF and check affiliations for all papers.
+    # Phase 2: download PDF and check affiliations.
     link = entry_data["link"]
     pdf_url = link.replace("/abs/", "/pdf/")
     affiliation_matches: list[str] = []
@@ -100,6 +107,7 @@ def _process_paper_entry(entry_data: dict, whitelists: dict, scraper_config: dic
             timeout=30,
             attempts=scraper_config.get("pdf_attempts", 2),
             base_delay=1.0,
+            session=session,
         )
         affiliation_text = extract_affiliation_text(
             pdf_response.content,
@@ -127,10 +135,11 @@ def _process_entries_parallel(entries: list[dict], whitelists: dict, scraper_con
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     processed = 0
     matched = 0
+    session = create_session(pool_size=max_workers)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_process_paper_entry, entry, whitelists, scraper_config): entry
+            executor.submit(_process_paper_entry, entry, whitelists, scraper_config, session): entry
             for entry in entries
         }
 
