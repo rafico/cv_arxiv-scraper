@@ -89,14 +89,10 @@ def _process_paper_entry(entry_data: dict, whitelists: dict, scraper_config: dic
     # Phase 1: fast check — title and author (no PDF download).
     fast_matches = _check_fast_matches(entry_data, whitelists)
 
-    if any(fast_matches.values()):
-        # Already matched on title/author — skip PDF download entirely.
-        category_matches = {**fast_matches, "Affiliation": []}
-        return _build_result(entry_data, category_matches)
-
-    # Phase 2: no fast match — download PDF and check affiliations.
+    # Phase 2: download PDF and check affiliations for all papers.
     link = entry_data["link"]
     pdf_url = link.replace("/abs/", "/pdf/")
+    affiliation_matches: list[str] = []
     try:
         pdf_response = request_with_backoff(
             "GET",
@@ -105,27 +101,25 @@ def _process_paper_entry(entry_data: dict, whitelists: dict, scraper_config: dic
             attempts=scraper_config.get("pdf_attempts", 2),
             base_delay=1.0,
         )
+        affiliation_text = extract_affiliation_text(
+            pdf_response.content,
+            lines_start=scraper_config.get("pdf_lines_start", 2),
+            max_header_lines=scraper_config.get(
+                "pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)
+            ),
+            smart_header=scraper_config.get("pdf_smart_header", True),
+        )
+        api_affiliations = entry_data.get("api_affiliations", "")
+        affiliation_sources = [text for text in [affiliation_text, api_affiliations] if text]
+        affiliation_matches = check_whitelist_match(affiliation_sources, whitelists["affiliations"])
     except Exception as exc:
         LOGGER.warning("Error fetching PDF for %s: %s", link, exc)
-        return None
-
-    affiliation_text = extract_affiliation_text(
-        pdf_response.content,
-        lines_start=scraper_config.get("pdf_lines_start", 2),
-        max_header_lines=scraper_config.get(
-            "pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)
-        ),
-        smart_header=scraper_config.get("pdf_smart_header", True),
-    )
-
-    api_affiliations = entry_data.get("api_affiliations", "")
-    affiliation_sources = [text for text in [affiliation_text, api_affiliations] if text]
-    affiliation_matches = check_whitelist_match(affiliation_sources, whitelists["affiliations"])
-
-    if not affiliation_matches:
-        return None
 
     category_matches = {**fast_matches, "Affiliation": affiliation_matches}
+
+    if not any(category_matches.values()):
+        return None
+
     return _build_result(entry_data, category_matches)
 
 
