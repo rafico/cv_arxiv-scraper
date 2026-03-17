@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import inspect, text
 
 from app.models import db
+
+LOGGER = logging.getLogger(__name__)
 
 PAPER_COLUMN_DEFS = {
     "arxiv_id": "TEXT",
@@ -16,6 +19,7 @@ PAPER_COLUMN_DEFS = {
     "categories": "TEXT NOT NULL DEFAULT '[]'",
     "resource_links": "TEXT NOT NULL DEFAULT '[]'",
     "paper_score": "REAL NOT NULL DEFAULT 0",
+    "llm_relevance_score": "REAL",
     "feedback_score": "INTEGER NOT NULL DEFAULT 0",
     "is_hidden": "INTEGER NOT NULL DEFAULT 0",
     "publication_dt": "DATE",
@@ -29,6 +33,10 @@ INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_papers_hidden ON papers (is_hidden)",
     "CREATE INDEX IF NOT EXISTS idx_feedback_paper_action ON paper_feedback (paper_id, action)",
 ]
+UNIQUE_ARXIV_INDEX_STATEMENT = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_arxiv_id "
+    "ON papers (arxiv_id) WHERE arxiv_id IS NOT NULL"
+)
 
 
 def _try_parse_date(value: str | None):
@@ -81,6 +89,12 @@ def ensure_schema() -> None:
     for statement in INDEX_STATEMENTS:
         db.session.execute(text(statement))
     db.session.commit()
+    try:
+        db.session.execute(text(UNIQUE_ARXIV_INDEX_STATEMENT))
+        db.session.commit()
+    except Exception as exc:  # pragma: no cover - depends on legacy DB contents
+        LOGGER.warning("Could not create unique arXiv id index: %s", exc)
+        db.session.rollback()
 
     rows = db.session.execute(
         text(

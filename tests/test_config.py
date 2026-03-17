@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import copy
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from app import _validate_config
 from tests.helpers import TEST_SCRAPER_CONFIG
@@ -80,6 +84,31 @@ class ConfigValidationTests(unittest.TestCase):
     def test_config_not_dict(self):
         with self.assertRaises(ValueError, msg="dict"):
             _validate_config("not a dict")  # type: ignore[arg-type]
+
+    def test_llm_enabled_requires_key_source(self):
+        cfg = self._valid_config()
+        cfg["llm"]["enabled"] = True
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            with patch.dict(os.environ, {}, clear=False):
+                with self.assertRaises(ValueError, msg="API key"):
+                    _validate_config(cfg, config_path=config_path)
+
+    def test_llm_enabled_accepts_env_var(self):
+        cfg = self._valid_config()
+        cfg["llm"]["enabled"] = True
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}, clear=False):
+                _validate_config(cfg, config_path=config_path)
+
+    def test_llm_enabled_accepts_key_file(self):
+        cfg = self._valid_config()
+        cfg["llm"]["enabled"] = True
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / ".llm_api_key").write_text("file-key", encoding="utf-8")
+            _validate_config(cfg, config_path=root / "config.yaml")
 
 
 if __name__ == "__main__":

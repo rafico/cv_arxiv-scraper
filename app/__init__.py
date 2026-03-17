@@ -12,6 +12,7 @@ from app.models import db
 from app.schema import ensure_schema
 
 DEFAULT_DATABASE_URI = "sqlite:///arxiv_papers.db"
+DEFAULT_LLM_KEY_FILENAME = ".llm_api_key"
 
 
 def _load_config(path: Path) -> dict:
@@ -19,7 +20,27 @@ def _load_config(path: Path) -> dict:
         return yaml.safe_load(config_file)
 
 
-def _validate_config(config: dict) -> None:
+def _resolve_llm_key_path(config_path: Path | None = None) -> Path:
+    base_dir = config_path.parent if config_path is not None else Path(__file__).resolve().parent.parent
+    return base_dir / DEFAULT_LLM_KEY_FILENAME
+
+
+def _llm_api_key_available(config_path: Path | None = None) -> bool:
+    env_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if env_key:
+        return True
+
+    key_path = _resolve_llm_key_path(config_path)
+    if not key_path.is_file():
+        return False
+
+    try:
+        return bool(key_path.read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
+
+
+def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
     if not isinstance(config, dict):
         raise ValueError("Config must be a dict")
 
@@ -45,6 +66,29 @@ def _validate_config(config: dict) -> None:
         value = whitelists[key]
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             raise ValueError(f"'whitelists.{key}' must be a list of strings")
+
+    llm = config.get("llm")
+    if llm is None:
+        return
+    if not isinstance(llm, dict):
+        raise ValueError("'llm' must be a dict")
+
+    for key in ("model", "base_url"):
+        value = llm.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"'llm.{key}' must be a non-empty string when provided")
+
+    max_concurrent = llm.get("max_concurrent", 4)
+    try:
+        if int(max_concurrent) < 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValueError("'llm.max_concurrent' must be a positive integer") from None
+
+    if llm.get("enabled") and not _llm_api_key_available(config_path):
+        raise ValueError(
+            "LLM is enabled but no API key was found via OPENROUTER_API_KEY or .llm_api_key"
+        )
 
 
 def _register_blueprints(app: Flask) -> None:
@@ -74,11 +118,14 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         app.config.get("CONFIG_PATH", (Path(app.root_path).parent / "config.yaml").resolve())
     )
     app.config["CONFIG_PATH"] = str(config_path)
+    app.config["LLM_KEY_PATH"] = str(
+        Path(app.config.get("LLM_KEY_PATH", _resolve_llm_key_path(config_path))).resolve()
+    )
 
     if "SCRAPER_CONFIG" not in app.config:
         app.config["SCRAPER_CONFIG"] = _load_config(config_path)
 
-    _validate_config(app.config["SCRAPER_CONFIG"])
+    _validate_config(app.config["SCRAPER_CONFIG"], config_path=config_path)
 
     db.init_app(app)
     with app.app_context():

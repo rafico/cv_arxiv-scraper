@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from threading import Event
 from unittest.mock import patch
 
 from tests.helpers import FlaskDBTestCase
@@ -35,7 +36,7 @@ class ScrapeJobErrorTests(FlaskDBTestCase):
     def test_success_sets_status_to_finished(self):
         """Normal completion should set status to 'finished' with a 'done' event."""
 
-        def fake_scrape(app, event_callback=None):
+        def fake_scrape(app, event_callback=None, force=False):
             event_callback("done", {"new_papers": 1, "duplicates_skipped": 0, "total_matched": 1, "total_in_feed": 5})
             return {}
 
@@ -53,6 +54,62 @@ class ScrapeJobErrorTests(FlaskDBTestCase):
         events = list(self.manager.stream_events("nonexistent"))
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0][0], "scrape_error")
+
+    def test_skipped_sets_status_and_stream_terminates(self):
+        def fake_scrape(app, event_callback=None, force=False):
+            event_callback("skipped", {"skipped": True, "reason": "Already scraped today"})
+            return {"skipped": True}
+
+        with patch("app.services.jobs.execute_scrape", side_effect=fake_scrape):
+            job = self.manager.start_or_get_active(self.app)
+            events = list(self.manager.stream_events(job.id, heartbeat_seconds=1))
+
+        self.assertEqual(job.status, "skipped")
+        self.assertIsNotNone(job.finished_at)
+        self.assertIsNone(self.manager._active_job_id)
+        self.assertEqual([event for event, _ in events], ["skipped"])
+
+    def test_force_rerun_after_skipped_creates_new_job(self):
+        barrier = Event()
+
+        def fake_scrape(app, event_callback=None, force=False):
+            if force:
+                event_callback("done", {"new_papers": 1, "duplicates_skipped": 0, "total_matched": 1, "total_in_feed": 1})
+                return {}
+
+            event_callback("skipped", {"skipped": True, "reason": "Already scraped today"})
+            barrier.wait(timeout=5)
+            return {"skipped": True}
+
+        with patch("app.services.jobs.execute_scrape", side_effect=fake_scrape):
+            first_job = self.manager.start_or_get_active(self.app)
+            events = self.manager.stream_events(first_job.id, heartbeat_seconds=1)
+            first_event = next(events)
+
+            self.assertEqual(first_event[0], "skipped")
+            self.assertIsNone(self.manager._active_job_id)
+
+            second_job = self.manager.start_or_get_active(self.app, force=True)
+            self.assertNotEqual(first_job.id, second_job.id)
+
+            barrier.set()
+            remaining_events = list(self.manager.stream_events(second_job.id, heartbeat_seconds=1))
+
+        self.assertIn("done", [event for event, _ in remaining_events])
+
+    def test_force_flag_is_forwarded_to_execute_scrape(self):
+        observed_forces: list[bool] = []
+
+        def fake_scrape(app, event_callback=None, force=False):
+            observed_forces.append(force)
+            event_callback("done", {"new_papers": 0, "duplicates_skipped": 0, "total_matched": 0, "total_in_feed": 0})
+            return {}
+
+        with patch("app.services.jobs.execute_scrape", side_effect=fake_scrape):
+            job = self.manager.start_or_get_active(self.app, force=True)
+            list(self.manager.stream_events(job.id, heartbeat_seconds=1))
+
+        self.assertEqual(observed_forces, [True])
 
 
 class StatusSnapshotTests(FlaskDBTestCase):
@@ -72,7 +129,7 @@ class StatusSnapshotTests(FlaskDBTestCase):
 
         barrier = threading.Event()
 
-        def blocking_scrape(app, event_callback=None):
+        def blocking_scrape(app, event_callback=None, force=False):
             barrier.wait(timeout=5)
             event_callback("done", {"new_papers": 0, "duplicates_skipped": 0, "total_matched": 0, "total_in_feed": 0})
 
@@ -94,7 +151,7 @@ class StatusSnapshotTests(FlaskDBTestCase):
         self.assertEqual(snap["terminal_status"], "error")
 
     def test_snapshot_after_success_returns_terminal_finished(self):
-        def fake_scrape(app, event_callback=None):
+        def fake_scrape(app, event_callback=None, force=False):
             event_callback("done", {"new_papers": 0, "duplicates_skipped": 0, "total_matched": 0, "total_in_feed": 0})
 
         with patch("app.services.jobs.execute_scrape", side_effect=fake_scrape):

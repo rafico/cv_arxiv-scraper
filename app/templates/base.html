@@ -160,7 +160,13 @@
                 '</svg></div>';
         }
 
-        function startScrape() {
+        function setOverlayVisible(visible) {
+            const overlay = document.getElementById("progress-overlay");
+            overlay.classList.toggle("hidden", !visible);
+            overlay.classList.toggle("flex", visible);
+        }
+
+        function startScrape(force = false) {
             const btn = document.getElementById("scrape-btn");
             btn.disabled = true;
             document.getElementById("scrape-icon").classList.add("animate-spin");
@@ -178,11 +184,10 @@
             document.getElementById("progress-stats").classList.add("hidden");
             document.getElementById("progress-footer").classList.add("hidden");
 
-            const overlay = document.getElementById("progress-overlay");
-            overlay.classList.remove("hidden");
-            overlay.classList.add("flex");
+            setOverlayVisible(true);
 
-            const source = new EventSource("/api/scrape/stream");
+            const streamUrl = force ? "/api/scrape/stream?force=1" : "/api/scrape/stream";
+            const source = new EventSource(streamUrl);
 
             source.addEventListener("feed", (event) => {
                 const data = JSON.parse(event.data);
@@ -224,6 +229,19 @@
                 const data = JSON.parse(event.data);
                 source.close();
                 showDone(data);
+            });
+
+            source.addEventListener("skipped", (event) => {
+                const data = JSON.parse(event.data);
+                source.close();
+
+                if (window.confirm(data.reason || "Already scraped today. Run again?")) {
+                    startScrape(true);
+                    return;
+                }
+
+                resetScrapeButton();
+                setOverlayVisible(false);
             });
 
             source.onerror = () => {
@@ -317,6 +335,10 @@
                     } else if (data.terminal_status === "error") {
                         document.getElementById("progress-subtitle").textContent = "Scrape failed. Please try again.";
                         document.getElementById("progress-bar").className = "h-full bg-red-500 rounded-full transition-all duration-300 ease-out";
+                        document.getElementById("progress-footer").classList.remove("hidden");
+                        resetScrapeButton();
+                    } else if (data.terminal_status === "skipped") {
+                        document.getElementById("progress-subtitle").textContent = "Scrape skipped because today's papers already exist.";
                         document.getElementById("progress-footer").classList.remove("hidden");
                         resetScrapeButton();
                     } else {

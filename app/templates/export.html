@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArXiv Export</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-stone-50 text-stone-900">
+    <main class="max-w-6xl mx-auto px-4 py-8">
+        <header class="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">ArXiv CV Scraper</p>
+                <h1 class="text-3xl font-bold tracking-tight">Paper Export</h1>
+                <p class="mt-1 text-sm text-stone-600">
+                    Timeframe: {{ timeframe|title }}. {{ total }} paper{{ 's' if total != 1 }} included.
+                </p>
+            </div>
+            <p class="text-sm text-stone-500">Generated {{ generated_at.strftime("%Y-%m-%d %H:%M UTC") }}</p>
+        </header>
+
+        {% if papers %}
+        <section class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {% for paper in papers %}
+            <article class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+                <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                    <span class="rounded-full bg-stone-100 px-2 py-1 font-semibold text-stone-700">{{ paper.match_type }}</span>
+                    <span class="rounded-full bg-sky-50 px-2 py-1 font-semibold text-sky-700">Score {{ "%.1f"|format(paper.rank_score) }}</span>
+                    {% if paper.llm_relevance_score is not none %}
+                    <span class="rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-700">AI {{ paper.llm_relevance_score|round|int }}/10</span>
+                    {% endif %}
+                    <span class="ml-auto text-stone-400">{{ paper.publication_dt or paper.scraped_date }}</span>
+                </div>
+
+                <h2 class="text-lg font-semibold leading-tight">
+                    <a href="{{ paper.link }}" class="hover:text-blue-700">{{ paper.title }}</a>
+                </h2>
+                <p class="mt-1 text-sm text-stone-500">{{ paper.authors }}</p>
+                <p class="mt-3 text-sm leading-6 text-stone-700">{{ paper.summary_text }}</p>
+
+                {% if paper.topic_tags_list %}
+                <div class="mt-3 flex flex-wrap gap-2">
+                    {% for tag in paper.topic_tags_list %}
+                    <span class="rounded-full bg-stone-100 px-2 py-1 text-xs text-stone-700">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if paper.matched_terms_list %}
+                <div class="mt-3 flex flex-wrap gap-2">
+                    {% for term in paper.matched_terms_list %}
+                    <span class="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">{{ term }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <div class="mt-4 flex items-center gap-3 text-sm">
+                    <a href="{{ paper.link }}" class="font-medium text-blue-700 hover:underline">arXiv</a>
+                    <a href="{{ paper.pdf_link }}" class="font-medium text-stone-700 hover:underline">PDF</a>
+                </div>
+            </article>
+            {% endfor %}
+        </section>
+        {% else %}
+        <div class="rounded-2xl border border-dashed border-stone-300 bg-white px-6 py-16 text-center">
+            <h2 class="text-lg font-semibold">No papers available for this timeframe</h2>
+            <p class="mt-2 text-sm text-stone-500">Run a scrape or widen the timeframe and export again.</p>
+        </div>
+        {% endif %}
+    </main>
+</body>
+</html>

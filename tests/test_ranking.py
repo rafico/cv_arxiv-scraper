@@ -34,6 +34,24 @@ class RankingTests(unittest.TestCase):
     def test_combined_rank_score(self):
         self.assertEqual(combined_rank_score(10.0, 4), 15.0)
 
+    def test_llm_relevance_bonus_increases_score(self):
+        today = date.today()
+        without_llm = compute_paper_score(
+            match_types=["Author"],
+            matched_terms_count=2,
+            publication_dt=today,
+            resource_count=1,
+            llm_relevance_score=None,
+        )
+        with_llm = compute_paper_score(
+            match_types=["Author"],
+            matched_terms_count=2,
+            publication_dt=today,
+            resource_count=1,
+            llm_relevance_score=8.0,
+        )
+        self.assertGreater(with_llm, without_llm)
+
 
 if __name__ == "__main__":
     unittest.main()

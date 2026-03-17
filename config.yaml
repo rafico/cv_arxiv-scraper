@@ -4,11 +4,18 @@ email:
 
 scraper:
   feed_url: "https://rss.arxiv.org/rss/cs.CV"
+  rolling_window_days: 2
   max_workers: 8
   pdf_attempts: 2
   pdf_lines_start: 2
   pdf_max_header_lines: 50
   pdf_smart_header: true
+
+llm:
+  enabled: false
+  model: "anthropic/claude-sonnet-4"
+  base_url: "https://openrouter.ai/api/v1"
+  max_concurrent: 4
 
 whitelists:
   titles:

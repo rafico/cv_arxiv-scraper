@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
+from pathlib import Path
 from typing import Callable
 
 import requests
+from sqlalchemy.exc import IntegrityError
 
 from app.services.enrichment import (
+    fetch_recent_papers,
     enrich_entries_with_api_metadata,
     extract_affiliation_text,
     now_utc,
     parse_feed_entries,
 )
 from app.services.http_client import create_session, request_with_backoff
+from app.services.llm_client import LLMClient, resolve_api_key
 from app.services.matching import (
     MATCH_PRIORITY,
     check_author_match,
@@ -25,7 +28,7 @@ from app.services.matching import (
 )
 from app.constants import DEFAULT_MAX_WORKERS
 from app.services.ranking import compute_paper_score
-from app.services.summary import extract_topic_tags, generate_summary
+from app.services.summary import extract_topic_tags, generate_llm_summary
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +44,8 @@ def _emit(callback: EventCallback, event: str, data: dict) -> None:
 def _build_result(
     entry_data: dict,
     category_matches: dict[str, list[str]],
+    llm_client: LLMClient | None = None,
+    interests_text: str = "",
 ) -> dict:
     """Assemble a result dict from an entry and its matches."""
     match_types = [name for name, terms in category_matches.items() if terms]
@@ -49,6 +54,16 @@ def _build_result(
     )
     title = entry_data["title"]
     abstract = entry_data.get("abstract", "")
+    summary_text = (
+        generate_llm_summary(llm_client, title, abstract)
+        if llm_client is not None
+        else generate_summary(title, abstract)
+    )
+    llm_relevance_score = (
+        llm_client.rate_relevance(title, abstract, interests_text)
+        if llm_client is not None
+        else None
+    )
 
     return {
         "arxiv_id": entry_data.get("arxiv_id"),
@@ -57,7 +72,7 @@ def _build_result(
         "link": entry_data["link"],
         "pdf_link": entry_data["link"].replace("/abs/", "/pdf/"),
         "abstract_text": abstract,
-        "summary_text": generate_summary(title, abstract),
+        "summary_text": summary_text,
         "topic_tags": extract_topic_tags(title, abstract),
         "categories": entry_data.get("categories", []),
         "resource_links": entry_data.get("resource_links", []),
@@ -70,7 +85,9 @@ def _build_result(
             matched_terms_count=len(matched_terms),
             publication_dt=entry_data.get("publication_dt"),
             resource_count=len(entry_data.get("resource_links", [])),
+            llm_relevance_score=llm_relevance_score,
         ),
+        "llm_relevance_score": llm_relevance_score,
         "publication_dt": entry_data.get("publication_dt"),
         "publication_date": entry_data.get("publication_date", "Date Unknown"),
     }
@@ -92,6 +109,8 @@ def _process_paper_entry(
     whitelists: dict,
     scraper_config: dict,
     session: requests.Session | None = None,
+    llm_client: LLMClient | None = None,
+    interests_text: str = "",
 ) -> dict | None:
     # Phase 1: fast check — title and author (no PDF download).
     fast_matches = _check_fast_matches(entry_data, whitelists)
@@ -128,10 +147,21 @@ def _process_paper_entry(
     if not any(category_matches.values()):
         return None
 
-    return _build_result(entry_data, category_matches)
+    return _build_result(
+        entry_data,
+        category_matches,
+        llm_client=llm_client,
+        interests_text=interests_text,
+    )
 
 
-def _process_entries_parallel(entries: list[dict], whitelists: dict, scraper_config: dict):
+def _process_entries_parallel(
+    entries: list[dict],
+    whitelists: dict,
+    scraper_config: dict,
+    llm_client: LLMClient | None = None,
+    interests_text: str = "",
+):
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     processed = 0
     matched = 0
@@ -139,7 +169,15 @@ def _process_entries_parallel(entries: list[dict], whitelists: dict, scraper_con
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_process_paper_entry, entry, whitelists, scraper_config, session): entry
+            executor.submit(
+                _process_paper_entry,
+                entry,
+                whitelists,
+                scraper_config,
+                session,
+                llm_client,
+                interests_text,
+            ): entry
             for entry in entries
         }
 
@@ -172,57 +210,68 @@ def _sort_results(results: list[dict]) -> None:
     )
 
 
+def _identity_keys(data: dict) -> set[str]:
+    keys = set()
+    link = data.get("link")
+    arxiv_id = data.get("arxiv_id")
+    if isinstance(link, str) and link:
+        keys.add(link)
+    if isinstance(arxiv_id, str) and arxiv_id:
+        keys.add(arxiv_id)
+    return keys
+
+
 def _save_results(app, results: list[dict]) -> tuple[int, int]:
     from app.models import Paper, db
 
     now = now_utc()
     today_str = now.date().isoformat()
     skipped = 0
-    new_papers = []
+    new_count = 0
 
     with app.app_context():
-        # Check DB for links that slipped through pre-filter (race / direct call).
-        links = [r["link"] for r in results]
-        existing_links: set[str] = set()
-        if links:
-            existing_rows = db.session.query(Paper.link).filter(Paper.link.in_(links)).all()
-            existing_links = {link for (link,) in existing_rows}
+        existing_keys = _get_existing_ids(app, results)
 
-        seen: set[str] = set()
+        seen_keys: set[str] = set()
         for result in results:
-            link = result["link"]
-            if link in existing_links or link in seen:
+            identity_keys = _identity_keys(result)
+            if any(key in existing_keys or key in seen_keys for key in identity_keys):
                 skipped += 1
                 continue
-            seen.add(link)
 
-            new_papers.append(
-                Paper(
-                    arxiv_id=result.get("arxiv_id"),
-                    title=result["title"],
-                    authors=result["authors"],
-                    link=result["link"],
-                    pdf_link=result["pdf_link"],
-                    abstract_text=result.get("abstract_text", ""),
-                    summary_text=result.get("summary_text", ""),
-                    topic_tags=result.get("topic_tags", []),
-                    categories=result.get("categories", []),
-                    resource_links=result.get("resource_links", []),
-                    match_type=result["match_type"],
-                    matched_terms=result["matches"],
-                    paper_score=float(result.get("paper_score", 0.0)),
-                    publication_date=result["publication_date"],
-                    publication_dt=result.get("publication_dt"),
-                    scraped_date=today_str,
-                    scraped_at=now,
-                )
+            seen_keys.update(identity_keys)
+            paper = Paper(
+                arxiv_id=result.get("arxiv_id"),
+                title=result["title"],
+                authors=result["authors"],
+                link=result["link"],
+                pdf_link=result["pdf_link"],
+                abstract_text=result.get("abstract_text", ""),
+                summary_text=result.get("summary_text", ""),
+                topic_tags=result.get("topic_tags", []),
+                categories=result.get("categories", []),
+                resource_links=result.get("resource_links", []),
+                match_type=result["match_type"],
+                matched_terms=result["matches"],
+                paper_score=float(result.get("paper_score", 0.0)),
+                llm_relevance_score=result.get("llm_relevance_score"),
+                publication_date=result["publication_date"],
+                publication_dt=result.get("publication_dt"),
+                scraped_date=today_str,
+                scraped_at=now,
             )
+            db.session.add(paper)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                skipped += 1
+                continue
 
-        if new_papers:
-            db.session.add_all(new_papers)
-            db.session.commit()
+            existing_keys.update(identity_keys)
+            new_count += 1
 
-    return len(new_papers), skipped
+    return new_count, skipped
 
 
 def _build_summary(new_count: int, skipped: int, total_matched: int, total_in_feed: int) -> dict:
@@ -234,35 +283,137 @@ def _build_summary(new_count: int, skipped: int, total_matched: int, total_in_fe
     }
 
 
-def _get_existing_links(app, entries: list[dict]) -> set[str]:
-    """Pre-check which links already exist in the DB to skip them early."""
+def _get_existing_ids(app, entries: list[dict]) -> set[str]:
+    """Pre-check which links or arXiv ids already exist to skip them early."""
     from app.models import Paper, db
 
-    links = [entry["link"] for entry in entries]
-    if not links:
+    links = [entry["link"] for entry in entries if entry.get("link")]
+    arxiv_ids = [entry["arxiv_id"] for entry in entries if entry.get("arxiv_id")]
+    if not links and not arxiv_ids:
         return set()
 
+    filters = []
+    if links:
+        filters.append(Paper.link.in_(links))
+    if arxiv_ids:
+        filters.append(Paper.arxiv_id.in_(arxiv_ids))
+
     with app.app_context():
-        rows = db.session.query(Paper.link).filter(Paper.link.in_(links)).all()
-        return {link for (link,) in rows}
+        rows = db.session.query(Paper.link, Paper.arxiv_id).filter(db.or_(*filters)).all()
+        existing: set[str] = set()
+        for link, arxiv_id in rows:
+            if link:
+                existing.add(link)
+            if arxiv_id:
+                existing.add(arxiv_id)
+        return existing
 
 
-def execute_scrape(app, event_callback: EventCallback = None) -> dict:
+def _build_llm_interests(whitelists: dict) -> str:
+    parts = []
+    if whitelists.get("titles"):
+        parts.append(f"Title keywords: {', '.join(whitelists['titles'])}")
+    if whitelists.get("authors"):
+        parts.append(f"Authors: {', '.join(whitelists['authors'])}")
+    if whitelists.get("affiliations"):
+        parts.append(f"Affiliations: {', '.join(whitelists['affiliations'])}")
+    return "; ".join(parts)
+
+
+def _create_llm_client(app) -> tuple[LLMClient | None, str]:
+    llm_config = app.config["SCRAPER_CONFIG"].get("llm", {})
+    if not llm_config.get("enabled"):
+        return None, ""
+
+    api_key = resolve_api_key(Path(app.config["LLM_KEY_PATH"]))
+    if not api_key:
+        LOGGER.warning("LLM is enabled but no API key is available")
+        return None, ""
+
+    try:
+        client = LLMClient(
+            api_key=api_key,
+            model=llm_config.get("model", "anthropic/claude-sonnet-4"),
+            base_url=llm_config.get("base_url", "https://openrouter.ai/api/v1"),
+            max_concurrent=int(llm_config.get("max_concurrent", 4)),
+        )
+    except Exception as exc:
+        LOGGER.warning("Unable to initialize LLM client: %s", exc)
+        return None, ""
+
+    interests_text = _build_llm_interests(app.config["SCRAPER_CONFIG"]["whitelists"])
+    return client, interests_text
+
+
+def execute_scrape(app, event_callback: EventCallback = None, force: bool = False) -> dict:
+    from app.models import Paper, db
+
     config = app.config["SCRAPER_CONFIG"]
     whitelists = config["whitelists"]
     scraper_config = config["scraper"]
+    now = now_utc()
+
+    if not force:
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start = today_start + timedelta(days=1)
+        with app.app_context():
+            already_scraped = (
+                db.session.query(Paper.id)
+                .filter(Paper.scraped_at >= today_start, Paper.scraped_at < tomorrow_start)
+                .first()
+                is not None
+            )
+        if already_scraped:
+            payload = {
+                **_build_summary(0, 0, 0, 0),
+                "skipped": True,
+                "reason": "Already scraped today",
+            }
+            _emit(event_callback, "skipped", payload)
+            return payload
 
     _emit(event_callback, "status", {"phase": "feed", "message": "Fetching RSS feed..."})
     entries = parse_feed_entries(scraper_config["feed_url"])
+    rolling_window_days = max(0, int(scraper_config.get("rolling_window_days", 0)))
+    if rolling_window_days > 0:
+        _emit(
+            event_callback,
+            "status",
+            {
+                "phase": "rolling_window",
+                "message": f"Loading papers from the past {rolling_window_days} days...",
+            },
+        )
+        try:
+            recent_entries = fetch_recent_papers(rolling_window_days, scraper_config["feed_url"])
+        except Exception as exc:
+            LOGGER.warning("Rolling-window fetch failed: %s", exc)
+            recent_entries = []
+
+        merged_entries: dict[str, dict] = {}
+        for entry in entries:
+            merged_entries[entry.get("arxiv_id") or entry["link"]] = entry
+        for entry in recent_entries:
+            merged_entries.setdefault(entry.get("arxiv_id") or entry["link"], entry)
+        entries = list(merged_entries.values())
+
     total_entries = len(entries)
     _emit(event_callback, "feed", {"total": total_entries})
 
     # Skip entries already in the database before doing any heavy work.
-    existing_links = _get_existing_links(app, entries)
-    pre_filtered = len(existing_links)
-    if existing_links:
-        entries = [e for e in entries if e["link"] not in existing_links]
+    existing_ids = _get_existing_ids(app, entries)
+    pre_filtered = 0
+    if existing_ids:
+        filtered_entries = [
+            entry
+            for entry in entries
+            if not _identity_keys(entry).intersection(existing_ids)
+        ]
+        pre_filtered = len(entries) - len(filtered_entries)
+        entries = filtered_entries
         LOGGER.info("Skipped %d already-stored papers, %d new to process", pre_filtered, len(entries))
+
+    llm_client, interests_text = _create_llm_client(app)
 
     _emit(
         event_callback,
@@ -278,7 +429,13 @@ def execute_scrape(app, event_callback: EventCallback = None) -> dict:
     )
 
     results: list[dict] = []
-    for processed, matched, result in _process_entries_parallel(entries, whitelists, scraper_config):
+    for processed, matched, result in _process_entries_parallel(
+        entries,
+        whitelists,
+        scraper_config,
+        llm_client,
+        interests_text,
+    ):
         payload = {"processed": processed, "total": total_entries, "matched": matched}
         if result:
             results.append(result)
@@ -307,7 +464,7 @@ def execute_scrape(app, event_callback: EventCallback = None) -> dict:
     LOGGER.info(
         "Scrape complete: %s new, %s duplicates, %s matched out of %s entries",
         new_count,
-        skipped,
+        skipped + pre_filtered,
         len(results),
         total_entries,
     )
@@ -318,8 +475,8 @@ def run_scrape(app) -> dict:
     return execute_scrape(app, event_callback=None)
 
 
-def stream_or_start_scrape(app):
+def stream_or_start_scrape(app, force: bool = False):
     """Compatibility wrapper implemented in job manager module."""
     from app.services.jobs import SCRAPE_JOB_MANAGER
 
-    return SCRAPE_JOB_MANAGER.stream_for_request(app)
+    return SCRAPE_JOB_MANAGER.stream_for_request(app, force=force)

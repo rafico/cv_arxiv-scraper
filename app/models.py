@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text as sql_text
 from sqlalchemy.types import TypeDecorator, TEXT
 
 db = SQLAlchemy()
@@ -39,6 +40,12 @@ class JSONList(TypeDecorator):
 class Paper(db.Model):
     __tablename__ = "papers"
     __table_args__ = (
+        db.Index(
+            "uq_papers_arxiv_id",
+            "arxiv_id",
+            unique=True,
+            sqlite_where=sql_text("arxiv_id IS NOT NULL"),
+        ),
         db.Index("idx_papers_scraped_at", "scraped_at"),
         db.Index("idx_papers_publication_dt", "publication_dt"),
         db.Index("idx_papers_rank", "paper_score", "feedback_score"),
@@ -46,7 +53,7 @@ class Paper(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    arxiv_id = db.Column(db.String(40), index=True)
+    arxiv_id = db.Column(db.String(40))
     title = db.Column(db.Text, nullable=False)
     authors = db.Column(db.Text, nullable=False)
     link = db.Column(db.Text, nullable=False, unique=True)
@@ -61,6 +68,7 @@ class Paper(db.Model):
     match_type = db.Column(db.Text, nullable=False)
     matched_terms = db.Column(JSONList, nullable=False, default=list)
     paper_score = db.Column(db.Float, nullable=False, default=0.0)
+    llm_relevance_score = db.Column(db.Float, nullable=True)
     feedback_score = db.Column(db.Integer, nullable=False, default=0)
     is_hidden = db.Column(db.Boolean, nullable=False, default=False)
 

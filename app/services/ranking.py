@@ -13,6 +13,7 @@ MATCH_TYPE_WEIGHTS = {
 
 TERM_MATCH_WEIGHT = 3.0
 RESOURCE_SIGNAL_WEIGHT = 1.5
+LLM_RELEVANCE_WEIGHT = 5.0
 HALF_LIFE_DAYS = 14.0
 
 FEEDBACK_BOOST = 1.25
@@ -40,13 +41,19 @@ def compute_paper_score(
     matched_terms_count: int,
     publication_dt: date | None,
     resource_count: int,
+    llm_relevance_score: float | None = None,
 ) -> float:
     match_score = sum(MATCH_TYPE_WEIGHTS.get(match_type, 0.0) for match_type in match_types)
     term_score = matched_terms_count * TERM_MATCH_WEIGHT
     resource_score = min(resource_count, 4) * RESOURCE_SIGNAL_WEIGHT
+    llm_bonus = (
+        (llm_relevance_score / 10.0) * LLM_RELEVANCE_WEIGHT
+        if llm_relevance_score is not None
+        else 0.0
+    )
     recency = recency_multiplier(publication_dt)
 
-    return round((match_score + term_score + resource_score) * recency, 3)
+    return round((match_score + term_score + resource_score + llm_bonus) * recency, 3)
 
 
 def compute_feedback_delta(action: str) -> int:

@@ -48,6 +48,14 @@ def generate_summary(title: str, abstract: str, max_chars: int = 260) -> str:
     return candidate
 
 
+def generate_llm_summary(llm_client, title: str, abstract: str, max_chars: int = 280) -> str:
+    result = llm_client.generate_tldr(title, abstract)
+    if result:
+        trimmed = clean_whitespace(result)
+        return trimmed[:max_chars].rstrip()
+    return generate_summary(title, abstract)
+
+
 def extract_topic_tags(title: str, abstract: str, limit: int = 5) -> list[str]:
     full_text = f"{title} {abstract}".lower()
     tags: list[str] = []

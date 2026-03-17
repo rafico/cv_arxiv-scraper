@@ -46,9 +46,13 @@ class ScrapeJobManager:
             self._jobs.pop(job.id, None)
 
     def _publish(self, job_id: str, event: str, data: dict) -> None:
-        job = self._jobs.get(job_id)
-        if not job:
-            return
+        terminal_events = {"done", "scrape_error", "skipped"}
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return
+            if event in terminal_events and self._active_job_id == job_id:
+                self._active_job_id = None
 
         with job.condition:
             job.events.append((event, data))
@@ -58,11 +62,18 @@ class ScrapeJobManager:
             elif event == "scrape_error":
                 job.status = "error"
                 job.finished_at = now_utc()
+            elif event == "skipped":
+                job.status = "skipped"
+                job.finished_at = now_utc()
             job.condition.notify_all()
 
-    def _run_job(self, app, job_id: str) -> None:
+    def _run_job(self, app, job_id: str, force: bool = False) -> None:
         try:
-            execute_scrape(app, event_callback=lambda event, data: self._publish(job_id, event, data))
+            execute_scrape(
+                app,
+                event_callback=lambda event, data: self._publish(job_id, event, data),
+                force=force,
+            )
         except Exception as exc:
             LOGGER.exception("Background scrape job failed")
             self._publish(job_id, "scrape_error", {"message": str(exc)})
@@ -72,16 +83,19 @@ class ScrapeJobManager:
                     self._active_job_id = None
                 self._trim_history()
 
-    def start_or_get_active(self, app) -> ScrapeJob:
+    def start_or_get_active(self, app, force: bool = False) -> ScrapeJob:
         with self._lock:
             if self._active_job_id and self._active_job_id in self._jobs:
-                return self._jobs[self._active_job_id]
+                active_job = self._jobs[self._active_job_id]
+                if active_job.finished_at is None and active_job.status == "running":
+                    return active_job
+                self._active_job_id = None
 
             job_id = uuid.uuid4().hex
             job = ScrapeJob(id=job_id, started_at=now_utc())
             self._jobs[job_id] = job
             self._active_job_id = job_id
-            self._executor.submit(self._run_job, app, job_id)
+            self._executor.submit(self._run_job, app, job_id, force)
             return job
 
     def get_status_snapshot(self) -> dict:
@@ -148,11 +162,11 @@ class ScrapeJobManager:
                 raise RuntimeError("Expected event but got None")
             event, data = next_event
             yield next_event
-            if event in {"done", "scrape_error"} and cursor >= len(job.events):
+            if event in {"done", "scrape_error", "skipped"} and cursor >= len(job.events):
                 break
 
-    def stream_for_request(self, app):
-        job = self.start_or_get_active(app)
+    def stream_for_request(self, app, force: bool = False):
+        job = self.start_or_get_active(app, force=force)
         for event, data in self.stream_events(job.id):
             yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
 

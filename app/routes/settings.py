@@ -18,10 +18,14 @@ from flask import (
     url_for,
 )
 
+from app import _validate_config
+from app.services.llm_client import has_api_key, write_api_key
+
 log = logging.getLogger(__name__)
 
 settings_bp = Blueprint("settings", __name__)
 _CSRF_SESSION_KEY = "settings_csrf_token"
+_LLM_MASK_VALUE = "********"
 
 
 def _normalize_multiline(value: str) -> list[str]:
@@ -61,6 +65,16 @@ def _save_config_key(key: str, value) -> None:
     current_app.config["SCRAPER_CONFIG"] = full_config
 
 
+def _build_llm_view_model(config: dict) -> dict:
+    llm_cfg = config.get("llm", {})
+    return {
+        "enabled": bool(llm_cfg.get("enabled", False)),
+        "model": llm_cfg.get("model", "anthropic/claude-sonnet-4"),
+        "base_url": llm_cfg.get("base_url", "https://openrouter.ai/api/v1"),
+        "max_concurrent": int(llm_cfg.get("max_concurrent", 4) or 4),
+    }
+
+
 @settings_bp.route("/settings", methods=["GET"])
 def view_settings():
     from app.services.email_digest import check_gmail_auth_status
@@ -68,6 +82,7 @@ def view_settings():
     config = current_app.config["SCRAPER_CONFIG"]
     email_cfg = config.get("email", {})
     gmail_status = check_gmail_auth_status()
+    llm_key_path = Path(current_app.config["LLM_KEY_PATH"])
 
     return render_template(
         "settings.html",
@@ -77,6 +92,9 @@ def view_settings():
             "subject_prefix": email_cfg.get("subject_prefix", "ArXiv Digest"),
         },
         gmail_status=gmail_status,
+        llm_config=_build_llm_view_model(config),
+        llm_key_configured=has_api_key(llm_key_path),
+        llm_key_mask=_LLM_MASK_VALUE,
         csrf_token=_get_or_create_csrf_token(),
         callback_uri=url_for("settings.gmail_callback", _external=True),
     )
@@ -129,6 +147,52 @@ def save_email_settings():
 
     session[_CSRF_SESSION_KEY] = token_urlsafe(32)
     flash("Email settings saved.", "success")
+    return redirect(url_for("settings.view_settings"))
+
+
+@settings_bp.route("/settings/llm", methods=["POST"])
+def save_llm_settings():
+    _validate_csrf_token()
+
+    config_path = Path(current_app.config["CONFIG_PATH"])
+    key_path = Path(current_app.config["LLM_KEY_PATH"])
+    enabled = request.form.get("llm_enabled") == "on"
+    model = request.form.get("llm_model", "anthropic/claude-sonnet-4").strip()
+    base_url = request.form.get("llm_base_url", "https://openrouter.ai/api/v1").strip()
+    max_concurrent_raw = request.form.get("llm_max_concurrent", "4").strip()
+    api_key = request.form.get("llm_api_key", "").strip()
+
+    try:
+        max_concurrent = max(1, int(max_concurrent_raw or "4"))
+    except ValueError:
+        flash("LLM max concurrent requests must be a positive integer.", "error")
+        return redirect(url_for("settings.view_settings"))
+
+    with config_path.open("r", encoding="utf-8") as handle:
+        full_config = yaml.safe_load(handle)
+
+    full_config["llm"] = {
+        "enabled": enabled,
+        "model": model or "anthropic/claude-sonnet-4",
+        "base_url": base_url or "https://openrouter.ai/api/v1",
+        "max_concurrent": max_concurrent,
+    }
+
+    if api_key and api_key != _LLM_MASK_VALUE:
+        write_api_key(api_key, key_path)
+
+    try:
+        _validate_config(full_config, config_path=config_path)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("settings.view_settings"))
+
+    with config_path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
+
+    current_app.config["SCRAPER_CONFIG"] = full_config
+    session[_CSRF_SESSION_KEY] = token_urlsafe(32)
+    flash("LLM settings saved.", "success")
     return redirect(url_for("settings.view_settings"))
 
 
@@ -196,4 +260,3 @@ def send_test_digest():
         log.exception("Test digest failed")
 
     return redirect(url_for("settings.view_settings"))
-

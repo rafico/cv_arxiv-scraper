@@ -82,6 +82,10 @@
                 <option value="trending" {{ 'selected' if current_filters.sort == 'trending' }}>Trending</option>
                 <option value="newest" {{ 'selected' if current_filters.sort == 'newest' }}>Newest</option>
             </select>
+            <a href="/api/export?timeframe={{ current_filters.timeframe }}&download=1"
+               class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                Export
+            </a>
         </div>
     </div>
 
@@ -120,6 +124,11 @@
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold {{ BADGE[mtype].bg }} {{ BADGE[mtype].text }}">{{ mtype }}</span>
                 {% endif %}
                 {% endfor %}
+                {% if paper.llm_relevance_score is not none %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700">
+                    AI: {{ paper.llm_relevance_score|round|int }}/10
+                </span>
+                {% endif %}
                 <span class="text-[11px] text-gray-400 ml-auto tabular-nums">
                     {{ paper.publication_dt or paper.scraped_date }}
                 </span>

@@ -8,7 +8,8 @@ import logging
 import re
 import time
 import defusedxml.ElementTree as ET
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 import feedparser
 import pdfplumber
@@ -93,6 +94,102 @@ def parse_feed_entries(feed_url: str) -> list[dict]:
         )
 
     LOGGER.info("Total entries in RSS feed: %s", len(entries))
+    return entries
+
+
+def _extract_category_from_feed_url(feed_url: str) -> str | None:
+    path = urlparse(feed_url).path.rstrip("/")
+    if not path:
+        return None
+    category = path.split("/")[-1].strip()
+    return category or None
+
+
+def _parse_atom_entry(entry) -> dict:
+    id_el = entry.find("atom:id", _ATOM_NS)
+    title_el = entry.find("atom:title", _ATOM_NS)
+    summary_el = entry.find("atom:summary", _ATOM_NS)
+    published_el = entry.find("atom:published", _ATOM_NS)
+
+    link = ""
+    if id_el is not None and id_el.text:
+        link = id_el.text.strip()
+
+    authors_list = [
+        clean_whitespace(name_el.text)
+        for author_el in entry.findall("atom:author", _ATOM_NS)
+        for name_el in [author_el.find("atom:name", _ATOM_NS)]
+        if name_el is not None and name_el.text
+    ]
+    categories = [
+        term
+        for term in (
+            category_el.get("term", "").strip()
+            for category_el in entry.findall("atom:category", _ATOM_NS)
+        )
+        if term
+    ]
+    publication_dt, publication_date = parse_publication_dt(
+        published_el.text if published_el is not None else None
+    )
+
+    return {
+        "arxiv_id": extract_arxiv_id(link),
+        "link": link,
+        "title": clean_whitespace(title_el.text if title_el is not None else ""),
+        "author": ", ".join(authors_list),
+        "authors_list": authors_list,
+        "abstract": clean_abstract(summary_el.text if summary_el is not None else ""),
+        "published": published_el.text if published_el is not None else None,
+        "publication_dt": publication_dt,
+        "publication_date": publication_date,
+        "categories": categories,
+    }
+
+
+def fetch_recent_papers(days: int, feed_url: str) -> list[dict]:
+    category = _extract_category_from_feed_url(feed_url)
+    if not category or days <= 0:
+        return []
+
+    start_date = date.today() - timedelta(days=days + 1)
+    end_date = date.today()
+    from_ts = start_date.strftime("%Y%m%d0000")
+    to_ts = end_date.strftime("%Y%m%d2359")
+    batch_size = _ARXIV_API_BATCH_SIZE
+    entries: list[dict] = []
+    start = 0
+
+    while True:
+        if start > 0:
+            time.sleep(_ARXIV_API_DELAY)
+
+        params = {
+            "search_query": f"cat:{category} AND submittedDate:[{from_ts} TO {to_ts}]",
+            "sortBy": "submittedDate",
+            "sortOrder": "descending",
+            "start": start,
+            "max_results": batch_size,
+        }
+        response = request_with_backoff(
+            "GET",
+            _ARXIV_API_URL,
+            params=params,
+            timeout=30,
+            attempts=3,
+            base_delay=1.5,
+        )
+        root = ET.fromstring(response.text)
+        batch_entries = [_parse_atom_entry(entry) for entry in root.findall("atom:entry", _ATOM_NS)]
+        if not batch_entries:
+            break
+
+        entries.extend(batch_entries)
+        if len(batch_entries) < batch_size:
+            break
+        start += batch_size
+
+    LOGGER.info("Fetched %d rolling-window entries for %s", len(entries), category)
     return entries
 
 

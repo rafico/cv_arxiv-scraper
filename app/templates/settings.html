@@ -5,7 +5,7 @@
 {% block content %}
 <div class="max-w-2xl">
     <h1 class="text-xl font-bold text-gray-900 mb-1">Settings</h1>
-    <p class="text-sm text-gray-500 mb-6">Manage your email digest and whitelists.</p>
+    <p class="text-sm text-gray-500 mb-6">Manage your email digest, LLM settings, and whitelists.</p>
 
     {# ══════════ Email & Gmail Section ══════════ #}
     <div class="mb-8">
@@ -134,6 +134,76 @@
         </form>
     </div>
 
+    {# ══════════ LLM Section ══════════ #}
+    <div class="mb-8">
+        <h2 class="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M9.75 3v2.25M14.25 3v2.25M9.75 18.75V21M14.25 18.75V21M3 9.75h2.25M3 14.25h2.25M18.75 9.75H21M18.75 14.25H21M7.5 6.75h9a.75.75 0 01.75.75v9a.75.75 0 01-.75.75h-9a.75.75 0 01-.75-.75v-9a.75.75 0 01.75-.75z"/>
+            </svg>
+            LLM / AI
+        </h2>
+
+        <form method="POST" action="/settings/llm" id="llm-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="bg-white rounded-lg border border-gray-200 p-5">
+                <div class="space-y-4">
+                    <label class="inline-flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" name="llm_enabled" {% if llm_config.enabled %}checked{% endif %}
+                               class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                        <span>
+                            <span class="block text-sm font-semibold text-gray-900">Enable LLM summaries and relevance scoring</span>
+                            <span class="block text-xs text-gray-500 mt-0.5">Uses `OPENROUTER_API_KEY` or a local `.llm_api_key` file.</span>
+                        </span>
+                    </label>
+
+                    <div>
+                        <label for="llm_api_key" class="block text-sm font-semibold text-gray-900 mb-1">API Key</label>
+                        <p class="text-xs text-gray-500 mb-2">Leave blank to keep the existing key. It is stored in `.llm_api_key`, not in `config.yaml`.</p>
+                        <input type="password" name="llm_api_key" id="llm_api_key"
+                               value="{{ llm_key_mask if llm_key_configured else '' }}"
+                               placeholder="OpenRouter API key"
+                               class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm bg-gray-50
+                                      focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
+                    </div>
+
+                    <div>
+                        <label for="llm_model" class="block text-sm font-semibold text-gray-900 mb-1">Model</label>
+                        <input type="text" name="llm_model" id="llm_model"
+                               value="{{ llm_config.model }}"
+                               class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm bg-gray-50
+                                      focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
+                    </div>
+
+                    <div>
+                        <label for="llm_base_url" class="block text-sm font-semibold text-gray-900 mb-1">Base URL</label>
+                        <input type="text" name="llm_base_url" id="llm_base_url"
+                               value="{{ llm_config.base_url }}"
+                               class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm bg-gray-50
+                                      focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
+                    </div>
+
+                    <div>
+                        <label for="llm_max_concurrent" class="block text-sm font-semibold text-gray-900 mb-1">Max Concurrent Requests</label>
+                        <input type="number" min="1" name="llm_max_concurrent" id="llm_max_concurrent"
+                               value="{{ llm_config.max_concurrent }}"
+                               class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm bg-gray-50
+                                      focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
+                    </div>
+                </div>
+
+                <div class="mt-4 flex justify-end">
+                    <button type="submit" id="llm-save-btn"
+                            class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg
+                                   hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900
+                                   transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        Save LLM Settings
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
     {# ══════════ Whitelists Section ══════════ #}
     <h2 class="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
         <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -188,6 +258,12 @@
 
     document.getElementById("email-form").addEventListener("submit", function () {
         var btn = document.getElementById("email-save-btn");
+        btn.disabled = true;
+        btn.textContent = "Saving...";
+    });
+
+    document.getElementById("llm-form").addEventListener("submit", function () {
+        var btn = document.getElementById("llm-save-btn");
         btn.disabled = true;
         btn.textContent = "Saving...";
     });

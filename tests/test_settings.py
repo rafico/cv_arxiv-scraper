@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -208,3 +209,45 @@ class EmailSettingsTests(FlaskDBTestCase):
         self.assertIn("Test Prefix", html)
         self.assertIn("Email & Gmail", html)
 
+
+class LLMSettingsTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.app.test_client()
+
+    def _csrf_token(self) -> str:
+        self.client.get("/settings")
+        with self.client.session_transaction() as session:
+            return session["settings_csrf_token"]
+
+    def test_settings_page_shows_llm_section(self):
+        response = self.client.get("/settings")
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("LLM / AI", html)
+
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}, clear=False)
+    def test_llm_settings_save_writes_key_file_not_config(self):
+        token = self._csrf_token()
+        response = self.client.post(
+            "/settings/llm",
+            data={
+                "csrf_token": token,
+                "llm_enabled": "on",
+                "llm_api_key": "super-secret-key",
+                "llm_model": "test/model",
+                "llm_base_url": "https://openrouter.ai/api/v1",
+                "llm_max_concurrent": "3",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        config_path = Path(self.app.config["CONFIG_PATH"])
+        saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["llm"]["model"], "test/model")
+        self.assertNotIn("api_key", saved["llm"])
+
+        key_path = Path(self.app.config["LLM_KEY_PATH"])
+        self.assertTrue(key_path.exists())
+        self.assertEqual(key_path.read_text(encoding="utf-8"), "super-secret-key")
