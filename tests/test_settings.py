@@ -85,6 +85,75 @@ class GmailStatusTests(FlaskDBTestCase):
         self.assertEqual(data["status"], "no_credentials")
 
 
+class UploadCredentialsTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.app.test_client()
+
+    def _csrf_token(self) -> str:
+        self.client.get("/settings")
+        with self.client.session_transaction() as session:
+            return session["settings_csrf_token"]
+
+    def test_upload_requires_csrf(self):
+        response = self.client.post("/settings/upload-credentials")
+        self.assertEqual(response.status_code, 400)
+
+    @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
+    def test_upload_saves_valid_json(self, mock_creds_path):
+        import io
+        token = self._csrf_token()
+        valid_json = b'{"web":{"client_id":"123","client_secret":"456"}}'
+        
+        response = self.client.post(
+            "/settings/upload-credentials",
+            data={
+                "csrf_token": token,
+                "credentials_file": (io.BytesIO(valid_json), "credentials.json"),
+            },
+            content_type="multipart/form-data"
+        )
+        
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/settings", response.headers["Location"])
+        mock_creds_path.write_bytes.assert_called_once_with(valid_json)
+
+    @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
+    def test_upload_rejects_invalid_json(self, mock_creds_path):
+        import io
+        token = self._csrf_token()
+        invalid_json = b'Not a JSON'
+        
+        response = self.client.post(
+            "/settings/upload-credentials",
+            data={
+                "csrf_token": token,
+                "credentials_file": (io.BytesIO(invalid_json), "credentials.json"),
+            },
+            content_type="multipart/form-data"
+        )
+        
+        self.assertEqual(response.status_code, 302)
+        mock_creds_path.write_bytes.assert_not_called()
+
+    @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
+    def test_upload_rejects_missing_oauth_fields(self, mock_creds_path):
+        import io
+        token = self._csrf_token()
+        wrong_json = b'{"installed":{"client_id":"123"}}'
+        
+        response = self.client.post(
+            "/settings/upload-credentials",
+            data={
+                "csrf_token": token,
+                "credentials_file": (io.BytesIO(wrong_json), "credentials.json"),
+            },
+            content_type="multipart/form-data"
+        )
+        
+        self.assertEqual(response.status_code, 302)
+        mock_creds_path.write_bytes.assert_not_called()
+
 
 class GmailOAuthFlowTests(FlaskDBTestCase):
     """Tests for the Gmail OAuth redirect flow."""
@@ -207,7 +276,7 @@ class EmailSettingsTests(FlaskDBTestCase):
         html = response.data.decode()
         self.assertIn("me@test.com", html)
         self.assertIn("Test Prefix", html)
-        self.assertIn("Email & Gmail", html)
+        self.assertIn("Email &amp; Gmail", html)
 
 
 class LLMSettingsTests(FlaskDBTestCase):

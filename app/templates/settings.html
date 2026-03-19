@@ -14,71 +14,225 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                       d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
             </svg>
-            Email & Gmail
+            Email &amp; Gmail
         </h2>
 
-        {# ── Gmail Auth Status Card ── #}
+        {# ── Gmail Connection Status ── #}
         <div class="bg-white rounded-lg border border-gray-200 p-5 mb-4">
-            <div class="flex items-start justify-between">
-                <div class="flex items-start gap-3">
+            {# Status badge row #}
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
                     {% if gmail_status.status == 'connected' %}
-                    <div class="mt-0.5 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+                    <div class="flex-shrink-0 w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+                    <span class="text-sm font-medium text-gray-900">Gmail Connected</span>
                     {% elif gmail_status.status == 'expired' %}
-                    <div class="mt-0.5 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-amber-400"></div>
+                    <div class="flex-shrink-0 w-2.5 h-2.5 rounded-full bg-amber-400"></div>
+                    <span class="text-sm font-medium text-gray-900">Token Expired</span>
+                    {% elif gmail_status.status == 'no_token' %}
+                    <div class="flex-shrink-0 w-2.5 h-2.5 rounded-full bg-amber-400"></div>
+                    <span class="text-sm font-medium text-gray-900">Gmail Not Authorized</span>
+                    {% elif gmail_status.status == 'no_credentials' %}
+                    <div class="flex-shrink-0 w-2.5 h-2.5 rounded-full bg-gray-300"></div>
+                    <span class="text-sm font-medium text-gray-900">Setup Required</span>
                     {% else %}
-                    <div class="mt-0.5 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-red-400"></div>
+                    <div class="flex-shrink-0 w-2.5 h-2.5 rounded-full bg-red-400"></div>
+                    <span class="text-sm font-medium text-gray-900">Invalid Token</span>
                     {% endif %}
-                    <div>
-                        <p class="text-sm font-medium text-gray-900">
-                            {% if gmail_status.status == 'connected' %}
-                                Gmail Connected
-                            {% elif gmail_status.status == 'expired' %}
-                                Token Expired
-                            {% elif gmail_status.status == 'no_credentials' %}
-                                Missing credentials.json
-                            {% elif gmail_status.status == 'no_token' %}
-                                Gmail Not Authorized
-                            {% else %}
-                                Invalid Token
-                            {% endif %}
-                        </p>
-                        <p class="text-xs text-gray-500 mt-0.5">{{ gmail_status.message }}</p>
-                    </div>
                 </div>
 
-                {% if gmail_status.status != 'no_credentials' %}
-                <form method="POST" action="/settings/gmail-auth" class="ml-4 flex-shrink-0">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit"
-                            class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
-                                   {% if gmail_status.status == 'connected' %}
-                                       bg-gray-100 text-gray-600 hover:bg-gray-200
-                                   {% else %}
-                                       bg-gray-900 text-white hover:bg-gray-800
-                                   {% endif %}">
-                        <svg class="w-3.5 h-3.5 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
-                        </svg>
-                        {% if gmail_status.status == 'connected' %}Re-authorize{% else %}Authorize Gmail{% endif %}
-                    </button>
-                </form>
-                {% endif %}
-            </div>
+                <div class="flex items-center gap-2">
+                    {# Show Authorize / Re-authorize when credentials exist #}
+                    {% if gmail_status.status != 'no_credentials' %}
+                    <form method="POST" action="/settings/gmail-auth" class="flex-shrink-0">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit"
+                                class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+                                       {% if gmail_status.status == 'connected' %}
+                                           bg-gray-100 text-gray-600 hover:bg-gray-200
+                                       {% else %}
+                                           bg-gray-900 text-white hover:bg-gray-800
+                                       {% endif %}">
+                            <svg class="w-3.5 h-3.5 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                            </svg>
+                            {% if gmail_status.status == 'connected' %}Re-authorize{% else %}Authorize Gmail{% endif %}
+                        </button>
+                    </form>
+                    {% endif %}
 
-            {% if gmail_status.status == 'no_credentials' %}
-            <div class="mt-4 bg-gray-50 rounded-lg p-4">
-                <p class="text-xs font-medium text-gray-700 mb-2">Setup steps:</p>
-                <ol class="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
-                    <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-blue-600 hover:underline">Google Cloud Console &rarr; Credentials</a></li>
-                    <li>Enable the <strong>Gmail API</strong> for your project</li>
-                    <li>Create an <strong>OAuth 2.0 Client ID</strong> (Web application type)</li>
-                    <li>Under <strong>Authorized redirect URIs</strong>, add:<br>
-                        <code class="bg-gray-200 px-1 py-0.5 rounded text-[11px] select-all">{{ callback_uri }}</code>
-                    </li>
-                    <li>Download the JSON file and save it as <code class="bg-gray-200 px-1 py-0.5 rounded text-[11px]">credentials.json</code> in the project root</li>
-                    <li>Come back here and click <strong>Authorize Gmail</strong></li>
-                </ol>
+                    {# Toggle setup details #}
+                    {% if gmail_status.status != 'connected' %}
+                    <button type="button" onclick="toggleSetupSteps()"
+                            class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg
+                                   bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+                        <svg id="setup-toggle-icon" class="w-3.5 h-3.5 mr-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                        Setup Guide
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-1.5">{{ gmail_status.message }}</p>
+
+            {# ── Setup Stepper (collapsible) ── #}
+            {% if gmail_status.status != 'connected' %}
+            <div id="setup-steps" class="{% if gmail_status.status == 'no_credentials' %}mt-5{% else %}mt-5 hidden{% endif %}">
+                <div class="space-y-0">
+
+                    {# — Step 1: Google Cloud Console — #}
+                    {% set step1_done = gmail_status.status != 'no_credentials' %}
+                    <div class="flex gap-3">
+                        <div class="flex flex-col items-center">
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
+                                        {% if step1_done %}bg-emerald-100 text-emerald-600{% else %}bg-gray-900 text-white{% endif %}">
+                                {% if step1_done %}
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                {% else %}1{% endif %}
+                            </div>
+                            <div class="w-px h-full bg-gray-200 my-1"></div>
+                        </div>
+                        <div class="pb-5 flex-1">
+                            <p class="text-sm font-medium text-gray-900">Create a Google Cloud project</p>
+                            <p class="text-xs text-gray-500 mt-0.5">Open the
+                                <a href="https://console.cloud.google.com/projectcreate" target="_blank"
+                                   class="text-blue-600 hover:underline">Google Cloud Console</a>
+                                and create a new project (or use an existing one).
+                            </p>
+                        </div>
+                    </div>
+
+                    {# — Step 2: Enable Gmail API — #}
+                    <div class="flex gap-3">
+                        <div class="flex flex-col items-center">
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
+                                        {% if step1_done %}bg-emerald-100 text-emerald-600{% else %}bg-gray-200 text-gray-500{% endif %}">
+                                {% if step1_done %}
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                {% else %}2{% endif %}
+                            </div>
+                            <div class="w-px h-full bg-gray-200 my-1"></div>
+                        </div>
+                        <div class="pb-5 flex-1">
+                            <p class="text-sm font-medium text-gray-900">Enable the Gmail API</p>
+                            <p class="text-xs text-gray-500 mt-0.5">Go to
+                                <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank"
+                                   class="text-blue-600 hover:underline">Gmail API</a>
+                                and click <strong>Enable</strong>.
+                            </p>
+                        </div>
+                    </div>
+
+                    {# — Step 3: Create OAuth Client ID — #}
+                    <div class="flex gap-3">
+                        <div class="flex flex-col items-center">
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
+                                        {% if step1_done %}bg-emerald-100 text-emerald-600{% else %}bg-gray-200 text-gray-500{% endif %}">
+                                {% if step1_done %}
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                {% else %}3{% endif %}
+                            </div>
+                            <div class="w-px h-full bg-gray-200 my-1"></div>
+                        </div>
+                        <div class="pb-5 flex-1">
+                            <p class="text-sm font-medium text-gray-900">Create OAuth 2.0 Client ID</p>
+                            <p class="text-xs text-gray-500 mt-0.5">Go to
+                                <a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank"
+                                   class="text-blue-600 hover:underline">Credentials → Create OAuth Client ID</a>.
+                                Choose <strong>Web application</strong> type.
+                            </p>
+                        </div>
+                    </div>
+
+                    {# — Step 4: Add Redirect URI — #}
+                    <div class="flex gap-3">
+                        <div class="flex flex-col items-center">
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
+                                        {% if step1_done %}bg-emerald-100 text-emerald-600{% else %}bg-gray-200 text-gray-500{% endif %}">
+                                {% if step1_done %}
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                {% else %}4{% endif %}
+                            </div>
+                            <div class="w-px h-full bg-gray-200 my-1"></div>
+                        </div>
+                        <div class="pb-5 flex-1">
+                            <p class="text-sm font-medium text-gray-900">Add this redirect URI</p>
+                            <p class="text-xs text-gray-500 mt-0.5 mb-2">Under <strong>Authorized redirect URIs</strong>, add the URL below:</p>
+                            <div class="flex items-center gap-2">
+                                <code id="callback-uri" class="flex-1 bg-gray-100 border border-gray-200 px-3 py-1.5 rounded-lg text-xs font-mono text-gray-700 select-all truncate">{{ callback_uri }}</code>
+                                <button type="button" onclick="copyCallbackUri()"
+                                        id="copy-uri-btn"
+                                        class="flex-shrink-0 inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-lg
+                                               bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200 transition-all">
+                                    <svg id="copy-icon" class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                                    </svg>
+                                    <svg id="check-icon" class="w-3.5 h-3.5 mr-1 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                    <span id="copy-text">Copy</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {# — Step 5: Upload credentials.json — #}
+                    {% set step5_done = gmail_status.status != 'no_credentials' %}
+                    <div class="flex gap-3">
+                        <div class="flex flex-col items-center">
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
+                                        {% if step5_done %}bg-emerald-100 text-emerald-600{% else %}bg-gray-200 text-gray-500{% endif %}">
+                                {% if step5_done %}
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                {% else %}5{% endif %}
+                            </div>
+                            <div class="w-px h-full bg-gray-200 my-1"></div>
+                        </div>
+                        <div class="pb-5 flex-1">
+                            <p class="text-sm font-medium text-gray-900">Upload credentials.json</p>
+                            <p class="text-xs text-gray-500 mt-0.5 mb-2">Download the JSON from Google Cloud and upload it here.</p>
+                            {% if not step5_done %}
+                            <form method="POST" action="/settings/upload-credentials" enctype="multipart/form-data" id="upload-creds-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <label for="credentials_file"
+                                       id="drop-zone"
+                                       class="flex flex-col items-center justify-center w-full py-4 px-4 rounded-lg border-2 border-dashed
+                                              border-gray-300 bg-gray-50 hover:bg-gray-100 hover:border-gray-400
+                                              cursor-pointer transition-colors">
+                                    <svg class="w-6 h-6 text-gray-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                    </svg>
+                                    <span class="text-xs text-gray-500" id="upload-label">Drop credentials.json here or <span class="text-blue-600 font-medium">browse</span></span>
+                                    <input type="file" name="credentials_file" id="credentials_file" accept=".json" class="hidden">
+                                </label>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {# — Step 6: Authorize — #}
+                    {% set step6_done = gmail_status.status == 'connected' %}
+                    <div class="flex gap-3">
+                        <div class="flex flex-col items-center">
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
+                                        {% if step6_done %}bg-emerald-100 text-emerald-600
+                                        {% elif step5_done %}bg-gray-900 text-white
+                                        {% else %}bg-gray-200 text-gray-500{% endif %}">
+                                {% if step6_done %}
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                {% else %}6{% endif %}
+                            </div>
+                        </div>
+                        <div class="flex-1">
+                            <p class="text-sm font-medium text-gray-900">Authorize Gmail</p>
+                            <p class="text-xs text-gray-500 mt-0.5">Click the <strong>Authorize Gmail</strong> button above to connect your account.</p>
+                        </div>
+                    </div>
+
+                </div>
             </div>
             {% endif %}
         </div>
@@ -315,5 +469,77 @@
             testBtn.textContent = "Sending...";
         });
     }
+
+    /* ── Copy callback URI to clipboard ── */
+    function copyCallbackUri() {
+        var uri = document.getElementById("callback-uri");
+        if (!uri) return;
+        navigator.clipboard.writeText(uri.textContent.trim()).then(function() {
+            var copyIcon = document.getElementById("copy-icon");
+            var checkIcon = document.getElementById("check-icon");
+            var copyText = document.getElementById("copy-text");
+            copyIcon.classList.add("hidden");
+            checkIcon.classList.remove("hidden");
+            copyText.textContent = "Copied!";
+            setTimeout(function() {
+                copyIcon.classList.remove("hidden");
+                checkIcon.classList.add("hidden");
+                copyText.textContent = "Copy";
+            }, 2000);
+        });
+    }
+
+    /* ── Toggle setup steps visibility ── */
+    function toggleSetupSteps() {
+        var steps = document.getElementById("setup-steps");
+        var icon = document.getElementById("setup-toggle-icon");
+        if (!steps) return;
+        var hidden = steps.classList.toggle("hidden");
+        if (icon) {
+            icon.style.transform = hidden ? "" : "rotate(180deg)";
+        }
+    }
+
+    /* ── Drag-and-drop + auto-submit for credentials upload ── */
+    (function() {
+        var fileInput = document.getElementById("credentials_file");
+        var dropZone = document.getElementById("drop-zone");
+        var uploadLabel = document.getElementById("upload-label");
+        var form = document.getElementById("upload-creds-form");
+        if (!fileInput || !dropZone || !form) return;
+
+        fileInput.addEventListener("change", function() {
+            if (fileInput.files.length > 0) {
+                uploadLabel.textContent = fileInput.files[0].name;
+                form.submit();
+            }
+        });
+
+        ["dragenter", "dragover"].forEach(function(evt) {
+            dropZone.addEventListener(evt, function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.add("border-blue-400", "bg-blue-50");
+            });
+        });
+
+        ["dragleave", "drop"].forEach(function(evt) {
+            dropZone.addEventListener(evt, function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.remove("border-blue-400", "bg-blue-50");
+            });
+        });
+
+        dropZone.addEventListener("drop", function(e) {
+            var files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                uploadLabel.textContent = files[0].name;
+                form.submit();
+            }
+        });
+    })();
 </script>
 {% endblock %}
+

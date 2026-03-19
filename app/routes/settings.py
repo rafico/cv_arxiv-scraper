@@ -125,6 +125,43 @@ def save_settings():
 # ── Gmail / Email API endpoints ─────────────────────────────────────────
 
 
+@settings_bp.route("/settings/upload-credentials", methods=["POST"])
+def upload_credentials():
+    """Accept a credentials.json file upload and save to project root."""
+    import json as _json
+
+    validate_csrf_token()
+
+    uploaded = request.files.get("credentials_file")
+    if not uploaded or not uploaded.filename:
+        flash("No file selected.", "error")
+        return redirect(url_for("settings.view_settings"))
+
+    try:
+        raw = uploaded.read()
+        data = _json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        flash("Invalid JSON file. Please upload the credentials.json from Google Cloud Console.", "error")
+        return redirect(url_for("settings.view_settings"))
+
+    # Validate expected OAuth client structure.
+    web = data.get("web", {})
+    if not web.get("client_id") or not web.get("client_secret"):
+        flash(
+            "This file doesn't look like a valid OAuth credentials file. "
+            "Make sure you download the JSON for an OAuth 2.0 Client ID "
+            "(Web application type).",
+            "error",
+        )
+        return redirect(url_for("settings.view_settings"))
+
+    from app.services.email_digest import DEFAULT_CREDENTIALS_PATH
+
+    DEFAULT_CREDENTIALS_PATH.write_bytes(raw)
+    flash("credentials.json uploaded successfully. You can now authorize Gmail.", "success")
+    return redirect(url_for("settings.view_settings"))
+
+
 @settings_bp.route("/settings/gmail-status", methods=["GET"])
 def gmail_status():
     from app.services.email_digest import check_gmail_auth_status
