@@ -25,16 +25,8 @@ from app.services.email_digest import send_digest
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ArXiv CV daily email digest")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Build the email but do not actually send it",
-    )
-    parser.add_argument(
-        "--send-only",
-        action="store_true",
-        help="Skip scraping — send digest from papers already in the database",
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Build the email but do not actually send it")
+    parser.add_argument("--send-only", action="store_true", help="Skip scraping — send digest from papers already in the database")
     args = parser.parse_args()
 
     app = create_app()
