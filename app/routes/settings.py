@@ -69,6 +69,7 @@ def _build_llm_view_model(config: dict) -> dict:
     llm_cfg = config.get("llm", {})
     return {
         "enabled": bool(llm_cfg.get("enabled", False)),
+        "provider": llm_cfg.get("provider", "openrouter"),
         "model": llm_cfg.get("model", "anthropic/claude-sonnet-4"),
         "base_url": llm_cfg.get("base_url", "https://openrouter.ai/api/v1"),
         "max_concurrent": int(llm_cfg.get("max_concurrent", 4) or 4),
@@ -157,10 +158,20 @@ def save_llm_settings():
     config_path = Path(current_app.config["CONFIG_PATH"])
     key_path = Path(current_app.config["LLM_KEY_PATH"])
     enabled = request.form.get("llm_enabled") == "on"
-    model = request.form.get("llm_model", "anthropic/claude-sonnet-4").strip()
-    base_url = request.form.get("llm_base_url", "https://openrouter.ai/api/v1").strip()
+    provider = request.form.get("llm_provider", "openrouter").strip()
+    if provider not in ("openrouter", "ollama"):
+        provider = "openrouter"
+    model = request.form.get("llm_model", "").strip()
+    base_url = request.form.get("llm_base_url", "").strip()
     max_concurrent_raw = request.form.get("llm_max_concurrent", "4").strip()
     api_key = request.form.get("llm_api_key", "").strip()
+
+    if provider == "ollama":
+        model = model or "llama3"
+        base_url = base_url or "http://localhost:11434/v1"
+    else:
+        model = model or "anthropic/claude-sonnet-4"
+        base_url = base_url or "https://openrouter.ai/api/v1"
 
     try:
         max_concurrent = max(1, int(max_concurrent_raw or "4"))
@@ -173,12 +184,13 @@ def save_llm_settings():
 
     full_config["llm"] = {
         "enabled": enabled,
-        "model": model or "anthropic/claude-sonnet-4",
-        "base_url": base_url or "https://openrouter.ai/api/v1",
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
         "max_concurrent": max_concurrent,
     }
 
-    if api_key and api_key != _LLM_MASK_VALUE:
+    if provider != "ollama" and api_key and api_key != _LLM_MASK_VALUE:
         write_api_key(api_key, key_path)
 
     try:

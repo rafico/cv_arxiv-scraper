@@ -234,6 +234,7 @@ class LLMSettingsTests(FlaskDBTestCase):
             data={
                 "csrf_token": token,
                 "llm_enabled": "on",
+                "llm_provider": "openrouter",
                 "llm_api_key": "super-secret-key",
                 "llm_model": "test/model",
                 "llm_base_url": "https://openrouter.ai/api/v1",
@@ -246,8 +247,61 @@ class LLMSettingsTests(FlaskDBTestCase):
         config_path = Path(self.app.config["CONFIG_PATH"])
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         self.assertEqual(saved["llm"]["model"], "test/model")
+        self.assertEqual(saved["llm"]["provider"], "openrouter")
         self.assertNotIn("api_key", saved["llm"])
 
         key_path = Path(self.app.config["LLM_KEY_PATH"])
         self.assertTrue(key_path.exists())
         self.assertEqual(key_path.read_text(encoding="utf-8"), "super-secret-key")
+
+    def test_llm_settings_save_ollama_skips_api_key_write(self):
+        token = self._csrf_token()
+        response = self.client.post(
+            "/settings/llm",
+            data={
+                "csrf_token": token,
+                "llm_enabled": "on",
+                "llm_provider": "ollama",
+                "llm_model": "mistral",
+                "llm_base_url": "http://localhost:11434/v1",
+                "llm_max_concurrent": "2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        config_path = Path(self.app.config["CONFIG_PATH"])
+        saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["llm"]["provider"], "ollama")
+        self.assertEqual(saved["llm"]["model"], "mistral")
+        self.assertEqual(saved["llm"]["base_url"], "http://localhost:11434/v1")
+        self.assertTrue(saved["llm"]["enabled"])
+
+        key_path = Path(self.app.config["LLM_KEY_PATH"])
+        self.assertFalse(key_path.exists())
+
+    def test_llm_settings_save_ollama_applies_defaults(self):
+        token = self._csrf_token()
+        response = self.client.post(
+            "/settings/llm",
+            data={
+                "csrf_token": token,
+                "llm_provider": "ollama",
+                "llm_model": "",
+                "llm_base_url": "",
+                "llm_max_concurrent": "4",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        config_path = Path(self.app.config["CONFIG_PATH"])
+        saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["llm"]["model"], "llama3")
+        self.assertEqual(saved["llm"]["base_url"], "http://localhost:11434/v1")
+
+    def test_settings_page_shows_provider_select(self):
+        response = self.client.get("/settings")
+        html = response.get_data(as_text=True)
+        self.assertIn("llm_provider", html)
+        self.assertIn("ollama", html)

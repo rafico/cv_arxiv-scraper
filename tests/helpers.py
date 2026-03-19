@@ -22,6 +22,7 @@ TEST_SCRAPER_CONFIG = {
     },
     "llm": {
         "enabled": False,
+        "provider": "openrouter",
         "model": "anthropic/claude-sonnet-4",
         "base_url": "https://openrouter.ai/api/v1",
         "max_concurrent": 4,

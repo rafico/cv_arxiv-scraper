@@ -153,11 +153,22 @@
                                class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
                         <span>
                             <span class="block text-sm font-semibold text-gray-900">Enable LLM summaries and relevance scoring</span>
-                            <span class="block text-xs text-gray-500 mt-0.5">Uses `OPENROUTER_API_KEY` or a local `.llm_api_key` file.</span>
+                            <span class="block text-xs text-gray-500 mt-0.5">Generates TL;DR summaries and relevance scores for each paper.</span>
                         </span>
                     </label>
 
                     <div>
+                        <label for="llm_provider" class="block text-sm font-semibold text-gray-900 mb-1">Provider</label>
+                        <select name="llm_provider" id="llm_provider"
+                                class="w-full rounded-lg border-gray-200 border px-3 py-2 text-sm bg-gray-50
+                                       focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
+                            <option value="openrouter" {% if llm_config.provider == 'openrouter' %}selected{% endif %}>OpenRouter</option>
+                            <option value="ollama" {% if llm_config.provider == 'ollama' %}selected{% endif %}>Ollama (local)</option>
+                        </select>
+                        <p id="ollama-hint" class="text-xs text-gray-500 mt-1" style="display: none;">Make sure Ollama is running on localhost:11434.</p>
+                    </div>
+
+                    <div id="llm-api-key-group">
                         <label for="llm_api_key" class="block text-sm font-semibold text-gray-900 mb-1">API Key</label>
                         <p class="text-xs text-gray-500 mb-2">Leave blank to keep the existing key. It is stored in `.llm_api_key`, not in `config.yaml`.</p>
                         <input type="password" name="llm_api_key" id="llm_api_key"
@@ -267,6 +278,35 @@
         btn.disabled = true;
         btn.textContent = "Saving...";
     });
+
+    (function() {
+        var providerSelect = document.getElementById("llm_provider");
+        var apiKeyGroup = document.getElementById("llm-api-key-group");
+        var ollamaHint = document.getElementById("ollama-hint");
+        var modelInput = document.getElementById("llm_model");
+        var baseUrlInput = document.getElementById("llm_base_url");
+
+        var defaults = {
+            openrouter: { model: "anthropic/claude-sonnet-4", base_url: "https://openrouter.ai/api/v1" },
+            ollama:     { model: "llama3", base_url: "http://localhost:11434/v1" }
+        };
+
+        function update() {
+            var isOllama = providerSelect.value === "ollama";
+            apiKeyGroup.style.display = isOllama ? "none" : "";
+            ollamaHint.style.display = isOllama ? "" : "none";
+        }
+
+        providerSelect.addEventListener("change", function() {
+            var prev = providerSelect.value === "ollama" ? "openrouter" : "ollama";
+            var nd = defaults[providerSelect.value];
+            if (modelInput.value === defaults[prev].model || !modelInput.value) modelInput.value = nd.model;
+            if (baseUrlInput.value === defaults[prev].base_url || !baseUrlInput.value) baseUrlInput.value = nd.base_url;
+            update();
+        });
+
+        update();
+    })();
 
     var testBtn = document.getElementById("test-digest-btn");
     if (testBtn && !testBtn.disabled) {

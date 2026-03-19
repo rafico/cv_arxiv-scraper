@@ -57,7 +57,7 @@ def _build_result(
     summary_text = (
         generate_llm_summary(llm_client, title, abstract)
         if llm_client is not None
-        else generate_summary(title, abstract)
+        else abstract
     )
     llm_relevance_score = (
         llm_client.rate_relevance(title, abstract, interests_text)
@@ -325,16 +325,25 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
     if not llm_config.get("enabled"):
         return None, ""
 
-    api_key = resolve_api_key(Path(app.config["LLM_KEY_PATH"]))
-    if not api_key:
-        LOGGER.warning("LLM is enabled but no API key is available")
-        return None, ""
+    provider = llm_config.get("provider", "openrouter")
+
+    if provider == "ollama":
+        api_key = "ollama"
+        default_base_url = "http://localhost:11434/v1"
+        default_model = "llama3"
+    else:
+        api_key = resolve_api_key(Path(app.config["LLM_KEY_PATH"]))
+        if not api_key:
+            LOGGER.warning("LLM is enabled but no API key is available")
+            return None, ""
+        default_base_url = "https://openrouter.ai/api/v1"
+        default_model = "anthropic/claude-sonnet-4"
 
     try:
         client = LLMClient(
             api_key=api_key,
-            model=llm_config.get("model", "anthropic/claude-sonnet-4"),
-            base_url=llm_config.get("base_url", "https://openrouter.ai/api/v1"),
+            model=llm_config.get("model", default_model),
+            base_url=llm_config.get("base_url", default_base_url),
             max_concurrent=int(llm_config.get("max_concurrent", 4)),
         )
     except Exception as exc:

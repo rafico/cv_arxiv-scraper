@@ -85,7 +85,11 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
     except (TypeError, ValueError):
         raise ValueError("'llm.max_concurrent' must be a positive integer") from None
 
-    if llm.get("enabled") and not _llm_api_key_available(config_path):
+    provider = llm.get("provider", "openrouter")
+    if provider not in ("openrouter", "ollama"):
+        raise ValueError(f"'llm.provider' must be 'openrouter' or 'ollama', got '{provider}'")
+
+    if llm.get("enabled") and provider != "ollama" and not _llm_api_key_available(config_path):
         raise ValueError(
             "LLM is enabled but no API key was found via OPENROUTER_API_KEY or .llm_api_key"
         )
