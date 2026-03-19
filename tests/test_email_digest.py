@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import unittest
 from datetime import date, datetime, timedelta, timezone
+from email import message_from_bytes
+from email.header import make_header, decode_header
 from unittest.mock import MagicMock, patch
 
 from app.models import Paper, db
@@ -55,6 +58,11 @@ class RenderPaperHtmlTests(unittest.TestCase):
         html = _render_paper_html(paper)
         self.assertNotIn('"><img', html)
 
+    def test_score_uses_feedback_adjusted_rank(self):
+        paper = _make_paper(paper_score=10.0, feedback_score=4)
+        html = _render_paper_html(paper)
+        self.assertIn("Score: 15.0", html)
+
 
 class BuildEmailBodyTests(unittest.TestCase):
     def test_empty_papers_shows_message(self):
@@ -88,6 +96,26 @@ class QueryTodaysPapersTests(FlaskDBTestCase):
         self.assertIn("Recent", titles)
         self.assertNotIn("Old", titles)
         self.assertNotIn("Hidden", titles)
+
+    def test_orders_by_feedback_adjusted_rank(self):
+        lower_raw_higher_rank = _make_paper(
+            title="Boosted",
+            link="https://arxiv.org/abs/0000.33333",
+            paper_score=50.0,
+            feedback_score=7,
+        )
+        higher_raw_lower_rank = _make_paper(
+            title="Unboosted",
+            link="https://arxiv.org/abs/0000.44444",
+            paper_score=55.0,
+            feedback_score=0,
+        )
+        db.session.add_all([lower_raw_higher_rank, higher_raw_lower_rank])
+        db.session.commit()
+
+        papers = _query_todays_papers(self.app)
+        titles = [paper.title for paper in papers]
+        self.assertLess(titles.index("Boosted"), titles.index("Unboosted"))
 
 
 class GetEmailConfigTests(FlaskDBTestCase):
@@ -135,6 +163,31 @@ class SendDigestTests(FlaskDBTestCase):
             mock_creds.return_value = MagicMock()
             with self.assertRaises(ValueError, msg="recipient"):
                 send_digest(self.app)
+
+    @patch("app.services.email_digest.utc_today", return_value=date(2026, 3, 20))
+    @patch("app.services.email_digest._build_gmail_service")
+    @patch("app.services.email_digest._load_gmail_credentials")
+    def test_send_digest_uses_utc_today_for_subject(
+        self,
+        mock_creds,
+        mock_service_builder,
+        _mock_today,
+    ):
+        from app.services.email_digest import send_digest
+
+        mock_creds.return_value = MagicMock()
+        service = MagicMock()
+        mock_service_builder.return_value = service
+        self.app.config["SCRAPER_CONFIG"]["email"] = {"recipient": "a@b.com"}
+        db.session.add(_make_paper())
+        db.session.commit()
+
+        send_digest(self.app)
+
+        raw = service.users.return_value.messages.return_value.send.call_args.kwargs["body"]["raw"]
+        message = message_from_bytes(base64.urlsafe_b64decode(raw))
+        subject = str(make_header(decode_header(message["Subject"])))
+        self.assertEqual(subject, "ArXiv Digest — Mar 20, 2026 (1 papers)")
 
 
 if __name__ == "__main__":

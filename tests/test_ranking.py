@@ -1,10 +1,12 @@
 from datetime import date, timedelta
 import unittest
+from unittest.mock import patch
 
 from app.services.ranking import (
     combined_rank_score,
     compute_feedback_delta,
     compute_paper_score,
+    recency_multiplier,
 )
 
 
@@ -51,6 +53,10 @@ class RankingTests(unittest.TestCase):
             llm_relevance_score=8.0,
         )
         self.assertGreater(with_llm, without_llm)
+
+    @patch("app.services.ranking.utc_today", return_value=date(2026, 3, 20))
+    def test_recency_multiplier_uses_utc_today(self, _mock_today):
+        self.assertEqual(recency_multiplier(date(2026, 3, 20)), 1.0)
 
 
 if __name__ == "__main__":

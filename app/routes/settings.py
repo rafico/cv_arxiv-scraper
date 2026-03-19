@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from secrets import compare_digest, token_urlsafe
+from secrets import token_urlsafe
 
 import yaml
 from flask import (
     Blueprint,
-    abort,
     current_app,
     flash,
     jsonify,
@@ -19,35 +18,18 @@ from flask import (
 )
 
 from app import _validate_config
+from app.csrf import get_or_create_csrf_token, validate_csrf_token
 from app.services.llm_client import has_api_key, write_api_key
 
 log = logging.getLogger(__name__)
 
 settings_bp = Blueprint("settings", __name__)
-_CSRF_SESSION_KEY = "settings_csrf_token"
 _LLM_MASK_VALUE = "********"
 
 
 def _normalize_multiline(value: str) -> list[str]:
     entries = [line.strip() for line in value.splitlines() if line.strip()]
     return list(dict.fromkeys(entries))
-
-
-def _get_or_create_csrf_token() -> str:
-    csrf_token = session.get(_CSRF_SESSION_KEY)
-    if csrf_token:
-        return csrf_token
-
-    csrf_token = token_urlsafe(32)
-    session[_CSRF_SESSION_KEY] = csrf_token
-    return csrf_token
-
-
-def _validate_csrf_token() -> None:
-    submitted_token = request.form.get("csrf_token", "")
-    expected_token = session.get(_CSRF_SESSION_KEY, "")
-    if not submitted_token or not expected_token or not compare_digest(submitted_token, expected_token):
-        abort(400, description="Invalid CSRF token")
 
 
 def _save_config_key(key: str, value) -> None:
@@ -110,14 +92,14 @@ def view_settings():
         llm_config=_build_llm_view_model(config),
         llm_key_configured=has_api_key(llm_key_path),
         llm_key_mask=_LLM_MASK_VALUE,
-        csrf_token=_get_or_create_csrf_token(),
+        csrf_token=get_or_create_csrf_token(),
         callback_uri=url_for("settings.gmail_callback", _external=True),
     )
 
 
 @settings_bp.route("/settings", methods=["POST"])
 def save_settings():
-    _validate_csrf_token()
+    validate_csrf_token()
 
     config_path = Path(current_app.config["CONFIG_PATH"])
     new_whitelists = {
@@ -135,7 +117,7 @@ def save_settings():
         yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
 
     current_app.config["SCRAPER_CONFIG"] = full_config
-    session[_CSRF_SESSION_KEY] = token_urlsafe(32)
+    session["settings_csrf_token"] = token_urlsafe(32)
     flash("Settings saved successfully.", "success")
     return redirect(url_for("settings.view_settings"))
 
@@ -152,7 +134,7 @@ def gmail_status():
 
 @settings_bp.route("/settings/email", methods=["POST"])
 def save_email_settings():
-    _validate_csrf_token()
+    validate_csrf_token()
 
     recipient = request.form.get("email_recipient", "").strip()
     subject_prefix = request.form.get("email_subject_prefix", "ArXiv Digest").strip()
@@ -160,14 +142,14 @@ def save_email_settings():
     email_cfg = {"recipient": recipient, "subject_prefix": subject_prefix}
     _save_config_key("email", email_cfg)
 
-    session[_CSRF_SESSION_KEY] = token_urlsafe(32)
+    session["settings_csrf_token"] = token_urlsafe(32)
     flash("Email settings saved.", "success")
     return redirect(url_for("settings.view_settings"))
 
 
 @settings_bp.route("/settings/llm", methods=["POST"])
 def save_llm_settings():
-    _validate_csrf_token()
+    validate_csrf_token()
 
     config_path = Path(current_app.config["CONFIG_PATH"])
     key_path = Path(current_app.config["LLM_KEY_PATH"])
@@ -214,14 +196,14 @@ def save_llm_settings():
         yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
 
     current_app.config["SCRAPER_CONFIG"] = full_config
-    session[_CSRF_SESSION_KEY] = token_urlsafe(32)
+    session["settings_csrf_token"] = token_urlsafe(32)
     flash("LLM settings saved.", "success")
     return redirect(url_for("settings.view_settings"))
 
 
 @settings_bp.route("/settings/gmail-auth", methods=["POST"])
 def gmail_auth():
-    _validate_csrf_token()
+    validate_csrf_token()
 
     from app.services.email_digest import start_oauth_flow
 
@@ -268,7 +250,7 @@ def gmail_callback():
 
 @settings_bp.route("/settings/send-test-digest", methods=["POST"])
 def send_test_digest():
-    _validate_csrf_token()
+    validate_csrf_token()
 
     from app.services.email_digest import send_digest
 

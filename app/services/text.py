@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import date, datetime, timezone
 
 _TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9\-]{2,}")
 
@@ -105,8 +106,10 @@ def tokenize(text: str | None) -> list[str]:
     return _TOKEN_RE.findall(normalized)
 
 
+def utc_today() -> date:
+    return datetime.now(timezone.utc).date()
+
+
 def now_utc():
     """Return the current UTC time as a naive datetime (for SQLite storage)."""
-    from datetime import datetime, timezone
-
     return datetime.now(timezone.utc).replace(tzinfo=None)

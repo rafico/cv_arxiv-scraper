@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% if csrf_token is defined %}
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    {% endif %}
     <title>{% block title %}ArXiv CV Scraper{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -131,6 +134,11 @@
     </main>
 
     <script>
+        function getCsrfToken() {
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            return meta ? meta.content : "";
+        }
+
         const BADGE_COLORS = {
             Author: "bg-blue-100 text-blue-700",
             Affiliation: "bg-emerald-100 text-emerald-700",
@@ -186,7 +194,15 @@
 
             setOverlayVisible(true);
 
-            const streamUrl = force ? "/api/scrape/stream?force=1" : "/api/scrape/stream";
+            const params = new URLSearchParams();
+            if (force) {
+                params.set("force", "1");
+            }
+            const csrfToken = getCsrfToken();
+            if (csrfToken) {
+                params.set("csrf_token", csrfToken);
+            }
+            const streamUrl = `/api/scrape/stream${params.toString() ? `?${params.toString()}` : ""}`;
             const source = new EventSource(streamUrl);
 
             source.addEventListener("feed", (event) => {

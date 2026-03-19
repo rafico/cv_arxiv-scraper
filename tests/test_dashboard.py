@@ -38,6 +38,11 @@ class DashboardRouteTests(FlaskDBTestCase):
 
         self.client = self.app.test_client()
 
+    def _csrf_token(self) -> str:
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            return session["settings_csrf_token"]
+
     def test_default_daily_timeframe_filters_old_papers(self):
         response = self.client.get("/")
         text = response.get_data(as_text=True)
@@ -55,9 +60,11 @@ class DashboardRouteTests(FlaskDBTestCase):
 
     def test_feedback_endpoint_toggles_action(self):
         paper = Paper.query.first()
+        token = self._csrf_token()
         response = self.client.post(
             f"/api/papers/{paper.id}/feedback",
             json={"action": "save"},
+            headers={"X-CSRF-Token": token},
         )
         data = response.get_json()
 

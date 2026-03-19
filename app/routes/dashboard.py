@@ -5,6 +5,7 @@ from datetime import timedelta
 from flask import Blueprint, render_template, request
 from flask_sqlalchemy.query import Query
 
+from app.csrf import get_or_create_csrf_token
 from app.models import Paper, db
 from app.services.feedback import get_feedback_snapshot
 from app.services.related import build_vector, top_related_papers
@@ -159,4 +160,5 @@ def index():
             "sort": sort,
             "include_hidden": include_hidden,
         },
+        csrf_token=get_or_create_csrf_token(),
     )

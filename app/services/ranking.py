@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from math import exp
 
+from app.services.text import utc_today
+
 MATCH_TYPE_WEIGHTS = {
     "Author": 44.0,
     "Affiliation": 26.0,
@@ -30,7 +32,7 @@ def recency_multiplier(publication_dt: date | None, today: date | None = None) -
     if publication_dt is None:
         return 0.72
 
-    today = today or date.today()
+    today = today or utc_today()
     age_days = max(0, (today - publication_dt).days)
     return exp(-age_days / HALF_LIFE_DAYS)
 

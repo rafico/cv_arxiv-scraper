@@ -15,7 +15,7 @@ import feedparser
 import pdfplumber
 
 from app.services.http_client import request_with_backoff
-from app.services.text import clean_whitespace
+from app.services.text import clean_whitespace, utc_today
 
 LOGGER = logging.getLogger(__name__)
 
@@ -152,8 +152,9 @@ def fetch_recent_papers(days: int, feed_url: str) -> list[dict]:
     if not category or days <= 0:
         return []
 
-    start_date = date.today() - timedelta(days=days + 1)
-    end_date = date.today()
+    today = utc_today()
+    start_date = today - timedelta(days=days + 1)
+    end_date = today
     from_ts = start_date.strftime("%Y%m%d0000")
     to_ts = end_date.strftime("%Y%m%d2359")
     batch_size = _ARXIV_API_BATCH_SIZE

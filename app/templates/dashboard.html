@@ -300,7 +300,10 @@
         try {
             const response = await fetch(`/api/papers/${paperId}/feedback`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCsrfToken(),
+                },
                 body: JSON.stringify({ action }),
             });
             const data = await response.json();

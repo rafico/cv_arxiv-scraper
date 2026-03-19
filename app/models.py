@@ -116,3 +116,17 @@ class PaperFeedback(db.Model):
     created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
 
     paper = db.relationship("Paper", back_populates="feedback")
+
+
+class ScrapeRun(db.Model):
+    __tablename__ = "scrape_runs"
+    __table_args__ = (
+        db.Index("idx_scrape_runs_started_at", "started_at"),
+        db.Index("idx_scrape_runs_status_started_at", "status", "started_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    status = db.Column(db.String(16), nullable=False, index=True)
+    forced = db.Column(db.Boolean, nullable=False, default=False)
+    started_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False, index=True)
+    finished_at = db.Column(db.DateTime, nullable=True, index=True)

@@ -6,7 +6,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import patch
 
-from app.models import Paper, db
+from app.models import Paper, ScrapeRun, db
 from app.services.text import now_utc
 from app.services.summary import generate_summary
 from tests.helpers import FlaskDBTestCase
@@ -218,7 +218,32 @@ class PreFilterCountTests(FlaskDBTestCase):
 
 
 class GuardTests(FlaskDBTestCase):
-    def test_execute_scrape_skips_when_today_already_scraped(self):
+    def test_execute_scrape_skips_when_successful_run_exists_today(self):
+        from app.services.scrape_engine import execute_scrape
+
+        now = now_utc()
+        db.session.add(
+            ScrapeRun(
+                status="success",
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        db.session.commit()
+
+        captured: list[tuple[str, dict]] = []
+
+        with patch("app.services.scrape_engine.parse_feed_entries") as mock_parse:
+            result = execute_scrape(
+                self.app,
+                event_callback=lambda event, data: captured.append((event, data)),
+            )
+
+        self.assertTrue(result["skipped"])
+        self.assertEqual(captured[0][0], "skipped")
+        mock_parse.assert_not_called()
+
+    def test_execute_scrape_does_not_skip_when_today_has_papers_but_no_successful_run(self):
         from app.services.scrape_engine import execute_scrape
 
         now = now_utc()
@@ -239,35 +264,26 @@ class GuardTests(FlaskDBTestCase):
         )
         db.session.commit()
 
-        captured: list[tuple[str, dict]] = []
+        with (
+            patch("app.services.scrape_engine.parse_feed_entries", return_value=[]),
+            patch("app.services.scrape_engine.enrich_entries_with_api_metadata"),
+            patch("app.services.scrape_engine._process_entries_parallel", return_value=iter([])),
+        ):
+            result = execute_scrape(self.app)
 
-        with patch("app.services.scrape_engine.parse_feed_entries") as mock_parse:
-            result = execute_scrape(
-                self.app,
-                event_callback=lambda event, data: captured.append((event, data)),
-            )
-
-        self.assertTrue(result["skipped"])
-        self.assertEqual(captured[0][0], "skipped")
-        mock_parse.assert_not_called()
+        self.assertIn("new_papers", result)
+        self.assertFalse(result.get("skipped", False))
 
     def test_force_true_bypasses_guard(self):
         from app.services.scrape_engine import execute_scrape
 
         now = now_utc()
         db.session.add(
-            Paper(
-                arxiv_id="0001",
-                title="Existing",
-                authors="A",
-                link="https://arxiv.org/abs/0001",
-                pdf_link="https://arxiv.org/pdf/0001.pdf",
-                match_type="Title",
-                matched_terms=["Vision"],
-                paper_score=1.0,
-                publication_date="2026-01-01",
-                scraped_date=now.date().isoformat(),
-                scraped_at=now - timedelta(hours=1),
+            ScrapeRun(
+                status="success",
+                started_at=now - timedelta(hours=1),
+                finished_at=now - timedelta(hours=1),
+                forced=False,
             )
         )
         db.session.commit()
@@ -280,6 +296,17 @@ class GuardTests(FlaskDBTestCase):
             result = execute_scrape(self.app, force=True)
 
         self.assertIn("new_papers", result)
+
+    def test_execute_scrape_records_error_run_on_failure(self):
+        from app.services.scrape_engine import execute_scrape
+
+        with patch("app.services.scrape_engine.parse_feed_entries", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                execute_scrape(self.app, force=True)
+
+        scrape_run = db.session.query(ScrapeRun).order_by(ScrapeRun.id.desc()).first()
+        self.assertIsNotNone(scrape_run)
+        self.assertEqual(scrape_run.status, "error")
 
 
 class RollingWindowTests(FlaskDBTestCase):

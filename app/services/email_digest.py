@@ -29,7 +29,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from flask import Flask
 
-from app.models import Paper
+from app.models import Paper, db
+from app.services.ranking import FEEDBACK_BOOST, combined_rank_score
+from app.services.text import utc_today
 
 log = logging.getLogger(__name__)
 
@@ -287,7 +289,14 @@ def _query_todays_papers(app: Flask, lookback_hours: int = 26) -> list[Paper]:
         return (
             Paper.query
             .filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
-            .order_by(Paper.paper_score.desc(), Paper.id.desc())
+            .order_by(
+                (
+                    db.func.coalesce(Paper.paper_score, 0.0)
+                    + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
+                ).desc(),
+                Paper.publication_dt.desc(),
+                Paper.scraped_at.desc(),
+            )
             .all()
         )
 
@@ -338,7 +347,7 @@ def _render_paper_html(paper: Paper) -> str:
         {topic_tags}
         {resource_links_html}
         <span style="float:right;color:#9ca3af;font-size:12px;">
-          Score: {paper.paper_score:.1f}
+          Score: {combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0)):.1f}
         </span>
       </div>
     </div>
@@ -400,7 +409,7 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
 
     subject_prefix = email_cfg["subject_prefix"]
     papers = _query_todays_papers(app)
-    today = date.today()
+    today = utc_today()
 
     subject = f"{subject_prefix} — {today.strftime('%b %d, %Y')} ({len(papers)} papers)"
     html_body = _build_email_body(papers, today)

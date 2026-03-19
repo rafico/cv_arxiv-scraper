@@ -320,6 +320,47 @@ def _build_llm_interests(whitelists: dict) -> str:
     return "; ".join(parts)
 
 
+def _has_successful_scrape_today(app, today_start, tomorrow_start) -> bool:
+    from app.models import ScrapeRun, db
+
+    with app.app_context():
+        return (
+            db.session.query(ScrapeRun.id)
+            .filter(
+                ScrapeRun.status == "success",
+                ScrapeRun.started_at >= today_start,
+                ScrapeRun.started_at < tomorrow_start,
+            )
+            .first()
+            is not None
+        )
+
+
+def _create_scrape_run(app, started_at, *, force: bool):
+    from app.models import ScrapeRun, db
+
+    with app.app_context():
+        scrape_run = ScrapeRun(status="running", forced=force, started_at=started_at)
+        db.session.add(scrape_run)
+        db.session.commit()
+        return scrape_run.id
+
+
+def _finish_scrape_run(app, scrape_run_id: int | None, *, status: str) -> None:
+    if scrape_run_id is None:
+        return
+
+    from app.models import ScrapeRun, db
+
+    with app.app_context():
+        scrape_run = db.session.get(ScrapeRun, scrape_run_id)
+        if scrape_run is None:
+            return
+        scrape_run.status = status
+        scrape_run.finished_at = now_utc()
+        db.session.commit()
+
+
 def _create_llm_client(app) -> tuple[LLMClient | None, str]:
     llm_config = app.config["SCRAPER_CONFIG"].get("llm", {})
     if not llm_config.get("enabled"):
@@ -355,24 +396,16 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
 
 
 def execute_scrape(app, event_callback: EventCallback = None, force: bool = False) -> dict:
-    from app.models import Paper, db
-
     config = app.config["SCRAPER_CONFIG"]
     whitelists = config["whitelists"]
     scraper_config = config["scraper"]
     now = now_utc()
+    scrape_run_id: int | None = None
 
     if not force:
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow_start = today_start + timedelta(days=1)
-        with app.app_context():
-            already_scraped = (
-                db.session.query(Paper.id)
-                .filter(Paper.scraped_at >= today_start, Paper.scraped_at < tomorrow_start)
-                .first()
-                is not None
-            )
-        if already_scraped:
+        if _has_successful_scrape_today(app, today_start, tomorrow_start):
             payload = {
                 **_build_summary(0, 0, 0, 0),
                 "skipped": True,
@@ -381,103 +414,114 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             _emit(event_callback, "skipped", payload)
             return payload
 
-    _emit(event_callback, "status", {"phase": "feed", "message": "Fetching RSS feed..."})
-    entries = parse_feed_entries(scraper_config["feed_url"])
-    rolling_window_days = max(0, int(scraper_config.get("rolling_window_days", 0)))
-    if rolling_window_days > 0:
+    scrape_run_id = _create_scrape_run(app, now, force=force)
+
+    try:
+        _emit(event_callback, "status", {"phase": "feed", "message": "Fetching RSS feed..."})
+        entries = parse_feed_entries(scraper_config["feed_url"])
+        rolling_window_days = max(0, int(scraper_config.get("rolling_window_days", 0)))
+        if rolling_window_days > 0:
+            _emit(
+                event_callback,
+                "status",
+                {
+                    "phase": "rolling_window",
+                    "message": f"Loading papers from the past {rolling_window_days} days...",
+                },
+            )
+            try:
+                recent_entries = fetch_recent_papers(rolling_window_days, scraper_config["feed_url"])
+            except Exception as exc:
+                LOGGER.warning("Rolling-window fetch failed: %s", exc)
+                recent_entries = []
+
+            merged_entries: dict[str, dict] = {}
+            for entry in entries:
+                merged_entries[entry.get("arxiv_id") or entry["link"]] = entry
+            for entry in recent_entries:
+                merged_entries.setdefault(entry.get("arxiv_id") or entry["link"], entry)
+            entries = list(merged_entries.values())
+
+        total_entries = len(entries)
+        _emit(event_callback, "feed", {"total": total_entries})
+
+        # Skip entries already in the database before doing any heavy work.
+        existing_ids = _get_existing_ids(app, entries)
+        pre_filtered = 0
+        if existing_ids:
+            filtered_entries = [
+                entry
+                for entry in entries
+                if not _identity_keys(entry).intersection(existing_ids)
+            ]
+            pre_filtered = len(entries) - len(filtered_entries)
+            entries = filtered_entries
+            LOGGER.info(
+                "Skipped %d already-stored papers, %d new to process",
+                pre_filtered,
+                len(entries),
+            )
+
+        llm_client, interests_text = _create_llm_client(app)
+
         _emit(
             event_callback,
             "status",
-            {
-                "phase": "rolling_window",
-                "message": f"Loading papers from the past {rolling_window_days} days...",
-            },
+            {"phase": "affiliations", "message": "Fetching metadata from arXiv API..."},
         )
-        try:
-            recent_entries = fetch_recent_papers(rolling_window_days, scraper_config["feed_url"])
-        except Exception as exc:
-            LOGGER.warning("Rolling-window fetch failed: %s", exc)
-            recent_entries = []
+        enrich_entries_with_api_metadata(entries)
 
-        merged_entries: dict[str, dict] = {}
-        for entry in entries:
-            merged_entries[entry.get("arxiv_id") or entry["link"]] = entry
-        for entry in recent_entries:
-            merged_entries.setdefault(entry.get("arxiv_id") or entry["link"], entry)
-        entries = list(merged_entries.values())
+        _emit(
+            event_callback,
+            "status",
+            {"phase": "processing", "message": f"Processing {len(entries)} papers..."},
+        )
 
-    total_entries = len(entries)
-    _emit(event_callback, "feed", {"total": total_entries})
-
-    # Skip entries already in the database before doing any heavy work.
-    existing_ids = _get_existing_ids(app, entries)
-    pre_filtered = 0
-    if existing_ids:
-        filtered_entries = [
-            entry
-            for entry in entries
-            if not _identity_keys(entry).intersection(existing_ids)
-        ]
-        pre_filtered = len(entries) - len(filtered_entries)
-        entries = filtered_entries
-        LOGGER.info("Skipped %d already-stored papers, %d new to process", pre_filtered, len(entries))
-
-    llm_client, interests_text = _create_llm_client(app)
-
-    _emit(
-        event_callback,
-        "status",
-        {"phase": "affiliations", "message": "Fetching metadata from arXiv API..."},
-    )
-    enrich_entries_with_api_metadata(entries)
-
-    _emit(
-        event_callback,
-        "status",
-        {"phase": "processing", "message": f"Processing {len(entries)} papers..."},
-    )
-
-    results: list[dict] = []
-    for processed, matched, result in _process_entries_parallel(
-        entries,
-        whitelists,
-        scraper_config,
-        llm_client,
-        interests_text,
-    ):
-        payload = {"processed": processed, "total": total_entries, "matched": matched}
-        if result:
-            results.append(result)
-            _emit(
-                event_callback,
-                "match",
-                {
-                    **payload,
-                    "paper": {
-                        "title": result["title"],
-                        "match_type": result["match_type"],
-                        "match_types": result["match_types"],
-                        "matched_terms": result["matches"],
+        results: list[dict] = []
+        for processed, matched, result in _process_entries_parallel(
+            entries,
+            whitelists,
+            scraper_config,
+            llm_client,
+            interests_text,
+        ):
+            payload = {"processed": processed, "total": total_entries, "matched": matched}
+            if result:
+                results.append(result)
+                _emit(
+                    event_callback,
+                    "match",
+                    {
+                        **payload,
+                        "paper": {
+                            "title": result["title"],
+                            "match_type": result["match_type"],
+                            "match_types": result["match_types"],
+                            "matched_terms": result["matches"],
+                        },
                     },
-                },
-            )
-        else:
-            _emit(event_callback, "progress", payload)
+                )
+            else:
+                _emit(event_callback, "progress", payload)
 
-    _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
-    _sort_results(results)
-    new_count, skipped = _save_results(app, results)
-    summary = _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
-    _emit(event_callback, "done", summary)
+        _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
+        _sort_results(results)
+        new_count, skipped = _save_results(app, results)
+        summary = _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
+        _emit(event_callback, "done", summary)
+        _finish_scrape_run(app, scrape_run_id, status="success")
 
-    LOGGER.info(
-        "Scrape complete: %s new, %s duplicates, %s matched out of %s entries",
-        new_count,
-        skipped + pre_filtered,
-        len(results),
-        total_entries,
-    )
-    return summary
+        LOGGER.info(
+            "Scrape complete: %s new, %s duplicates, %s matched out of %s entries",
+            new_count,
+            skipped + pre_filtered,
+            len(results),
+            total_entries,
+        )
+        return summary
+    except Exception:
+        _finish_scrape_run(app, scrape_run_id, status="error")
+        raise
 
 
 def run_scrape(app) -> dict:
