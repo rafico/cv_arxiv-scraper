@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from app.models import Paper, db
 from app.services.text import now_utc
+from app.services.summary import generate_summary
 from tests.helpers import FlaskDBTestCase
 
 
@@ -129,6 +130,33 @@ class SaveResultsDedupeTests(FlaskDBTestCase):
 
         self.assertEqual(new_count, 0)
         self.assertEqual(skipped, 1)
+
+
+class BuildResultTests(unittest.TestCase):
+    def test_build_result_uses_extractive_summary_when_llm_disabled(self):
+        from app.services.scrape_engine import _build_result
+
+        abstract = (
+            "Brief intro. "
+            "We introduce a transformer for dense prediction tasks and show strong "
+            "segmentation performance across benchmarks. "
+            "The approach also improves detection quality."
+        )
+        entry = {
+            "title": "A Vision Model",
+            "abstract": abstract,
+            "author": "Author A",
+            "link": "https://arxiv.org/abs/0001",
+            "authors_list": ["Author A"],
+        }
+
+        result = _build_result(
+            entry,
+            {"Title": ["Vision"], "Author": [], "Affiliation": []},
+        )
+
+        self.assertEqual(result["summary_text"], generate_summary(entry["title"], abstract))
+        self.assertNotEqual(result["summary_text"], abstract)
 
 
 class PreFilterCountTests(FlaskDBTestCase):

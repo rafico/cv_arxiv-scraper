@@ -28,7 +28,7 @@ from app.services.matching import (
 )
 from app.constants import DEFAULT_MAX_WORKERS
 from app.services.ranking import compute_paper_score
-from app.services.summary import extract_topic_tags, generate_llm_summary
+from app.services.summary import extract_topic_tags, generate_llm_summary, generate_summary
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def _build_result(
     summary_text = (
         generate_llm_summary(llm_client, title, abstract)
         if llm_client is not None
-        else abstract
+        else generate_summary(title, abstract)
     )
     llm_relevance_score = (
         llm_client.rate_relevance(title, abstract, interests_text)

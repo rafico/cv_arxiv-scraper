@@ -65,13 +65,27 @@ def _save_config_key(key: str, value) -> None:
     current_app.config["SCRAPER_CONFIG"] = full_config
 
 
+def _llm_provider_defaults(provider: str) -> dict[str, str]:
+    if provider == "ollama":
+        return {
+            "model": "llama3",
+            "base_url": "http://localhost:11434/v1",
+        }
+    return {
+        "model": "anthropic/claude-sonnet-4",
+        "base_url": "https://openrouter.ai/api/v1",
+    }
+
+
 def _build_llm_view_model(config: dict) -> dict:
     llm_cfg = config.get("llm", {})
+    provider = llm_cfg.get("provider", "openrouter")
+    defaults = _llm_provider_defaults(provider)
     return {
         "enabled": bool(llm_cfg.get("enabled", False)),
-        "provider": llm_cfg.get("provider", "openrouter"),
-        "model": llm_cfg.get("model", "anthropic/claude-sonnet-4"),
-        "base_url": llm_cfg.get("base_url", "https://openrouter.ai/api/v1"),
+        "provider": provider,
+        "model": llm_cfg.get("model", defaults["model"]),
+        "base_url": llm_cfg.get("base_url", defaults["base_url"]),
         "max_concurrent": int(llm_cfg.get("max_concurrent", 4) or 4),
     }
 
@@ -161,17 +175,14 @@ def save_llm_settings():
     provider = request.form.get("llm_provider", "openrouter").strip()
     if provider not in ("openrouter", "ollama"):
         provider = "openrouter"
+    defaults = _llm_provider_defaults(provider)
     model = request.form.get("llm_model", "").strip()
     base_url = request.form.get("llm_base_url", "").strip()
     max_concurrent_raw = request.form.get("llm_max_concurrent", "4").strip()
     api_key = request.form.get("llm_api_key", "").strip()
 
-    if provider == "ollama":
-        model = model or "llama3"
-        base_url = base_url or "http://localhost:11434/v1"
-    else:
-        model = model or "anthropic/claude-sonnet-4"
-        base_url = base_url or "https://openrouter.ai/api/v1"
+    model = model or defaults["model"]
+    base_url = base_url or defaults["base_url"]
 
     try:
         max_concurrent = max(1, int(max_concurrent_raw or "4"))

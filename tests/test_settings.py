@@ -305,3 +305,17 @@ class LLMSettingsTests(FlaskDBTestCase):
         html = response.get_data(as_text=True)
         self.assertIn("llm_provider", html)
         self.assertIn("ollama", html)
+
+    def test_settings_page_uses_ollama_defaults_when_model_and_base_url_missing(self):
+        self.app.config["SCRAPER_CONFIG"]["llm"] = {
+            "enabled": False,
+            "provider": "ollama",
+            "max_concurrent": 4,
+        }
+
+        response = self.client.get("/settings")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('value="llama3"', html)
+        self.assertIn('value="http://localhost:11434/v1"', html)
