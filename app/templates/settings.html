@@ -3,10 +3,10 @@
 {% block title %}Settings - ArXiv CV Scraper{% endblock %}
 
 {% macro pill_link(target, label) -%}
-<a href="{{ url_for('settings.view_settings', section=target) }}"
-   class="px-3 py-1.5 rounded-full text-sm font-medium transition-colors {{ 'bg-gray-900 text-white' if section == target else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+<button type="button" onclick="switchTab('{{ target }}')" data-tab="{{ target }}"
+   class="settings-tab px-3 py-1.5 rounded-full text-sm font-medium transition-colors {{ 'bg-gray-900 text-white' if section == target else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
     {{ label }}
-</a>
+</button>
 {%- endmacro %}
 
 {% macro multiline_textarea(name, label, help_text, items, rows=7) -%}
@@ -60,7 +60,7 @@
         </div>
     </div>
 
-    <section id="interests" class="mb-10">
+    <section id="interests" data-section="interests" class="mb-10 {{ '' if section == 'interests' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
                 <h2 class="text-lg font-semibold text-gray-900">Research Setup</h2>
@@ -94,7 +94,7 @@
         </form>
     </section>
 
-    <section id="controls" class="mb-10">
+    <section id="controls" data-section="controls" class="mb-10 {{ '' if section == 'controls' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
                 <h2 class="text-lg font-semibold text-gray-900">Ranking And Mute Controls</h2>
@@ -154,7 +154,7 @@
         </form>
     </section>
 
-    <section id="automation" class="mb-10">
+    <section id="automation" data-section="automation" class="mb-10 {{ '' if section == 'automation' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
                 <h2 class="text-lg font-semibold text-gray-900">Automation</h2>
@@ -357,7 +357,7 @@
         </div>
     </section>
 
-    <section id="ai" class="mb-4">
+    <section id="ai" data-section="ai" class="mb-4 {{ '' if section == 'ai' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
                 <h2 class="text-lg font-semibold text-gray-900">LLM / AI</h2>
@@ -431,6 +431,59 @@
 
 {% block scripts %}
 <script>
+    /* ── Tab routing ── */
+    function switchTab(target) {
+        document.querySelectorAll("[data-section]").forEach(function(el) {
+            el.classList.toggle("hidden", el.dataset.section !== target);
+        });
+        document.querySelectorAll(".settings-tab").forEach(function(btn) {
+            var isActive = btn.dataset.tab === target;
+            btn.className = "settings-tab px-3 py-1.5 rounded-full text-sm font-medium transition-colors " +
+                (isActive ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200");
+        });
+        history.replaceState(null, "", "/settings?section=" + target);
+    }
+
+    /* ── Unsaved-change indicators ── */
+    function trackUnsavedChanges(formId, buttonId) {
+        var form = document.getElementById(formId);
+        var button = document.getElementById(buttonId);
+        if (!form || !button) return;
+
+        var originalLabel = button.textContent.trim();
+        var originalData = new FormData(form);
+        var originalValues = {};
+        originalData.forEach(function(value, key) { originalValues[key] = value; });
+
+        function checkDirty() {
+            var currentData = new FormData(form);
+            var dirty = false;
+            currentData.forEach(function(value, key) {
+                if (key === "csrf_token") return;
+                if (originalValues[key] !== value) dirty = true;
+            });
+            if (dirty) {
+                button.classList.remove("bg-gray-900", "hover:bg-gray-800");
+                button.classList.add("bg-amber-600", "hover:bg-amber-700");
+                if (!button.textContent.trim().startsWith("*")) {
+                    button.textContent = "* " + originalLabel;
+                }
+            } else {
+                button.classList.remove("bg-amber-600", "hover:bg-amber-700");
+                button.classList.add("bg-gray-900", "hover:bg-gray-800");
+                button.textContent = originalLabel;
+            }
+        }
+
+        form.addEventListener("input", checkDirty);
+        form.addEventListener("change", checkDirty);
+    }
+
+    trackUnsavedChanges("settings-form", "save-btn");
+    trackUnsavedChanges("preferences-form", "preferences-save-btn");
+    trackUnsavedChanges("email-form", "email-save-btn");
+    trackUnsavedChanges("llm-form", "llm-save-btn");
+
     function setSavingState(formId, buttonId, loadingLabel) {
         var form = document.getElementById(formId);
         var button = document.getElementById(buttonId);

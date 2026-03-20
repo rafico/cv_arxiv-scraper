@@ -57,7 +57,7 @@
             </p>
             {% else %}
             <div class="mt-2 text-base font-semibold text-gray-900">Not run yet</div>
-            <p class="mt-1 text-sm text-gray-500">Run your first scrape to build today’s queue.</p>
+            <p class="mt-1 text-sm text-gray-500">Run your first scrape to build today's queue.</p>
             {% endif %}
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-4">
@@ -186,45 +186,64 @@
         </div>
     </div>
 
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-5">
-        <div class="flex flex-wrap items-center gap-2">
-            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Filters</span>
-            <select name="category" id="category"
-                    onchange="document.getElementById('filter-form').submit();"
-                    class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
-                <option value="">All categories</option>
-                {% for category in filter_options.categories %}
-                <option value="{{ category.label }}" {{ 'selected' if current_filters.category == category.label }}>
-                    {{ category.label }} ({{ category.count }})
-                </option>
-                {% endfor %}
-            </select>
-            <select name="resource_filter" id="resource_filter"
-                    onchange="document.getElementById('filter-form').submit();"
-                    class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
-                <option value="all" {{ 'selected' if current_filters.resource_filter == 'all' }}>All resource states</option>
-                <option value="available" {{ 'selected' if current_filters.resource_filter == 'available' }}>Has resources ({{ filter_options.resources.available }})</option>
-                <option value="missing" {{ 'selected' if current_filters.resource_filter == 'missing' }}>No resources ({{ filter_options.resources.missing }})</option>
-            </select>
+    {# ── Advanced filters (collapsible) ── #}
+    {% set has_advanced_filters = current_filters.category or current_filters.resource_filter != 'all' or current_filters.include_hidden %}
+    <div class="mb-4">
+        <button type="button" onclick="toggleAdvancedFilters()"
+                class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors">
+            <svg id="advanced-filter-icon" class="w-3.5 h-3.5 transition-transform {{ 'rotate-180' if has_advanced_filters }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+            Advanced Filters
+            {% if has_advanced_filters %}
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-gray-900 text-white">Active</span>
+            {% endif %}
+        </button>
+
+        <div id="advanced-filters" class="{{ '' if has_advanced_filters else 'hidden' }} mt-3">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+                <div class="flex flex-wrap items-center gap-2">
+                    <select name="category" id="category"
+                            onchange="document.getElementById('filter-form').submit();"
+                            class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                        <option value="">All categories</option>
+                        {% for category in filter_options.categories %}
+                        <option value="{{ category.label }}" {{ 'selected' if current_filters.category == category.label }}>
+                            {{ category.label }} ({{ category.count }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <select name="resource_filter" id="resource_filter"
+                            onchange="document.getElementById('filter-form').submit();"
+                            class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                        <option value="all" {{ 'selected' if current_filters.resource_filter == 'all' }}>All resource states</option>
+                        <option value="available" {{ 'selected' if current_filters.resource_filter == 'available' }}>Has resources ({{ filter_options.resources.available }})</option>
+                        <option value="missing" {{ 'selected' if current_filters.resource_filter == 'missing' }}>No resources ({{ filter_options.resources.missing }})</option>
+                    </select>
+                    {% if current_filters.view == 'inbox' %}
+                    <label class="inline-flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+                        <input type="checkbox" id="include_hidden_toggle" {{ 'checked' if current_filters.include_hidden }}
+                               onchange="toggleHidden(this)"
+                               class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                        Show not interested
+                    </label>
+                    {% endif %}
+                </div>
+                {% if has_advanced_filters %}
+                <div class="text-xs text-gray-500">
+                    {{ current_filters.category or 'All categories' }} ·
+                    {{ 'Has resources' if current_filters.resource_filter == 'available' else 'No resources' if current_filters.resource_filter == 'missing' else 'All resource states' }}
+                </div>
+                {% endif %}
+            </div>
         </div>
-        {% if current_filters.category or current_filters.resource_filter != 'all' %}
-        <div class="text-xs text-gray-500">
-            {{ current_filters.category or 'All categories' }} ·
-            {{ 'Has resources' if current_filters.resource_filter == 'available' else 'No resources' if current_filters.resource_filter == 'missing' else 'All resource states' }}
-        </div>
-        {% endif %}
     </div>
 
     <div class="flex items-center justify-between text-xs mb-6">
-        {% if current_filters.view == 'inbox' %}
-        <label class="inline-flex items-center gap-2 text-gray-500 cursor-pointer">
-            <input type="checkbox" id="include_hidden_toggle" {{ 'checked' if current_filters.include_hidden }}
-                   onchange="toggleHidden(this)"
-                   class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
-            Show not interested papers
-        </label>
-        {% else %}
+        {% if current_filters.view == 'saved' %}
         <div class="text-gray-500">Saved view defaults to all time so papers stay easy to find.</div>
+        {% else %}
+        <div></div>
         {% endif %}
         {% set has_non_default_filters = current_filters.q or current_filters.match_type or current_filters.include_hidden or current_filters.category or current_filters.resource_filter != 'all' or (current_filters.view == 'inbox' and (current_filters.timeframe != 'daily' or current_filters.sort != 'trending')) or (current_filters.view == 'saved' and (current_filters.timeframe != 'all' or current_filters.sort != 'saved')) %}
         {% if has_non_default_filters %}
@@ -239,8 +258,8 @@
     {% for paper in papers %}
     {% set paper_id = paper.arxiv_id or paper.link.split('/')[-1] %}
     <article class="group bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md hover:border-gray-300 transition-all duration-200 flex flex-col paper-card"
-             data-paper-id="{{ paper.id }}">
-        <a href="{{ paper.link }}" target="_blank" class="block">
+             data-paper-id="{{ paper.id }}" tabindex="0">
+        <a href="{{ paper.link }}" target="_blank" class="block paper-link">
             <div class="w-full h-36 bg-gray-100 overflow-hidden">
                 <img src="https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{{ paper_id }}.png"
                      alt="" loading="lazy"
@@ -273,107 +292,114 @@
             <p class="text-xs text-gray-500 mb-2 line-clamp-1">{{ paper.authors }}</p>
 
             {# ── Summary ── #}
-            <p class="text-xs text-gray-600 leading-relaxed mb-2 line-clamp-3">{{ paper.summary_text }}</p>
+            <p class="text-xs text-gray-600 leading-relaxed mb-3 line-clamp-3">{{ paper.summary_text }}</p>
 
-            {# ── Topic tags ── #}
-            {% if paper.topic_tags_list %}
-            <div class="flex flex-wrap gap-1 mb-2">
-                {% for tag in paper.topic_tags_list %}
-                <span class="text-[11px] text-gray-700 bg-gray-100 px-2 py-0.5 rounded">{{ tag }}</span>
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            {% if paper.categories_list %}
-            <div class="flex flex-wrap gap-1 mb-2">
-                {% for category in paper.categories_list[:4] %}
-                <span class="text-[11px] text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{{ category }}</span>
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            {# ── Matched terms ── #}
-            {% if paper.matched_terms_list %}
-            <div class="mb-3">
-                <div class="text-[11px] text-gray-500 mb-1">Why it matched</div>
-                <div class="flex flex-wrap gap-1">
-                    {% for term in paper.matched_terms_list %}
-                    <span class="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            {% if paper.resource_links_list %}
-            <div class="flex flex-wrap gap-1.5 mb-3">
-                {% for resource in paper.resource_links_list[:4] %}
-                <a href="{{ resource.url }}" target="_blank"
-                   class="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50">
-                    {{ resource.label or resource.type|title }}
-                </a>
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            <details class="mb-3 rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2">
-                <summary class="cursor-pointer list-none flex items-center justify-between gap-3 text-[11px] font-medium text-gray-600">
-                    <span>Score {{ '%.1f'|format(paper.rank_score_value) }} · Why this ranked here</span>
-                    <span class="text-gray-400">Details</span>
-                </summary>
-                <div class="mt-2 grid grid-cols-2 gap-2 text-[11px] text-gray-600">
-                    <div class="rounded-lg bg-white px-2 py-1.5">Match signals: {{ '%.1f'|format(paper.score_breakdown.match_score) }}</div>
-                    <div class="rounded-lg bg-white px-2 py-1.5">Term matches: {{ '%.1f'|format(paper.score_breakdown.term_score) }}</div>
-                    <div class="rounded-lg bg-white px-2 py-1.5">Resources: {{ '%.1f'|format(paper.score_breakdown.resource_score) }}</div>
-                    <div class="rounded-lg bg-white px-2 py-1.5">AI boost: {{ '%.1f'|format(paper.score_breakdown.ai_bonus) }}</div>
-                    <div class="rounded-lg bg-white px-2 py-1.5">Freshness x{{ '%.2f'|format(paper.score_breakdown.recency_multiplier) }}</div>
-                    <div class="rounded-lg bg-white px-2 py-1.5">Feedback: {{ '%.1f'|format(paper.score_breakdown.feedback_bonus) }}</div>
-                </div>
-            </details>
-
-            {# ── Feedback buttons ── #}
+            {# ── Feedback buttons (always visible for quick triage) ── #}
             <div class="flex items-center gap-2 mb-3">
                 {% for action, meta in FEEDBACK.items() %}
                 <button type="button"
                         onclick="sendFeedback({{ paper.id }}, '{{ action }}', this)"
                         data-action="{{ action }}"
-                        class="feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border
+                        class="feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border transition-opacity
                                {{ meta.active if action in paper.active_actions else 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50' }}">
                     {{ meta.label }} <span class="count">{{ paper.feedback_counts[action] }}</span>
                 </button>
                 {% endfor %}
             </div>
 
-            {% if paper.follow_recommendation.available or paper.mute_recommendation.available %}
-            <div class="flex flex-wrap items-center gap-2 mb-3">
-                {% if paper.follow_recommendation.available %}
-                <button type="button"
-                        onclick="sendRecommendation({{ paper.id }}, 'follow', this)"
-                        class="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100">
-                    Follow {{ paper.follow_recommendation.label }}
-                </button>
+            {# ── Collapsible details ── #}
+            {% set has_details = paper.topic_tags_list or paper.categories_list or paper.matched_terms_list or paper.resource_links_list or paper.related_papers or paper.follow_recommendation.available or paper.mute_recommendation.available %}
+            {% if has_details %}
+            <div class="card-details hidden" data-card-details>
+                {% if paper.topic_tags_list %}
+                <div class="flex flex-wrap gap-1 mb-2">
+                    {% for tag in paper.topic_tags_list %}
+                    <span class="text-[11px] text-gray-700 bg-gray-100 px-2 py-0.5 rounded">{{ tag }}</span>
+                    {% endfor %}
+                </div>
                 {% endif %}
-                {% if paper.mute_recommendation.available %}
-                <button type="button"
-                        onclick="sendRecommendation({{ paper.id }}, 'mute', this)"
-                        class="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-100">
-                    Mute {{ paper.mute_recommendation.label }}
-                </button>
-                {% endif %}
-            </div>
-            {% endif %}
 
-            {# ── Related papers ── #}
-            {% if paper.related_papers %}
-            <div class="mb-3">
-                <div class="text-[11px] text-gray-500 mb-1">Related</div>
-                <div class="space-y-1">
-                    {% for related in paper.related_papers %}
-                    <a href="{{ related.link }}" target="_blank" class="block text-[11px] text-gray-600 hover:text-blue-600 line-clamp-1">
-                        {{ related.title }}
+                {% if paper.categories_list %}
+                <div class="flex flex-wrap gap-1 mb-2">
+                    {% for category in paper.categories_list[:4] %}
+                    <span class="text-[11px] text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{{ category }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if paper.matched_terms_list %}
+                <div class="mb-3">
+                    <div class="text-[11px] text-gray-500 mb-1">Why it matched</div>
+                    <div class="flex flex-wrap gap-1">
+                        {% for term in paper.matched_terms_list %}
+                        <span class="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if paper.resource_links_list %}
+                <div class="flex flex-wrap gap-1.5 mb-3">
+                    {% for resource in paper.resource_links_list[:4] %}
+                    <a href="{{ resource.url }}" target="_blank"
+                       class="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50">
+                        {{ resource.label or resource.type|title }}
                     </a>
                     {% endfor %}
                 </div>
+                {% endif %}
+
+                <details class="mb-3 rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2">
+                    <summary class="cursor-pointer list-none flex items-center justify-between gap-3 text-[11px] font-medium text-gray-600">
+                        <span>Score {{ '%.1f'|format(paper.rank_score_value) }} · Why this ranked here</span>
+                        <span class="text-gray-400">Details</span>
+                    </summary>
+                    <div class="mt-2 grid grid-cols-2 gap-2 text-[11px] text-gray-600">
+                        <div class="rounded-lg bg-white px-2 py-1.5">Match signals: {{ '%.1f'|format(paper.score_breakdown.match_score) }}</div>
+                        <div class="rounded-lg bg-white px-2 py-1.5">Term matches: {{ '%.1f'|format(paper.score_breakdown.term_score) }}</div>
+                        <div class="rounded-lg bg-white px-2 py-1.5">Resources: {{ '%.1f'|format(paper.score_breakdown.resource_score) }}</div>
+                        <div class="rounded-lg bg-white px-2 py-1.5">AI boost: {{ '%.1f'|format(paper.score_breakdown.ai_bonus) }}</div>
+                        <div class="rounded-lg bg-white px-2 py-1.5">Freshness x{{ '%.2f'|format(paper.score_breakdown.recency_multiplier) }}</div>
+                        <div class="rounded-lg bg-white px-2 py-1.5">Feedback: {{ '%.1f'|format(paper.score_breakdown.feedback_bonus) }}</div>
+                    </div>
+                </details>
+
+                {% if paper.follow_recommendation.available or paper.mute_recommendation.available %}
+                <div class="flex flex-wrap items-center gap-2 mb-3">
+                    {% if paper.follow_recommendation.available %}
+                    <button type="button"
+                            onclick="sendRecommendation({{ paper.id }}, 'follow', this)"
+                            class="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100">
+                        Follow {{ paper.follow_recommendation.label }}
+                    </button>
+                    {% endif %}
+                    {% if paper.mute_recommendation.available %}
+                    <button type="button"
+                            onclick="sendRecommendation({{ paper.id }}, 'mute', this)"
+                            class="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-100">
+                        Mute {{ paper.mute_recommendation.label }}
+                    </button>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                {% if paper.related_papers %}
+                <div class="mb-3">
+                    <div class="text-[11px] text-gray-500 mb-1">Related</div>
+                    <div class="space-y-1">
+                        {% for related in paper.related_papers %}
+                        <a href="{{ related.link }}" target="_blank" class="block text-[11px] text-gray-600 hover:text-blue-600 line-clamp-1">
+                            {{ related.title }}
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
             </div>
+            <button type="button" onclick="toggleCardDetails(this)"
+                    class="card-toggle mb-3 text-[11px] font-medium text-gray-400 hover:text-gray-600 transition-colors text-left">
+                More details
+            </button>
             {% endif %}
 
             {# ── Footer links ── #}
@@ -382,8 +408,7 @@
                    class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300">
                     arXiv
                 </a>
-                <a href="{{ paper.pdf_link }}" target="_blank"
-                   class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
+                <a href="{{ paper.pdf_link }}" target="_blank" class="paper-pdf-link flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
                     PDF
                 </a>
             </div>
@@ -412,51 +437,6 @@
     </div>
 </div>
 
-<div class="mt-8 grid grid-cols-1 gap-4 xl:grid-cols-2">
-    <section class="rounded-2xl border border-gray-200 bg-white p-4">
-        <div class="flex items-center justify-between gap-3 mb-3">
-            <h2 class="text-sm font-semibold text-gray-900">Recent Scrapes</h2>
-            <a href="/settings?section=automation" class="text-xs text-gray-500 hover:text-gray-700">Open automation</a>
-        </div>
-        {% if dashboard_overview.scrape_history %}
-        <div class="space-y-2">
-            {% for run in dashboard_overview.scrape_history %}
-            <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-100 px-3 py-2 text-sm">
-                <div>
-                    <div class="font-medium text-gray-900">{{ run.status.replace('_', ' ').title() }}</div>
-                    <div class="text-xs text-gray-500">{{ run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC{% if run.forced %} · forced{% endif %}</div>
-                </div>
-                <div class="text-xs text-gray-400">{{ run.finished_at.strftime('%H:%M') if run.finished_at else 'running' }}</div>
-            </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <p class="text-sm text-gray-500">No scrape history yet.</p>
-        {% endif %}
-    </section>
-
-    <section class="rounded-2xl border border-gray-200 bg-white p-4">
-        <div class="flex items-center justify-between gap-3 mb-3">
-            <h2 class="text-sm font-semibold text-gray-900">Recent Digests</h2>
-            <a href="/settings?section=automation" class="text-xs text-gray-500 hover:text-gray-700">Preview or send</a>
-        </div>
-        {% if dashboard_overview.digest_history %}
-        <div class="space-y-2">
-            {% for run in dashboard_overview.digest_history %}
-            <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-100 px-3 py-2 text-sm">
-                <div>
-                    <div class="font-medium text-gray-900">{{ run.status.replace('_', ' ').title() }}{% if run.preview_only %} preview{% endif %}</div>
-                    <div class="text-xs text-gray-500">{{ run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ run.papers_count }} papers</div>
-                </div>
-                <div class="text-xs text-gray-400 truncate max-w-[12rem]">{{ run.recipient or 'No recipient' }}</div>
-            </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <p class="text-sm text-gray-500">No digest history yet.</p>
-        {% endif %}
-    </section>
-</div>
 {% else %}
 <div class="text-center py-24">
     <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-50 mb-4">
@@ -487,12 +467,49 @@
     </div>
     {% else %}
     <h3 class="text-base font-semibold text-gray-900">No papers for this filter</h3>
-    <p class="mt-1 text-sm text-gray-500 mb-6">Try widening the timeframe, clearing filters, or running a fresh scrape.</p>
+    <p class="mt-1 text-sm text-gray-500 mb-3">Try widening the timeframe, clearing filters, or running a fresh scrape.</p>
+
+    {# ── Active filter chips so user knows what's narrowing results ── #}
+    {% set active_chips = [] %}
+    {% if current_filters.match_type %}{% set _ = active_chips.append(('match_type', current_filters.match_type)) %}{% endif %}
+    {% if current_filters.q %}{% set _ = active_chips.append(('q', 'Search: ' ~ current_filters.q)) %}{% endif %}
+    {% if current_filters.category %}{% set _ = active_chips.append(('category', current_filters.category)) %}{% endif %}
+    {% if current_filters.resource_filter != 'all' %}{% set _ = active_chips.append(('resource_filter', 'Has resources' if current_filters.resource_filter == 'available' else 'No resources')) %}{% endif %}
+    {% if current_filters.view == 'inbox' and current_filters.timeframe != 'daily' %}{% set _ = active_chips.append(('timeframe', current_filters.timeframe|title)) %}{% endif %}
+    {% if current_filters.include_hidden %}{% set _ = active_chips.append(('include_hidden', 'Including hidden')) %}{% endif %}
+
+    {% if active_chips %}
+    <div class="flex flex-wrap items-center justify-center gap-2 mb-5">
+        <span class="text-xs text-gray-400">Active filters:</span>
+        {% for key, label in active_chips %}
+        <a href="{{ url_for('dashboard.index', view=current_filters.view,
+                timeframe=current_filters.timeframe if key != 'timeframe' else 'daily',
+                sort=current_filters.sort,
+                q=current_filters.q if key != 'q' else None,
+                match_type=current_filters.match_type if key != 'match_type' else None,
+                category=current_filters.category if key != 'category' else None,
+                resource_filter=current_filters.resource_filter if key != 'resource_filter' else None,
+                include_hidden='1' if current_filters.include_hidden and key != 'include_hidden' else None) }}"
+           class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors">
+            {{ label }}
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <button onclick="startScrape()"
             class="inline-flex items-center px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
         Run Scrape
     </button>
     {% endif %}
+</div>
+{% endif %}
+
+{# ── Keyboard shortcut hint ── #}
+{% if papers %}
+<div class="mt-6 text-center">
+    <p class="text-[11px] text-gray-300">Keyboard: <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">j</kbd>/<kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">k</kbd> navigate · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">s</kbd> save · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">u</kbd> upvote · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">x</kbd> skip · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">o</kbd> open · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">p</kbd> PDF · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">d</kbd> details</p>
 </div>
 {% endif %}
 {% endblock %}
@@ -516,6 +533,20 @@
             form.appendChild(hidden);
         }
         form.submit();
+    }
+
+    function toggleAdvancedFilters() {
+        const panel = document.getElementById("advanced-filters");
+        const icon = document.getElementById("advanced-filter-icon");
+        panel.classList.toggle("hidden");
+        icon.classList.toggle("rotate-180");
+    }
+
+    function toggleCardDetails(button) {
+        const details = button.previousElementSibling;
+        if (!details) return;
+        const hidden = details.classList.toggle("hidden");
+        button.textContent = hidden ? "More details" : "Less";
     }
 
     let searchTimeout;
@@ -545,13 +576,21 @@
         if (countEl) countEl.textContent = String(count);
 
         const styles = FEEDBACK_STYLES[action];
-        button.className = "feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border";
+        button.className = "feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border transition-opacity";
         button.classList.add(...(isActive ? styles.active : INACTIVE_STYLES));
+    }
+
+    function setFeedbackLoading(button, loading) {
+        button.disabled = loading;
+        button.style.opacity = loading ? "0.5" : "";
+        button.style.pointerEvents = loading ? "none" : "";
     }
 
     async function sendFeedback(paperId, action, button) {
         const card = button.closest(".paper-card");
         if (!card) return;
+
+        setFeedbackLoading(button, true);
 
         try {
             const response = await fetch(`/api/papers/${paperId}/feedback`, {
@@ -563,7 +602,7 @@
                 body: JSON.stringify({ action }),
             });
             const data = await response.json();
-            if (!response.ok) return;
+            if (!response.ok) { setFeedbackLoading(button, false); return; }
 
             card.querySelectorAll(".feedback-btn").forEach((btn) => {
                 const btnAction = btn.dataset.action;
@@ -584,10 +623,15 @@
             }
         } catch (error) {
             console.error("Feedback request failed", error);
+        } finally {
+            setFeedbackLoading(button, false);
         }
     }
 
     async function sendRecommendation(paperId, action, button) {
+        button.disabled = true;
+        button.style.opacity = "0.5";
+
         try {
             const response = await fetch(`/api/papers/${paperId}/${action}`, {
                 method: "POST",
@@ -598,9 +642,8 @@
                 body: JSON.stringify({}),
             });
             const data = await response.json();
-            if (!response.ok) return;
+            if (!response.ok) { button.disabled = false; button.style.opacity = ""; return; }
             button.textContent = data.added ? data.message : `${data.term} already configured`;
-            button.disabled = true;
             button.classList.add("opacity-60", "cursor-not-allowed");
             if (action === "mute") {
                 const card = button.closest(".paper-card");
@@ -610,7 +653,88 @@
             }
         } catch (error) {
             console.error("Recommendation request failed", error);
+            button.disabled = false;
+            button.style.opacity = "";
         }
     }
+
+    /* ── Keyboard shortcuts ── */
+    let focusedCardIndex = -1;
+
+    function getCards() {
+        return Array.from(document.querySelectorAll(".paper-card"));
+    }
+
+    function focusCard(index) {
+        const cards = getCards();
+        if (!cards.length) return;
+        focusedCardIndex = Math.max(0, Math.min(index, cards.length - 1));
+        const card = cards[focusedCardIndex];
+        card.focus();
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        cards.forEach((c, i) => {
+            c.classList.toggle("ring-2", i === focusedCardIndex);
+            c.classList.toggle("ring-gray-900", i === focusedCardIndex);
+        });
+    }
+
+    function clickCardFeedback(action) {
+        const cards = getCards();
+        if (focusedCardIndex < 0 || focusedCardIndex >= cards.length) return;
+        const btn = cards[focusedCardIndex].querySelector(`.feedback-btn[data-action="${action}"]`);
+        if (btn) btn.click();
+    }
+
+    document.addEventListener("keydown", (e) => {
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        const cards = getCards();
+        if (!cards.length) return;
+
+        switch (e.key) {
+            case "j":
+                e.preventDefault();
+                focusCard(focusedCardIndex + 1);
+                break;
+            case "k":
+                e.preventDefault();
+                focusCard(focusedCardIndex - 1);
+                break;
+            case "s":
+                e.preventDefault();
+                clickCardFeedback("save");
+                break;
+            case "u":
+                e.preventDefault();
+                clickCardFeedback("upvote");
+                break;
+            case "x":
+                e.preventDefault();
+                clickCardFeedback("skip");
+                break;
+            case "o":
+                e.preventDefault();
+                if (focusedCardIndex >= 0 && focusedCardIndex < cards.length) {
+                    const link = cards[focusedCardIndex].querySelector(".paper-link");
+                    if (link) window.open(link.href, "_blank");
+                }
+                break;
+            case "p":
+                e.preventDefault();
+                if (focusedCardIndex >= 0 && focusedCardIndex < cards.length) {
+                    const pdf = cards[focusedCardIndex].querySelector(".paper-pdf-link");
+                    if (pdf) window.open(pdf.href, "_blank");
+                }
+                break;
+            case "d":
+                e.preventDefault();
+                if (focusedCardIndex >= 0 && focusedCardIndex < cards.length) {
+                    const toggle = cards[focusedCardIndex].querySelector(".card-toggle");
+                    if (toggle) toggle.click();
+                }
+                break;
+        }
+    });
 </script>
 {% endblock %}

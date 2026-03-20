@@ -7,24 +7,7 @@
     <meta name="csrf-token" content="{{ csrf_token }}">
     {% endif %}
     <title>{% block title %}ArXiv CV Scraper{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(12px); }
-            to   { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to   { opacity: 1; }
-        }
-        @keyframes barPulse {
-            0%, 100% { opacity: 1; }
-            50%      { opacity: 0.7; }
-        }
-        .animate-slide-up { animation: slideUp 0.25s ease-out both; }
-        .animate-fade-in { animation: fadeIn 0.2s ease-out both; }
-        .bar-pulse { animation: barPulse 1.5s ease-in-out infinite; }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="h-full">
     <nav class="bg-white border-b border-gray-100">
@@ -50,6 +33,13 @@
                         </a>
                     </div>
                 </div>
+                <div class="flex items-center gap-2">
+                    <button id="mobile-menu-btn" onclick="toggleMobileMenu()"
+                            class="sm:hidden p-1.5 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-50">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                        </svg>
+                    </button>
                 <button id="scrape-btn" onclick="startScrape()"
                         class="inline-flex items-center px-3.5 py-1.5 bg-gray-900 text-white text-sm font-medium rounded-lg
                                hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900
@@ -60,9 +50,22 @@
                     </svg>
                     <span id="scrape-text">Run Scrape</span>
                 </button>
+                </div>
             </div>
         </div>
     </nav>
+    <div id="mobile-menu" class="sm:hidden hidden border-b border-gray-100 bg-white">
+        <div class="px-4 py-3 space-y-1">
+            <a href="/" class="block px-3 py-2 rounded-md text-sm font-medium
+                {% if request.endpoint == 'dashboard.index' %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900{% endif %}">
+                Papers
+            </a>
+            <a href="/settings" class="block px-3 py-2 rounded-md text-sm font-medium
+                {% if request.endpoint and 'settings' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900{% endif %}">
+                Settings
+            </a>
+        </div>
+    </div>
 
     <div id="progress-overlay" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-slide-up">
@@ -134,6 +137,10 @@
     </main>
 
     <script>
+        function toggleMobileMenu() {
+            document.getElementById("mobile-menu").classList.toggle("hidden");
+        }
+
         function getCsrfToken() {
             const meta = document.querySelector('meta[name="csrf-token"]');
             return meta ? meta.content : "";
@@ -191,6 +198,9 @@
                 '<p class="text-xs text-gray-400 text-center py-4" id="feed-placeholder">Waiting for matches...</p>';
             document.getElementById("progress-stats").classList.add("hidden");
             document.getElementById("progress-footer").classList.add("hidden");
+            document.getElementById("progress-footer").innerHTML =
+                '<button onclick="closeScrapeAndReload()" class="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">View Results</button>';
+            document.getElementById("progress-footer").className = "hidden border-t border-gray-100 px-6 py-3 bg-gray-50 text-right";
 
             setOverlayVisible(true);
 
@@ -251,13 +261,21 @@
                 const data = JSON.parse(event.data);
                 source.close();
 
-                if (window.confirm(data.reason || "Already scraped today. Run again?")) {
-                    startScrape(true);
-                    return;
-                }
+                document.getElementById("progress-title").textContent = "Already scraped";
+                document.getElementById("progress-subtitle").textContent = data.reason || "Today's papers have already been fetched.";
+                document.getElementById("progress-bar").style.width = "100%";
+                document.getElementById("progress-bar").className = "h-full bg-amber-400 rounded-full transition-all duration-300 ease-out";
+                document.getElementById("progress-pct").textContent = "";
+                document.getElementById("progress-matches").textContent = "";
+                document.getElementById("progress-counter").textContent = "";
+
+                const footer = document.getElementById("progress-footer");
+                footer.className = "border-t border-gray-100 px-6 py-3 bg-gray-50 flex items-center justify-end gap-2";
+                footer.innerHTML =
+                    '<button onclick="setOverlayVisible(false); resetScrapeButton();" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors">Dismiss</button>' +
+                    '<button onclick="startScrape(true)" class="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">Run Again</button>';
 
                 resetScrapeButton();
-                setOverlayVisible(false);
             });
 
             source.onerror = () => {
