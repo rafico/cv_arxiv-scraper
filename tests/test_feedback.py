@@ -53,6 +53,32 @@ class FeedbackTests(FlaskDBTestCase):
         updated = db.session.get(Paper, paper.id)
         self.assertTrue(updated.is_hidden)
 
+    def test_save_clears_skip_and_unhides_paper(self):
+        paper = self._create_paper()
+
+        apply_feedback_action(paper.id, "skip")
+        result = apply_feedback_action(paper.id, "save")
+
+        updated = db.session.get(Paper, paper.id)
+        self.assertTrue(result["active"])
+        self.assertEqual(result["counts"]["save"], 1)
+        self.assertEqual(result["counts"]["skip"], 0)
+        self.assertFalse(updated.is_hidden)
+
+    def test_skip_clears_positive_feedback(self):
+        paper = self._create_paper()
+
+        apply_feedback_action(paper.id, "upvote")
+        apply_feedback_action(paper.id, "save")
+        result = apply_feedback_action(paper.id, "skip")
+
+        updated = db.session.get(Paper, paper.id)
+        self.assertTrue(result["active"])
+        self.assertEqual(result["counts"]["upvote"], 0)
+        self.assertEqual(result["counts"]["save"], 0)
+        self.assertEqual(result["counts"]["skip"], 1)
+        self.assertTrue(updated.is_hidden)
+
 
 if __name__ == "__main__":
     import unittest

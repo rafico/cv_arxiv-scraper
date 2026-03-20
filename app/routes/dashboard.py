@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, current_app, render_template, request
 from flask_sqlalchemy.query import Query
 
 from app.csrf import get_or_create_csrf_token
-from app.models import Paper, db
+from app.models import DigestRun, Paper, PaperFeedback, ScrapeRun, db
 from app.services.feedback import get_feedback_snapshot
+from app.services.preferences import first_author_name, get_preferences
 from app.services.related import build_vector, top_related_papers
 from app.constants import DASHBOARD_PER_PAGE
-from app.services.ranking import FEEDBACK_BOOST, combined_rank_score
+from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score
 from app.services.text import now_utc
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -22,7 +23,9 @@ TIMEFRAME_DAYS = {
     "all": None,
 }
 
-SORT_OPTIONS = {"trending", "newest"}
+VIEW_OPTIONS = {"inbox", "saved"}
+SORT_OPTIONS = {"trending", "newest", "saved"}
+RESOURCE_FILTER_OPTIONS = {"all", "available", "missing"}
 
 
 def _parse_page(raw_value: str | None) -> int:
@@ -48,9 +51,163 @@ def _apply_timeframe(query: Query, timeframe: str) -> Query:
     )
 
 
-def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool: list[Paper]) -> None:
+def _interest_counts(config: dict) -> dict[str, int]:
+    whitelists = config.get("whitelists", {})
+    counts = {
+        "authors": len(whitelists.get("authors", [])),
+        "affiliations": len(whitelists.get("affiliations", [])),
+        "titles": len(whitelists.get("titles", [])),
+    }
+    counts["total"] = counts["authors"] + counts["affiliations"] + counts["titles"]
+    return counts
+
+
+def _apply_muted_filters(query: Query, config: dict, *, active: bool) -> Query:
+    if not active:
+        return query
+
+    preferences = get_preferences(config)
+    muted = preferences["muted"]
+    for author in muted["authors"]:
+        escaped = f"%{author.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%"
+        query = query.filter(~Paper.authors.ilike(escaped, escape="\\"))
+    for topic in muted["topics"]:
+        escaped = f"%{topic.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%"
+        query = query.filter(~db.cast(Paper.topic_tags, db.Text).ilike(escaped, escape="\\"))
+    for affiliation in muted["affiliations"]:
+        escaped = f"%{affiliation.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%"
+        query = query.filter(~db.cast(Paper.matched_terms, db.Text).ilike(escaped, escape="\\"))
+    return query
+
+
+def _escape_like_term(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _apply_category_filter(query: Query, category: str | None) -> Query:
+    if not category:
+        return query
+    escaped = f"%{_escape_like_term(category)}%"
+    return query.filter(~db.cast(Paper.categories, db.Text).is_(None)).filter(
+        db.cast(Paper.categories, db.Text).ilike(escaped, escape="\\")
+    )
+
+
+def _apply_resource_filter(query: Query, resource_filter: str) -> Query:
+    resources_expr = db.cast(Paper.resource_links, db.Text)
+    if resource_filter == "available":
+        return query.filter(resources_expr != "[]")
+    if resource_filter == "missing":
+        return query.filter(
+            db.or_(resources_expr == "[]", resources_expr.is_(None))
+        )
+    return query
+
+
+def _build_filter_options(query: Query) -> dict:
+    category_counts: dict[str, int] = {}
+    resources_available = 0
+    resources_missing = 0
+
+    rows = query.order_by(None).with_entities(Paper.categories, Paper.resource_links).all()
+    for categories, resource_links in rows:
+        for category in categories or []:
+            category_counts[category] = category_counts.get(category, 0) + 1
+        if resource_links:
+            resources_available += 1
+        else:
+            resources_missing += 1
+
+    categories = [
+        {"label": label, "count": count}
+        for label, count in sorted(category_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    ]
+    return {
+        "categories": categories,
+        "resources": {
+            "available": resources_available,
+            "missing": resources_missing,
+        },
+    }
+
+
+def _build_onboarding_steps(config: dict, *, saved_count: int, has_successful_scrape: bool) -> list[dict]:
+    interest_total = _interest_counts(config)["total"]
+    return [
+        {
+            "label": "Add interests",
+            "description": "Track the authors, labs, and topics you care about.",
+            "complete": interest_total > 0,
+            "href": "/settings?section=interests",
+        },
+        {
+            "label": "Run a scrape",
+            "description": "Build your research inbox from the latest arXiv feed.",
+            "complete": has_successful_scrape,
+            "href": "#run-scrape",
+        },
+        {
+            "label": "Save or rate papers",
+            "description": "Teach the ranking loop what is genuinely useful.",
+            "complete": saved_count > 0 or PaperFeedback.query.count() > 0,
+            "href": "/",
+        },
+    ]
+
+
+def _build_dashboard_overview(config: dict) -> dict:
+    latest_scrape = ScrapeRun.query.order_by(ScrapeRun.started_at.desc()).first()
+    latest_digest = DigestRun.query.order_by(DigestRun.started_at.desc()).first()
+    has_successful_scrape = (
+        db.session.query(ScrapeRun.id).filter(ScrapeRun.status == "success").first() is not None
+    )
+
+    latest_scrape_view = None
+    if latest_scrape is not None:
+        timestamp = latest_scrape.finished_at or latest_scrape.started_at
+        latest_scrape_view = {
+            "status": latest_scrape.status,
+            "status_label": latest_scrape.status.replace("_", " ").title(),
+            "timestamp": timestamp.strftime("%Y-%m-%d %H:%M UTC"),
+            "forced": bool(latest_scrape.forced),
+        }
+
+    latest_digest_view = None
+    if latest_digest is not None:
+        timestamp = latest_digest.finished_at or latest_digest.started_at
+        latest_digest_view = {
+            "status": latest_digest.status,
+            "status_label": latest_digest.status.replace("_", " ").title(),
+            "timestamp": timestamp.strftime("%Y-%m-%d %H:%M UTC"),
+            "papers_count": int(latest_digest.papers_count or 0),
+            "preview_only": bool(latest_digest.preview_only),
+            "recipient": latest_digest.recipient,
+        }
+
+    saved_count = PaperFeedback.query.filter_by(action="save").count()
+
+    return {
+        "saved_count": saved_count,
+        "interest_counts": _interest_counts(config),
+        "latest_scrape": latest_scrape_view,
+        "latest_digest": latest_digest_view,
+        "has_successful_scrape": has_successful_scrape,
+        "scrape_history": ScrapeRun.query.order_by(ScrapeRun.started_at.desc()).limit(5).all(),
+        "digest_history": DigestRun.query.order_by(DigestRun.started_at.desc()).limit(5).all(),
+        "onboarding_steps": _build_onboarding_steps(
+            config,
+            saved_count=saved_count,
+            has_successful_scrape=has_successful_scrape,
+        ),
+    }
+
+
+def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool: list[Paper], config: dict) -> None:
     paper_ids = [paper.id for paper in papers]
     feedback_snapshot = get_feedback_snapshot(paper_ids)
+    preferences = get_preferences(config)
+    followed_authors = set(config.get("whitelists", {}).get("authors", []))
+    muted_topics = set(preferences["muted"]["topics"])
 
     vectors_by_id = {
         paper.id: build_vector(
@@ -75,6 +232,25 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
         paper.feedback_counts = feedback["counts"]  # type: ignore[attr-defined]
         paper.active_actions = feedback["active_actions"]  # type: ignore[attr-defined]
         paper.rank_score_value = combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0))  # type: ignore[attr-defined]
+        paper.score_breakdown = explain_score(  # type: ignore[attr-defined]
+            match_types=[part.strip() for part in (paper.match_type or "").split("+") if part.strip()],
+            matched_terms_count=len(paper.matched_terms_list),
+            publication_dt=paper.publication_dt,
+            resource_count=len(paper.resource_links_list),
+            llm_relevance_score=paper.llm_relevance_score,
+            feedback_score=int(paper.feedback_score or 0),
+            config=config,
+        )
+        primary_author = first_author_name(paper.authors)
+        primary_topic = next((topic for topic in paper.topic_tags_list if topic), "")
+        paper.follow_recommendation = {  # type: ignore[attr-defined]
+            "label": primary_author,
+            "available": bool(primary_author) and primary_author not in followed_authors,
+        }
+        paper.mute_recommendation = {  # type: ignore[attr-defined]
+            "label": primary_topic,
+            "available": bool(primary_topic) and primary_topic not in muted_topics,
+        }
 
         related_ids = top_related_papers(paper.id, vectors_by_id, top_k=3)
         paper.related_papers = [candidate_by_id[related_id] for related_id in related_ids]  # type: ignore[attr-defined]
@@ -82,14 +258,27 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
 
 @dashboard_bp.route("/")
 def index():
+    config = current_app.config["SCRAPER_CONFIG"]
+    view = request.args.get("view", "inbox")
+    if view not in VIEW_OPTIONS:
+        view = "inbox"
+
     query = Paper.query
+    if view == "saved":
+        query = query.join(
+            PaperFeedback,
+            db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == "save"),
+        )
+    query = _apply_muted_filters(query, config, active=view != "saved")
+
     include_hidden = request.args.get("include_hidden") == "1"
     if not include_hidden:
         query = query.filter(Paper.is_hidden.is_(False))
 
-    timeframe = request.args.get("timeframe", "daily")
+    default_timeframe = "all" if view == "saved" else "daily"
+    timeframe = request.args.get("timeframe", default_timeframe)
     if timeframe not in TIMEFRAME_DAYS:
-        timeframe = "daily"
+        timeframe = default_timeframe
     query = _apply_timeframe(query, timeframe)
 
     match_type = request.args.get("match_type")
@@ -98,7 +287,7 @@ def index():
 
     q = request.args.get("q", "").strip()
     if q:
-        escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        escaped_q = _escape_like_term(q)
         search = f"%{escaped_q}%"
         query = query.filter(
             db.or_(
@@ -112,11 +301,28 @@ def index():
             )
         )
 
-    sort = request.args.get("sort", "trending")
-    if sort not in SORT_OPTIONS:
-        sort = "trending"
+    category = request.args.get("category", "").strip()
+    resource_filter = request.args.get("resource_filter", "all").strip()
+    if resource_filter not in RESOURCE_FILTER_OPTIONS:
+        resource_filter = "all"
 
-    if sort == "newest":
+    filter_options = _build_filter_options(query)
+    query = _apply_category_filter(query, category or None)
+    query = _apply_resource_filter(query, resource_filter)
+
+    default_sort = "saved" if view == "saved" else "trending"
+    sort = request.args.get("sort", default_sort)
+    valid_sorts = {"saved", "newest"} if view == "saved" else {"trending", "newest"}
+    if sort not in valid_sorts or sort not in SORT_OPTIONS:
+        sort = default_sort
+
+    if sort == "saved" and view == "saved":
+        query = query.order_by(
+            PaperFeedback.created_at.desc(),
+            Paper.publication_dt.desc(),
+            Paper.scraped_at.desc(),
+        )
+    elif sort == "newest":
         query = query.order_by(Paper.publication_dt.desc(), Paper.scraped_at.desc())
     else:
         query = query.order_by(
@@ -146,7 +352,7 @@ def index():
         .limit(250)
         .all()
     )
-    _enrich_cards_with_feedback_and_related(papers, candidate_pool)
+    _enrich_cards_with_feedback_and_related(papers, candidate_pool, config)
 
     return render_template(
         "dashboard.html",
@@ -154,11 +360,16 @@ def index():
         pagination=pagination,
         type_counts=type_counts,
         current_filters={
+            "view": view,
             "match_type": match_type,
             "q": q,
             "timeframe": timeframe,
             "sort": sort,
             "include_hidden": include_hidden,
+            "category": category,
+            "resource_filter": resource_filter,
         },
+        filter_options=filter_options,
+        dashboard_overview=_build_dashboard_overview(config),
         csrf_token=get_or_create_csrf_token(),
     )

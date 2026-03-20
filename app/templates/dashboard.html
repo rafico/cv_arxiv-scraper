@@ -12,13 +12,14 @@
 {% set FEEDBACK = {
     'upvote': {'label': 'Upvote', 'active': 'bg-blue-50 text-blue-700 border-blue-200'},
     'save':   {'label': 'Save',   'active': 'bg-emerald-50 text-emerald-700 border-emerald-200'},
-    'skip':   {'label': 'Skip',   'active': 'bg-rose-50 text-rose-700 border-rose-200'},
+    'skip':   {'label': 'Not Interested', 'active': 'bg-rose-50 text-rose-700 border-rose-200'},
 } %}
 
 {% set TIMEFRAMES = [('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly'), ('all', 'All Time')] %}
 
 {% block content %}
 <form method="GET" action="/" id="filter-form">
+    <input type="hidden" name="view" id="view_input" value="{{ current_filters.view }}">
     <input type="hidden" name="match_type" id="match_type_input" value="{{ current_filters.match_type or '' }}">
     <input type="hidden" name="timeframe" id="timeframe_input" value="{{ current_filters.timeframe }}">
     <input type="hidden" name="sort" id="sort_input" value="{{ current_filters.sort }}">
@@ -28,8 +29,10 @@
 
     <div class="flex items-start justify-between mb-4">
         <div>
-            <h1 class="text-xl font-bold text-gray-900">Matched Papers</h1>
-            <p class="text-sm text-gray-500 mt-0.5">Daily triage with ranking, metadata, and related papers</p>
+            <h1 class="text-xl font-bold text-gray-900">{{ 'Saved Papers' if current_filters.view == 'saved' else 'Matched Papers' }}</h1>
+            <p class="text-sm text-gray-500 mt-0.5">
+                {{ 'Your shortlist of papers to revisit and share.' if current_filters.view == 'saved' else 'Daily triage with ranking, metadata, and related papers.' }}
+            </p>
         </div>
         {% if pagination.total %}
         <div class="text-sm text-gray-400 tabular-nums pt-1">
@@ -38,7 +41,93 @@
         {% endif %}
     </div>
 
-    {# ── Timeframe pills ── #}
+    <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 mb-5">
+        <div class="rounded-2xl border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Saved Queue</div>
+            <div class="mt-2 text-2xl font-semibold text-gray-900">{{ dashboard_overview.saved_count }}</div>
+            <p class="mt-1 text-sm text-gray-500">Papers you marked to revisit later.</p>
+        </div>
+        <div class="rounded-2xl border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Last Scrape</div>
+            {% if dashboard_overview.latest_scrape %}
+            <div class="mt-2 text-base font-semibold text-gray-900">{{ dashboard_overview.latest_scrape.status_label }}</div>
+            <p class="mt-1 text-sm text-gray-500">
+                {{ dashboard_overview.latest_scrape.timestamp }}
+                {% if dashboard_overview.latest_scrape.forced %}<span class="text-gray-400">· forced rerun</span>{% endif %}
+            </p>
+            {% else %}
+            <div class="mt-2 text-base font-semibold text-gray-900">Not run yet</div>
+            <p class="mt-1 text-sm text-gray-500">Run your first scrape to build today’s queue.</p>
+            {% endif %}
+        </div>
+        <div class="rounded-2xl border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Tracking</div>
+            <div class="mt-2 text-base font-semibold text-gray-900">
+                {{ dashboard_overview.interest_counts.authors }} authors · {{ dashboard_overview.interest_counts.affiliations }} labs · {{ dashboard_overview.interest_counts.titles }} topics
+            </div>
+            <p class="mt-1 text-sm text-gray-500">Your ranking signals live in Settings and shape every scrape.</p>
+        </div>
+        <div class="rounded-2xl border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Latest Digest</div>
+            {% if dashboard_overview.latest_digest %}
+            <div class="mt-2 text-base font-semibold text-gray-900">{{ dashboard_overview.latest_digest.status_label }}</div>
+            <p class="mt-1 text-sm text-gray-500">
+                {{ dashboard_overview.latest_digest.timestamp }} · {{ dashboard_overview.latest_digest.papers_count }} papers
+            </p>
+            <p class="mt-1 text-xs text-gray-400">
+                {{ 'Preview only' if dashboard_overview.latest_digest.preview_only else dashboard_overview.latest_digest.recipient }}
+            </p>
+            {% else %}
+            <div class="mt-2 text-base font-semibold text-gray-900">Not sent yet</div>
+            <p class="mt-1 text-sm text-gray-500">Preview or send a digest from Settings when your inbox looks right.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% set incomplete_steps = dashboard_overview.onboarding_steps | selectattr('complete', 'equalto', false) | list %}
+    {% if incomplete_steps and current_filters.view == 'inbox' %}
+    <div class="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 mb-5">
+        <div class="flex items-center justify-between gap-3 mb-3">
+            <div>
+                <h2 class="text-sm font-semibold text-amber-900">First-Run Checklist</h2>
+                <p class="text-sm text-amber-800/80">Complete the core setup once, then this becomes a daily triage loop.</p>
+            </div>
+            <div class="text-xs font-medium text-amber-700">{{ dashboard_overview.onboarding_steps | rejectattr('complete', 'equalto', false) | list | length }}/{{ dashboard_overview.onboarding_steps|length }} done</div>
+        </div>
+        <div class="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            {% for step in dashboard_overview.onboarding_steps %}
+            <a href="{{ step.href }}"
+               {% if step.href == '#run-scrape' %}onclick="startScrape(); return false;"{% endif %}
+               class="rounded-xl border px-4 py-3 transition-colors {{ 'border-emerald-200 bg-white' if step.complete else 'border-amber-200 bg-white/80 hover:bg-white' }}">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="text-sm font-semibold {{ 'text-emerald-700' if step.complete else 'text-gray-900' }}">{{ step.label }}</div>
+                    <div class="text-[11px] uppercase tracking-[0.16em] {{ 'text-emerald-600' if step.complete else 'text-amber-700' }}">{{ 'Done' if step.complete else 'Next' }}</div>
+                </div>
+                <p class="mt-1 text-sm text-gray-500">{{ step.description }}</p>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+        <a href="{{ url_for('dashboard.index', view='inbox', timeframe='daily', sort='trending', q=current_filters.q or None, category=current_filters.category or None, resource_filter=current_filters.resource_filter if current_filters.resource_filter != 'all' else None) }}"
+           class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                  {{ 'bg-gray-900 text-white' if current_filters.view == 'inbox' else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+            Inbox
+        </a>
+        <a href="{{ url_for('dashboard.index', view='saved', timeframe='all', sort='saved', q=current_filters.q or None, category=current_filters.category or None, resource_filter=current_filters.resource_filter if current_filters.resource_filter != 'all' else None) }}"
+           class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                  {{ 'bg-emerald-600 text-white' if current_filters.view == 'saved' else 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' }}">
+            Saved {{ dashboard_overview.saved_count }}
+        </a>
+        <a href="/settings"
+           class="px-3 py-1.5 text-sm font-medium rounded-full bg-white border border-gray-200 text-gray-600 hover:bg-gray-50">
+            Edit Interests
+        </a>
+    </div>
+
+    {% if current_filters.view == 'inbox' %}
     <div class="flex flex-wrap items-center gap-2 mb-3">
         {% for value, label in TIMEFRAMES %}
         <button type="button" onclick="setFilter('timeframe_input','{{ value }}')"
@@ -48,6 +137,7 @@
         </button>
         {% endfor %}
     </div>
+    {% endif %}
 
     {# ── Match-type pills + search ── #}
     <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 mb-4">
@@ -79,25 +169,67 @@
             <select name="sort" id="sort"
                     onchange="document.getElementById('sort_input').value=this.value; document.getElementById('filter-form').submit();"
                     class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                {% if current_filters.view == 'saved' %}
+                <option value="saved" {{ 'selected' if current_filters.sort == 'saved' }}>Recently Saved</option>
+                <option value="newest" {{ 'selected' if current_filters.sort == 'newest' }}>Newest Paper</option>
+                {% else %}
                 <option value="trending" {{ 'selected' if current_filters.sort == 'trending' }}>Trending</option>
                 <option value="newest" {{ 'selected' if current_filters.sort == 'newest' }}>Newest</option>
+                {% endif %}
             </select>
+            {% if current_filters.view == 'inbox' %}
             <a href="/api/export?timeframe={{ current_filters.timeframe }}&download=1"
                class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
                 Export
             </a>
+            {% endif %}
         </div>
     </div>
 
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-5">
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Filters</span>
+            <select name="category" id="category"
+                    onchange="document.getElementById('filter-form').submit();"
+                    class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                <option value="">All categories</option>
+                {% for category in filter_options.categories %}
+                <option value="{{ category.label }}" {{ 'selected' if current_filters.category == category.label }}>
+                    {{ category.label }} ({{ category.count }})
+                </option>
+                {% endfor %}
+            </select>
+            <select name="resource_filter" id="resource_filter"
+                    onchange="document.getElementById('filter-form').submit();"
+                    class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                <option value="all" {{ 'selected' if current_filters.resource_filter == 'all' }}>All resource states</option>
+                <option value="available" {{ 'selected' if current_filters.resource_filter == 'available' }}>Has resources ({{ filter_options.resources.available }})</option>
+                <option value="missing" {{ 'selected' if current_filters.resource_filter == 'missing' }}>No resources ({{ filter_options.resources.missing }})</option>
+            </select>
+        </div>
+        {% if current_filters.category or current_filters.resource_filter != 'all' %}
+        <div class="text-xs text-gray-500">
+            {{ current_filters.category or 'All categories' }} ·
+            {{ 'Has resources' if current_filters.resource_filter == 'available' else 'No resources' if current_filters.resource_filter == 'missing' else 'All resource states' }}
+        </div>
+        {% endif %}
+    </div>
+
     <div class="flex items-center justify-between text-xs mb-6">
+        {% if current_filters.view == 'inbox' %}
         <label class="inline-flex items-center gap-2 text-gray-500 cursor-pointer">
             <input type="checkbox" id="include_hidden_toggle" {{ 'checked' if current_filters.include_hidden }}
                    onchange="toggleHidden(this)"
                    class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
-            Show skipped papers
+            Show not interested papers
         </label>
-        {% if current_filters.q or current_filters.match_type or current_filters.timeframe != 'daily' or current_filters.sort != 'trending' or current_filters.include_hidden %}
-        <a href="/" class="text-gray-500 hover:text-gray-700">Reset filters</a>
+        {% else %}
+        <div class="text-gray-500">Saved view defaults to all time so papers stay easy to find.</div>
+        {% endif %}
+        {% set has_non_default_filters = current_filters.q or current_filters.match_type or current_filters.include_hidden or current_filters.category or current_filters.resource_filter != 'all' or (current_filters.view == 'inbox' and (current_filters.timeframe != 'daily' or current_filters.sort != 'trending')) or (current_filters.view == 'saved' and (current_filters.timeframe != 'all' or current_filters.sort != 'saved')) %}
+        {% if has_non_default_filters %}
+        <a href="{{ url_for('dashboard.index', view=current_filters.view, timeframe='all' if current_filters.view == 'saved' else 'daily', sort='saved' if current_filters.view == 'saved' else 'trending') }}"
+           class="text-gray-500 hover:text-gray-700">Reset filters</a>
         {% endif %}
     </div>
 </form>
@@ -152,14 +284,51 @@
             </div>
             {% endif %}
 
-            {# ── Matched terms ── #}
-            {% if paper.matched_terms_list %}
-            <div class="flex flex-wrap gap-1 mb-3">
-                {% for term in paper.matched_terms_list %}
-                <span class="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
+            {% if paper.categories_list %}
+            <div class="flex flex-wrap gap-1 mb-2">
+                {% for category in paper.categories_list[:4] %}
+                <span class="text-[11px] text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{{ category }}</span>
                 {% endfor %}
             </div>
             {% endif %}
+
+            {# ── Matched terms ── #}
+            {% if paper.matched_terms_list %}
+            <div class="mb-3">
+                <div class="text-[11px] text-gray-500 mb-1">Why it matched</div>
+                <div class="flex flex-wrap gap-1">
+                    {% for term in paper.matched_terms_list %}
+                    <span class="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if paper.resource_links_list %}
+            <div class="flex flex-wrap gap-1.5 mb-3">
+                {% for resource in paper.resource_links_list[:4] %}
+                <a href="{{ resource.url }}" target="_blank"
+                   class="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50">
+                    {{ resource.label or resource.type|title }}
+                </a>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <details class="mb-3 rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2">
+                <summary class="cursor-pointer list-none flex items-center justify-between gap-3 text-[11px] font-medium text-gray-600">
+                    <span>Score {{ '%.1f'|format(paper.rank_score_value) }} · Why this ranked here</span>
+                    <span class="text-gray-400">Details</span>
+                </summary>
+                <div class="mt-2 grid grid-cols-2 gap-2 text-[11px] text-gray-600">
+                    <div class="rounded-lg bg-white px-2 py-1.5">Match signals: {{ '%.1f'|format(paper.score_breakdown.match_score) }}</div>
+                    <div class="rounded-lg bg-white px-2 py-1.5">Term matches: {{ '%.1f'|format(paper.score_breakdown.term_score) }}</div>
+                    <div class="rounded-lg bg-white px-2 py-1.5">Resources: {{ '%.1f'|format(paper.score_breakdown.resource_score) }}</div>
+                    <div class="rounded-lg bg-white px-2 py-1.5">AI boost: {{ '%.1f'|format(paper.score_breakdown.ai_bonus) }}</div>
+                    <div class="rounded-lg bg-white px-2 py-1.5">Freshness x{{ '%.2f'|format(paper.score_breakdown.recency_multiplier) }}</div>
+                    <div class="rounded-lg bg-white px-2 py-1.5">Feedback: {{ '%.1f'|format(paper.score_breakdown.feedback_bonus) }}</div>
+                </div>
+            </details>
 
             {# ── Feedback buttons ── #}
             <div class="flex items-center gap-2 mb-3">
@@ -173,6 +342,25 @@
                 </button>
                 {% endfor %}
             </div>
+
+            {% if paper.follow_recommendation.available or paper.mute_recommendation.available %}
+            <div class="flex flex-wrap items-center gap-2 mb-3">
+                {% if paper.follow_recommendation.available %}
+                <button type="button"
+                        onclick="sendRecommendation({{ paper.id }}, 'follow', this)"
+                        class="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100">
+                    Follow {{ paper.follow_recommendation.label }}
+                </button>
+                {% endif %}
+                {% if paper.mute_recommendation.available %}
+                <button type="button"
+                        onclick="sendRecommendation({{ paper.id }}, 'mute', this)"
+                        class="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-100">
+                    Mute {{ paper.mute_recommendation.label }}
+                </button>
+                {% endif %}
+            </div>
+            {% endif %}
 
             {# ── Related papers ── #}
             {% if paper.related_papers %}
@@ -215,13 +403,59 @@
             ('next', pagination.has_next, pagination.next_num, 'Next'),
         ] %}
             {% if has %}
-            <a href="{{ url_for('dashboard.index', page=num, q=current_filters.q, match_type=current_filters.match_type, timeframe=current_filters.timeframe, sort=current_filters.sort, include_hidden='1' if current_filters.include_hidden else None) }}"
+            <a href="{{ url_for('dashboard.index', page=num, view=current_filters.view, q=current_filters.q, match_type=current_filters.match_type, timeframe=current_filters.timeframe, sort=current_filters.sort, include_hidden='1' if current_filters.include_hidden else None, category=current_filters.category or None, resource_filter=current_filters.resource_filter if current_filters.resource_filter != 'all' else None) }}"
                class="px-3 py-1.5 text-sm rounded border border-gray-200 text-gray-600 hover:bg-gray-50">{{ label }}</a>
             {% else %}
             <span class="px-3 py-1.5 text-sm rounded border border-gray-100 text-gray-300">{{ label }}</span>
             {% endif %}
         {% endfor %}
     </div>
+</div>
+
+<div class="mt-8 grid grid-cols-1 gap-4 xl:grid-cols-2">
+    <section class="rounded-2xl border border-gray-200 bg-white p-4">
+        <div class="flex items-center justify-between gap-3 mb-3">
+            <h2 class="text-sm font-semibold text-gray-900">Recent Scrapes</h2>
+            <a href="/settings?section=automation" class="text-xs text-gray-500 hover:text-gray-700">Open automation</a>
+        </div>
+        {% if dashboard_overview.scrape_history %}
+        <div class="space-y-2">
+            {% for run in dashboard_overview.scrape_history %}
+            <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-100 px-3 py-2 text-sm">
+                <div>
+                    <div class="font-medium text-gray-900">{{ run.status.replace('_', ' ').title() }}</div>
+                    <div class="text-xs text-gray-500">{{ run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC{% if run.forced %} · forced{% endif %}</div>
+                </div>
+                <div class="text-xs text-gray-400">{{ run.finished_at.strftime('%H:%M') if run.finished_at else 'running' }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-500">No scrape history yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="rounded-2xl border border-gray-200 bg-white p-4">
+        <div class="flex items-center justify-between gap-3 mb-3">
+            <h2 class="text-sm font-semibold text-gray-900">Recent Digests</h2>
+            <a href="/settings?section=automation" class="text-xs text-gray-500 hover:text-gray-700">Preview or send</a>
+        </div>
+        {% if dashboard_overview.digest_history %}
+        <div class="space-y-2">
+            {% for run in dashboard_overview.digest_history %}
+            <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-100 px-3 py-2 text-sm">
+                <div>
+                    <div class="font-medium text-gray-900">{{ run.status.replace('_', ' ').title() }}{% if run.preview_only %} preview{% endif %}</div>
+                    <div class="text-xs text-gray-500">{{ run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ run.papers_count }} papers</div>
+                </div>
+                <div class="text-xs text-gray-400 truncate max-w-[12rem]">{{ run.recipient or 'No recipient' }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-500">No digest history yet.</p>
+        {% endif %}
+    </section>
 </div>
 {% else %}
 <div class="text-center py-24">
@@ -231,12 +465,34 @@
                   d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>
         </svg>
     </div>
+    {% if current_filters.view == 'saved' %}
+    <h3 class="text-base font-semibold text-gray-900">Your saved queue is empty</h3>
+    <p class="mt-1 text-sm text-gray-500 mb-6">Save strong matches from the inbox and they will stay here for follow-up.</p>
+    <a href="{{ url_for('dashboard.index', view='inbox') }}"
+       class="inline-flex items-center px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
+        Back To Inbox
+    </a>
+    {% elif not dashboard_overview.has_successful_scrape %}
+    <h3 class="text-base font-semibold text-gray-900">Build your first research queue</h3>
+    <p class="mt-1 text-sm text-gray-500 mb-6">Add the authors, labs, and topics you care about, then run a scrape to create your first triage session.</p>
+    <div class="flex flex-wrap items-center justify-center gap-3">
+        <a href="/settings"
+           class="inline-flex items-center px-5 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+            Open Settings
+        </a>
+        <button onclick="startScrape()"
+                class="inline-flex items-center px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
+            Run First Scrape
+        </button>
+    </div>
+    {% else %}
     <h3 class="text-base font-semibold text-gray-900">No papers for this filter</h3>
-    <p class="mt-1 text-sm text-gray-500 mb-6">Try widening the timeframe or running a fresh scrape.</p>
+    <p class="mt-1 text-sm text-gray-500 mb-6">Try widening the timeframe, clearing filters, or running a fresh scrape.</p>
     <button onclick="startScrape()"
             class="inline-flex items-center px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
         Run Scrape
     </button>
+    {% endif %}
 </div>
 {% endif %}
 {% endblock %}
@@ -314,11 +570,46 @@
                 updateFeedbackButton(btn, (data.active_actions || []).includes(btnAction), btnAction, data.counts[btnAction] || 0);
             });
 
-            if (action === "skip" && data.active && !document.getElementById("include_hidden_toggle").checked) {
+            const currentView = document.getElementById("view_input")?.value || "inbox";
+            const includeHidden = document.getElementById("include_hidden_toggle")?.checked || false;
+            const activeActions = data.active_actions || [];
+            const isSaved = activeActions.includes("save");
+            const isHidden = activeActions.includes("skip");
+
+            if ((currentView === "saved" && !isSaved) || (isHidden && !includeHidden)) {
                 card.remove();
+                if (!document.querySelector(".paper-card")) {
+                    window.location.reload();
+                }
             }
         } catch (error) {
             console.error("Feedback request failed", error);
+        }
+    }
+
+    async function sendRecommendation(paperId, action, button) {
+        try {
+            const response = await fetch(`/api/papers/${paperId}/${action}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCsrfToken(),
+                },
+                body: JSON.stringify({}),
+            });
+            const data = await response.json();
+            if (!response.ok) return;
+            button.textContent = data.added ? data.message : `${data.term} already configured`;
+            button.disabled = true;
+            button.classList.add("opacity-60", "cursor-not-allowed");
+            if (action === "mute") {
+                const card = button.closest(".paper-card");
+                if (card) {
+                    card.remove();
+                }
+            }
+        } catch (error) {
+            console.error("Recommendation request failed", error);
         }
     }
 </script>

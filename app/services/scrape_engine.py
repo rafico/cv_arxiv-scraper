@@ -27,6 +27,7 @@ from app.services.matching import (
     dedupe_preserve_order,
 )
 from app.constants import DEFAULT_MAX_WORKERS
+from app.services.preferences import get_preferences
 from app.services.ranking import compute_paper_score
 from app.services.summary import extract_topic_tags, generate_llm_summary, generate_summary
 
@@ -46,6 +47,7 @@ def _build_result(
     category_matches: dict[str, list[str]],
     llm_client: LLMClient | None = None,
     interests_text: str = "",
+    config: dict | None = None,
 ) -> dict:
     """Assemble a result dict from an entry and its matches."""
     match_types = [name for name, terms in category_matches.items() if terms]
@@ -65,6 +67,8 @@ def _build_result(
         else None
     )
 
+    topic_tags = extract_topic_tags(title, abstract)
+
     return {
         "arxiv_id": entry_data.get("arxiv_id"),
         "title": title,
@@ -73,7 +77,7 @@ def _build_result(
         "pdf_link": entry_data["link"].replace("/abs/", "/pdf/"),
         "abstract_text": abstract,
         "summary_text": summary_text,
-        "topic_tags": extract_topic_tags(title, abstract),
+        "topic_tags": topic_tags,
         "categories": entry_data.get("categories", []),
         "resource_links": entry_data.get("resource_links", []),
         "matches": matched_terms,
@@ -86,6 +90,7 @@ def _build_result(
             publication_dt=entry_data.get("publication_dt"),
             resource_count=len(entry_data.get("resource_links", [])),
             llm_relevance_score=llm_relevance_score,
+            config=config,
         ),
         "llm_relevance_score": llm_relevance_score,
         "publication_dt": entry_data.get("publication_dt"),
@@ -147,12 +152,24 @@ def _process_paper_entry(
     if not any(category_matches.values()):
         return None
 
-    return _build_result(
+    config = scraper_config.get("_product_config")
+
+    result = _build_result(
         entry_data,
         category_matches,
         llm_client=llm_client,
         interests_text=interests_text,
+        config=config,
     )
+    preferences = get_preferences(config)
+    muted = preferences["muted"]
+    if check_author_match(entry_data["authors_list"], muted["authors"]):
+        return None
+    if check_whitelist_match([entry_data.get("api_affiliations", "")], muted["affiliations"]):
+        return None
+    if check_whitelist_match(result["topic_tags"], muted["topics"]):
+        return None
+    return result
 
 
 def _process_entries_parallel(
@@ -478,10 +495,13 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         )
 
         results: list[dict] = []
+        processing_scraper_config = dict(scraper_config)
+        processing_scraper_config["_product_config"] = config
+
         for processed, matched, result in _process_entries_parallel(
             entries,
             whitelists,
-            scraper_config,
+            processing_scraper_config,
             llm_client,
             interests_text,
         ):

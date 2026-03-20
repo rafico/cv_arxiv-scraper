@@ -27,6 +27,20 @@ TEST_SCRAPER_CONFIG = {
         "base_url": "https://openrouter.ai/api/v1",
         "max_concurrent": 4,
     },
+    "preferences": {
+        "ranking": {
+            "author_weight": 44.0,
+            "affiliation_weight": 26.0,
+            "title_weight": 14.0,
+            "ai_weight": 5.0,
+            "freshness_half_life_days": 14.0,
+        },
+        "muted": {
+            "authors": [],
+            "affiliations": [],
+            "topics": [],
+        },
+    },
     "whitelists": {
         "titles": ["Vision"],
         "affiliations": ["MIT"],

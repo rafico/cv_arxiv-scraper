@@ -10,6 +10,9 @@ from app.services.ranking import combined_rank_score, compute_feedback_delta
 ALLOWED_ACTIONS = {"upvote", "save", "skip"}
 
 
+def _load_feedback_rows(paper_id: int) -> list[PaperFeedback]:
+    return PaperFeedback.query.filter_by(paper_id=paper_id).all()
+
 
 def apply_feedback_action(paper_id: int, action: str) -> dict:
     """Toggle a feedback action and return updated ranking metadata."""
@@ -20,32 +23,47 @@ def apply_feedback_action(paper_id: int, action: str) -> dict:
     if not paper:
         raise LookupError(f"Paper {paper_id} not found")
 
-    existing = PaperFeedback.query.filter_by(paper_id=paper_id, action=action).first()
-    delta = compute_feedback_delta(action)
+    rows_by_action = {row.action: row for row in _load_feedback_rows(paper_id)}
+    existing = rows_by_action.get(action)
+    delta = 0
     active = False
 
     if existing:
         db.session.delete(existing)
-        delta *= -1
+        delta -= compute_feedback_delta(action)
     else:
         db.session.add(PaperFeedback(paper_id=paper_id, action=action))
+        delta += compute_feedback_delta(action)
         active = True
+
+        # "Not interested" should be exclusive with positive signals so papers
+        # don't end up simultaneously hidden and saved/upvoted.
+        if action == "skip":
+            for conflicting_action in ("upvote", "save"):
+                row = rows_by_action.get(conflicting_action)
+                if row:
+                    db.session.delete(row)
+                    delta -= compute_feedback_delta(conflicting_action)
+        elif action in {"upvote", "save"}:
+            skip_row = rows_by_action.get("skip")
+            if skip_row:
+                db.session.delete(skip_row)
+                delta -= compute_feedback_delta("skip")
 
     paper.feedback_score = max(-100, min(100, int(paper.feedback_score or 0) + delta))
 
-    if action == "skip":
-        paper.is_hidden = active
-    elif not PaperFeedback.query.filter_by(paper_id=paper_id, action="skip").first():
-        paper.is_hidden = False
-
     db.session.commit()
 
-    rows = PaperFeedback.query.filter_by(paper_id=paper_id).all()
+    rows = _load_feedback_rows(paper_id)
     counts = {"upvote": 0, "save": 0, "skip": 0}
     active_actions = []
     for row in rows:
         counts[row.action] = counts.get(row.action, 0) + 1
         active_actions.append(row.action)
+
+    paper.is_hidden = "skip" in active_actions
+    db.session.commit()
+
     return {
         "paper_id": paper.id,
         "action": action,

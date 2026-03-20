@@ -82,10 +82,11 @@ def ensure_schema() -> None:
     db.session.commit()
 
     # Ensure feedback table exists even on older DBs.
-    from app.models import PaperFeedback, ScrapeRun  # local import to avoid circular dependency
+    from app.models import DigestRun, PaperFeedback, ScrapeRun  # local import to avoid circular dependency
 
     PaperFeedback.__table__.create(bind=db.engine, checkfirst=True)
     ScrapeRun.__table__.create(bind=db.engine, checkfirst=True)
+    DigestRun.__table__.create(bind=db.engine, checkfirst=True)
 
     for statement in INDEX_STATEMENTS:
         db.session.execute(text(statement))

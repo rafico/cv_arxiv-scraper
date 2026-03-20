@@ -110,6 +110,12 @@ class ConfigValidationTests(unittest.TestCase):
             (root / ".llm_api_key").write_text("file-key", encoding="utf-8")
             _validate_config(cfg, config_path=root / "config.yaml")
 
+    def test_preferences_ranking_values_must_be_positive(self):
+        cfg = self._valid_config()
+        cfg["preferences"]["ranking"]["author_weight"] = 0
+        with self.assertRaises(ValueError, msg="positive"):
+            _validate_config(cfg)
+
 
 if __name__ == "__main__":
     unittest.main()

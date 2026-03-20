@@ -10,6 +10,7 @@ from flask import Flask
 
 from app.models import db
 from app.schema import ensure_schema
+from app.services.preferences import get_preferences
 
 DEFAULT_DATABASE_URI = "sqlite:///arxiv_papers.db"
 DEFAULT_LLM_KEY_FILENAME = ".llm_api_key"
@@ -66,6 +67,17 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
         value = whitelists[key]
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             raise ValueError(f"'whitelists.{key}' must be a list of strings")
+
+    preferences = config.get("preferences")
+    if preferences is not None and not isinstance(preferences, dict):
+        raise ValueError("'preferences' must be a dict")
+    normalized_preferences = get_preferences(config)
+    for key, value in normalized_preferences["ranking"].items():
+        if value <= 0:
+            raise ValueError(f"'preferences.ranking.{key}' must be positive")
+    for key, items in normalized_preferences["muted"].items():
+        if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
+            raise ValueError(f"'preferences.muted.{key}' must be a list of strings")
 
     llm = config.get("llm")
     if llm is None:

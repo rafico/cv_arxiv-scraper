@@ -1,6 +1,16 @@
+from pathlib import Path
+
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from app.csrf import validate_csrf_token
+from app.models import Paper
+from app import _validate_config
+from app.services.preferences import (
+    append_muted_term,
+    append_whitelist_term,
+    first_author_name,
+    save_config,
+)
 from app.services import SCRAPE_JOB_MANAGER, apply_feedback_action, stream_or_start_scrape
 from app.services.export import generate_html_report
 
@@ -72,3 +82,37 @@ def paper_feedback(paper_id: int):
         return jsonify({"error": str(exc)}), 404
 
     return jsonify(result)
+
+
+@api_bp.route("/papers/<int:paper_id>/follow", methods=["POST"])
+def follow_recommendation(paper_id: int):
+    validate_csrf_token()
+    paper = Paper.query.get_or_404(paper_id)
+
+    term = first_author_name(paper.authors)
+    if not term:
+        return jsonify({"error": "No author available to follow"}), 400
+
+    config_path = Path(current_app.config["CONFIG_PATH"])
+    full_config, added = append_whitelist_term(current_app.config["SCRAPER_CONFIG"], "authors", term)
+    _validate_config(full_config, config_path=config_path)
+    save_config(config_path, full_config)
+    current_app.config["SCRAPER_CONFIG"] = full_config
+    return jsonify({"term": term, "added": added, "message": f"Following {term}."})
+
+
+@api_bp.route("/papers/<int:paper_id>/mute", methods=["POST"])
+def mute_recommendation(paper_id: int):
+    validate_csrf_token()
+    paper = Paper.query.get_or_404(paper_id)
+
+    term = next((tag for tag in paper.topic_tags_list if tag), "")
+    if not term:
+        return jsonify({"error": "No topic available to mute"}), 400
+
+    config_path = Path(current_app.config["CONFIG_PATH"])
+    full_config, added = append_muted_term(current_app.config["SCRAPER_CONFIG"], "topics", term)
+    _validate_config(full_config, config_path=config_path)
+    save_config(config_path, full_config)
+    current_app.config["SCRAPER_CONFIG"] = full_config
+    return jsonify({"term": term, "added": added, "message": f"Muted topic {term}."})

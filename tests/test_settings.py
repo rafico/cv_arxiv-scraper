@@ -278,6 +278,46 @@ class EmailSettingsTests(FlaskDBTestCase):
         self.assertIn("Test Prefix", html)
         self.assertIn("Email &amp; Gmail", html)
 
+    def test_digest_preview_route_renders_html(self):
+        response = self.client.get("/settings/digest-preview")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("ArXiv CV Digest", response.get_data(as_text=True))
+
+
+class PreferenceSettingsTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.app.test_client()
+
+    def _csrf_token(self) -> str:
+        self.client.get("/settings")
+        with self.client.session_transaction() as session:
+            return session["settings_csrf_token"]
+
+    def test_preferences_save_updates_config(self):
+        token = self._csrf_token()
+        response = self.client.post(
+            "/settings/preferences",
+            data={
+                "csrf_token": token,
+                "pref_author_weight": "50",
+                "pref_affiliation_weight": "20",
+                "pref_title_weight": "10",
+                "pref_ai_weight": "3",
+                "pref_freshness_half_life_days": "7",
+                "muted_topics": "Tracking\nDetection",
+                "muted_authors": "Alice Smith",
+                "muted_affiliations": "Example Lab",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        preferences = self.app.config["SCRAPER_CONFIG"]["preferences"]
+        self.assertEqual(preferences["ranking"]["author_weight"], 50.0)
+        self.assertEqual(preferences["ranking"]["freshness_half_life_days"], 7.0)
+        self.assertEqual(preferences["muted"]["topics"], ["Tracking", "Detection"])
+        self.assertEqual(preferences["muted"]["authors"], ["Alice Smith"])
+
 
 class LLMSettingsTests(FlaskDBTestCase):
     def setUp(self):

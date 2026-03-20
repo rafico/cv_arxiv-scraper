@@ -16,9 +16,10 @@ class ApiCsrfTests(FlaskDBTestCase):
             Paper(
                 arxiv_id="2603.0001",
                 title="API Paper",
-                authors="Author A",
+                authors="Author A, Author B",
                 link="https://arxiv.org/abs/2603.0001",
                 pdf_link="https://arxiv.org/pdf/2603.0001",
+                topic_tags=["Segmentation"],
                 match_type="Title",
                 matched_terms=["Vision"],
                 paper_score=1.0,
@@ -67,3 +68,26 @@ class ApiCsrfTests(FlaskDBTestCase):
     def test_scrape_stream_requires_csrf(self):
         response = self.client.get("/api/scrape/stream")
         self.assertEqual(response.status_code, 400)
+
+    def test_follow_endpoint_adds_author_to_whitelist(self):
+        paper = Paper.query.first()
+        response = self.client.post(
+            f"/api/papers/{paper.id}/follow",
+            json={},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Author A", self.app.config["SCRAPER_CONFIG"]["whitelists"]["authors"])
+
+    def test_mute_endpoint_adds_topic_to_preferences(self):
+        paper = Paper.query.first()
+        response = self.client.post(
+            f"/api/papers/{paper.id}/mute",
+            json={},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        muted_topics = self.app.config["SCRAPER_CONFIG"]["preferences"]["muted"]["topics"]
+        self.assertIn("Segmentation", muted_topics)

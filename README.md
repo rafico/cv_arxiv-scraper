@@ -13,7 +13,7 @@ Stop drowning in the arXiv firehose. This tool scrapes the [arXiv cs.CV](https:/
 ## Why use this?
 
 - **Personalized ranking** — Papers are scored by how well they match your interests (authors you follow, labs you track, topics you study), not just recency.
-- **Zero signup, fully local** — No accounts, no cloud, no API keys. Install, configure your interests, and go.
+- **Zero signup, local-first** — Core scraping and ranking run locally. Gmail digest and optional LLM features require extra setup only if you want them.
 - **Triage workflow** — Upvote, save, or skip papers. Your feedback tunes future rankings so the best papers rise to the top.
 - **Auto-generated summaries & tags** — Each matched paper gets a short plain-language summary and topic tags so you can scan faster.
 - **Related paper recommendations** — Lightweight embedding similarity finds related work you might have missed.
@@ -89,13 +89,13 @@ Get a daily email with your matched papers — no need to open the dashboard.
 
 ### Setup
 
-1. **Create a Google Cloud OAuth client** — Go to the [Google Cloud Console](https://console.cloud.google.com/), create a project, enable the **Gmail API**, and create an **OAuth 2.0 Client ID** (type: Desktop app). Download the JSON file and save it as `credentials.json` in the project root.
+1. **Create a Google Cloud OAuth client** — Go to the [Google Cloud Console](https://console.cloud.google.com/), create a project, enable the **Gmail API**, and create an **OAuth 2.0 Client ID** (type: Web application). Download the JSON file and either upload it in **Settings** or save it as `credentials.json` in the project root.
 
 2. **Run the one-time auth flow:**
    ```bash
    python gmail_auth_setup.py
    ```
-   This opens a browser for Google consent. The resulting `token.json` is saved locally with restricted file permissions (`600`). The app requests only the `gmail.send` scope — it **cannot** read, list, or delete your emails.
+   Most users can complete this from **Settings** in the web UI. The CLI flow above is the fallback for headless environments. The resulting `token.json` is saved locally with restricted file permissions (`600`). The app requests only the `gmail.send` scope — it **cannot** read, list, or delete your emails.
 
 3. **Set your recipient in `config.yaml`:**
    ```yaml
@@ -106,13 +106,13 @@ Get a daily email with your matched papers — no need to open the dashboard.
 
 4. **Test it:**
    ```bash
-   python email_digest.py --dry-run   # preview without sending
-   python email_digest.py             # send now
+   python digest_cli.py --dry-run   # preview without sending
+   python digest_cli.py             # send now
    ```
 
 5. **Schedule with cron** (e.g. every day at 8 AM):
    ```
-   0 8 * * * cd /path/to/cv_arxiv-scraper && ~/venv/bin/python email_digest.py
+   0 8 * * * cd /path/to/cv_arxiv-scraper && ~/venv/bin/python digest_cli.py
    ```
 
 ### Security notes
@@ -188,7 +188,7 @@ Multiple matches stack — a paper by a tracked author at a tracked lab on a tra
 │   ├── routes/                  # Flask blueprints
 │   └── templates/               # Jinja2 HTML templates
 ├── arxiv.py                     # CLI entry point
-├── email_digest.py              # Email digest CLI (for cron)
+├── digest_cli.py                # Email digest CLI (for cron)
 ├── gmail_auth_setup.py          # One-time Gmail OAuth setup
 ├── config.yaml                  # Your interests & scraper settings
 ├── run.py                       # Web server entry point

@@ -29,9 +29,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from flask import Flask
 
-from app.models import Paper, db
+from app.models import DigestRun, Paper, db
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score
-from app.services.text import utc_today
+from app.services.text import now_utc, utc_today
 
 log = logging.getLogger(__name__)
 
@@ -280,6 +280,77 @@ def _get_email_config(app: Flask) -> dict:
     }
 
 
+def _create_digest_run(
+    app: Flask,
+    *,
+    recipient: str,
+    subject: str,
+    papers_count: int,
+    preview_only: bool,
+) -> int:
+    with app.app_context():
+        run = DigestRun(
+            status="running",
+            recipient=recipient,
+            subject=subject,
+            papers_count=papers_count,
+            preview_only=preview_only,
+            started_at=now_utc(),
+        )
+        db.session.add(run)
+        db.session.commit()
+        return int(run.id)
+
+
+def _finish_digest_run(app: Flask, digest_run_id: int | None, *, status: str, error_message: str | None = None) -> None:
+    if digest_run_id is None:
+        return
+
+    with app.app_context():
+        run = db.session.get(DigestRun, digest_run_id)
+        if run is None:
+            return
+        run.status = status
+        run.error_message = error_message
+        run.finished_at = now_utc()
+        db.session.commit()
+
+
+def get_digest_history(limit: int = 6) -> list[DigestRun]:
+    return (
+        DigestRun.query
+        .order_by(DigestRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def build_digest_preview(app: Flask) -> dict:
+    email_cfg = _get_email_config(app)
+    papers = _query_todays_papers(app)
+    today = utc_today()
+    subject = f"{email_cfg['subject_prefix']} — {today.strftime('%b %d, %Y')} ({len(papers)} papers)"
+    return {
+        "recipient": email_cfg["recipient"],
+        "subject": subject,
+        "papers_count": len(papers),
+        "papers": papers,
+        "html": _build_email_body(papers, today),
+    }
+
+
+def get_digest_status_snapshot(app: Flask) -> dict:
+    email_cfg = _get_email_config(app)
+    latest = DigestRun.query.order_by(DigestRun.started_at.desc()).first()
+    preview = build_digest_preview(app)
+    return {
+        "recipient": email_cfg["recipient"],
+        "papers_ready": preview["papers_count"],
+        "preview_subject": preview["subject"],
+        "latest_run": latest,
+    }
+
+
 def _query_todays_papers(app: Flask, lookback_hours: int = 26) -> list[Paper]:
     """Return papers scraped within the lookback window, ranked by score."""
     from app.services.text import now_utc
@@ -407,12 +478,17 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
             "No recipient configured. Set 'email.recipient' in config.yaml."
         )
 
-    subject_prefix = email_cfg["subject_prefix"]
-    papers = _query_todays_papers(app)
-    today = utc_today()
-
-    subject = f"{subject_prefix} — {today.strftime('%b %d, %Y')} ({len(papers)} papers)"
-    html_body = _build_email_body(papers, today)
+    preview = build_digest_preview(app)
+    subject = preview["subject"]
+    papers = preview["papers"]
+    html_body = preview["html"]
+    digest_run_id = _create_digest_run(
+        app,
+        recipient=recipient,
+        subject=subject,
+        papers_count=len(papers),
+        preview_only=dry_run,
+    )
 
     msg = MIMEMultipart("alternative")
     msg["To"] = recipient
@@ -421,14 +497,20 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
 
     if dry_run:
         log.info("Dry run — email not sent (would send to %s)", recipient)
+        _finish_digest_run(app, digest_run_id, status="preview")
         return {"papers_count": len(papers), "sent": False, "recipient": recipient}
 
-    service = _build_gmail_service(creds)
-    raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
-    service.users().messages().send(
-        userId="me",
-        body={"raw": raw_message},
-    ).execute()
+    try:
+        service = _build_gmail_service(creds)
+        raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+        service.users().messages().send(
+            userId="me",
+            body={"raw": raw_message},
+        ).execute()
+    except Exception as exc:
+        _finish_digest_run(app, digest_run_id, status="error", error_message=str(exc))
+        raise
 
     log.info("Digest sent to %s (%d papers)", recipient, len(papers))
+    _finish_digest_run(app, digest_run_id, status="success")
     return {"papers_count": len(papers), "sent": True, "recipient": recipient}

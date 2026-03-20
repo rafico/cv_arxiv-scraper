@@ -20,6 +20,8 @@ from flask import (
 from app import _validate_config
 from app.csrf import get_or_create_csrf_token, validate_csrf_token
 from app.services.llm_client import has_api_key, write_api_key
+from app.services.preferences import get_preferences, save_config, update_preferences_from_form
+from app.services.ranking import recompute_all_paper_scores
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +47,12 @@ def _save_config_key(key: str, value) -> None:
         yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
 
     current_app.config["SCRAPER_CONFIG"] = full_config
+
+
+def _load_full_config() -> dict:
+    config_path = Path(current_app.config["CONFIG_PATH"])
+    with config_path.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
 
 
 def _llm_provider_defaults(provider: str) -> dict[str, str]:
@@ -74,21 +82,41 @@ def _build_llm_view_model(config: dict) -> dict:
 
 @settings_bp.route("/settings", methods=["GET"])
 def view_settings():
-    from app.services.email_digest import check_gmail_auth_status
+    from app.models import ScrapeRun
+    from app.services.email_digest import (
+        build_digest_preview,
+        check_gmail_auth_status,
+        get_digest_history,
+        get_digest_status_snapshot,
+    )
 
     config = current_app.config["SCRAPER_CONFIG"]
     email_cfg = config.get("email", {})
     gmail_status = check_gmail_auth_status()
     llm_key_path = Path(current_app.config["LLM_KEY_PATH"])
+    section = request.args.get("section", "interests")
+    preferences = get_preferences(config)
+    digest_status = get_digest_status_snapshot(current_app._get_current_object())
+    digest_preview = build_digest_preview(current_app._get_current_object())
+    scrape_history = (
+        ScrapeRun.query.order_by(ScrapeRun.started_at.desc()).limit(8).all()
+    )
+    digest_history = get_digest_history(limit=8)
 
     return render_template(
         "settings.html",
+        section=section,
         whitelists=config["whitelists"],
+        preferences=preferences,
         email_config={
             "recipient": email_cfg.get("recipient", ""),
             "subject_prefix": email_cfg.get("subject_prefix", "ArXiv Digest"),
         },
         gmail_status=gmail_status,
+        digest_status=digest_status,
+        digest_preview=digest_preview,
+        digest_history=digest_history,
+        scrape_history=scrape_history,
         llm_config=_build_llm_view_model(config),
         llm_key_configured=has_api_key(llm_key_path),
         llm_key_mask=_LLM_MASK_VALUE,
@@ -119,7 +147,27 @@ def save_settings():
     current_app.config["SCRAPER_CONFIG"] = full_config
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Settings saved successfully.", "success")
-    return redirect(url_for("settings.view_settings"))
+    return redirect(url_for("settings.view_settings", section="interests"))
+
+
+@settings_bp.route("/settings/preferences", methods=["POST"])
+def save_preferences():
+    validate_csrf_token()
+
+    config_path = Path(current_app.config["CONFIG_PATH"])
+    try:
+        full_config = update_preferences_from_form(_load_full_config(), request.form)
+        _validate_config(full_config, config_path=config_path)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("settings.view_settings", section="controls"))
+
+    save_config(config_path, full_config)
+    current_app.config["SCRAPER_CONFIG"] = full_config
+    recompute_all_paper_scores(current_app._get_current_object())
+    session["settings_csrf_token"] = token_urlsafe(32)
+    flash("Ranking and mute preferences saved.", "success")
+    return redirect(url_for("settings.view_settings", section="controls"))
 
 
 # ── Gmail / Email API endpoints ─────────────────────────────────────────
@@ -135,14 +183,14 @@ def upload_credentials():
     uploaded = request.files.get("credentials_file")
     if not uploaded or not uploaded.filename:
         flash("No file selected.", "error")
-        return redirect(url_for("settings.view_settings"))
+        return redirect(url_for("settings.view_settings", section="automation"))
 
     try:
         raw = uploaded.read()
         data = _json.loads(raw)
     except (ValueError, UnicodeDecodeError):
         flash("Invalid JSON file. Please upload the credentials.json from Google Cloud Console.", "error")
-        return redirect(url_for("settings.view_settings"))
+        return redirect(url_for("settings.view_settings", section="automation"))
 
     # Validate expected OAuth client structure.
     web = data.get("web", {})
@@ -153,13 +201,13 @@ def upload_credentials():
             "(Web application type).",
             "error",
         )
-        return redirect(url_for("settings.view_settings"))
+        return redirect(url_for("settings.view_settings", section="automation"))
 
     from app.services.email_digest import DEFAULT_CREDENTIALS_PATH
 
     DEFAULT_CREDENTIALS_PATH.write_bytes(raw)
     flash("credentials.json uploaded successfully. You can now authorize Gmail.", "success")
-    return redirect(url_for("settings.view_settings"))
+    return redirect(url_for("settings.view_settings", section="automation"))
 
 
 @settings_bp.route("/settings/gmail-status", methods=["GET"])
@@ -181,7 +229,7 @@ def save_email_settings():
 
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Email settings saved.", "success")
-    return redirect(url_for("settings.view_settings"))
+    return redirect(url_for("settings.view_settings", section="automation"))
 
 
 @settings_bp.route("/settings/llm", methods=["POST"])
@@ -207,7 +255,7 @@ def save_llm_settings():
         max_concurrent = max(1, int(max_concurrent_raw or "4"))
     except ValueError:
         flash("LLM max concurrent requests must be a positive integer.", "error")
-        return redirect(url_for("settings.view_settings"))
+        return redirect(url_for("settings.view_settings", section="ai"))
 
     with config_path.open("r", encoding="utf-8") as handle:
         full_config = yaml.safe_load(handle)
@@ -227,7 +275,7 @@ def save_llm_settings():
         _validate_config(full_config, config_path=config_path)
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(url_for("settings.view_settings"))
+        return redirect(url_for("settings.view_settings", section="ai"))
 
     with config_path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
@@ -235,7 +283,7 @@ def save_llm_settings():
     current_app.config["SCRAPER_CONFIG"] = full_config
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("LLM settings saved.", "success")
-    return redirect(url_for("settings.view_settings"))
+    return redirect(url_for("settings.view_settings", section="ai"))
 
 
 @settings_bp.route("/settings/gmail-auth", methods=["POST"])
@@ -249,7 +297,7 @@ def gmail_auth():
 
     if not result["success"]:
         flash(result["message"], "error")
-        return redirect(url_for("settings.view_settings"))
+        return redirect(url_for("settings.view_settings", section="automation"))
 
     session["oauth_state"] = result["state"]
     return redirect(result["auth_url"])
@@ -264,12 +312,12 @@ def gmail_callback():
     returned_state = request.args.get("state", "")
     if not stored_state or stored_state != returned_state:
         flash("OAuth state mismatch — please try authorizing again.", "error")
-        return redirect(url_for("settings.view_settings"))
+        return redirect(url_for("settings.view_settings", section="automation"))
 
     error = request.args.get("error")
     if error:
         flash(f"Google authorization denied: {error}", "error")
-        return redirect(url_for("settings.view_settings"))
+        return redirect(url_for("settings.view_settings", section="automation"))
 
     callback_url = url_for("settings.gmail_callback", _external=True)
     result = finish_oauth_flow(
@@ -282,7 +330,7 @@ def gmail_callback():
     else:
         flash(result["message"], "error")
 
-    return redirect(url_for("settings.view_settings"))
+    return redirect(url_for("settings.view_settings", section="automation"))
 
 
 @settings_bp.route("/settings/send-test-digest", methods=["POST"])
@@ -301,4 +349,14 @@ def send_test_digest():
         flash(f"Failed to send digest: {exc}", "error")
         log.exception("Test digest failed")
 
-    return redirect(url_for("settings.view_settings"))
+    return redirect(url_for("settings.view_settings", section="automation"))
+
+
+@settings_bp.route("/settings/digest-preview", methods=["GET"])
+def digest_preview():
+    from app.services.email_digest import build_digest_preview
+
+    preview = build_digest_preview(current_app._get_current_object())
+    response = current_app.response_class(preview["html"], mimetype="text/html")
+    response.headers["X-Digest-Subject"] = preview["subject"]
+    return response

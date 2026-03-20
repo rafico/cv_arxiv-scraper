@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 from app.models import Paper, db
+from app.services.feedback import apply_feedback_action
 from tests.helpers import FlaskDBTestCase
 
 
@@ -21,8 +22,12 @@ class DashboardRouteTests(FlaskDBTestCase):
                 abstract_text="vision transformer segmentation",
                 summary_text="Summary text",
                 topic_tags=["Segmentation", "Vision"],
-                categories=["cs.CV"],
-                resource_links=[],
+                categories=["cs.CV"] if idx % 2 == 0 else ["cs.RO"],
+                resource_links=(
+                    [{"type": "code", "url": f"https://example.com/code/{idx}"}]
+                    if idx % 3 == 0
+                    else []
+                ),
                 match_type="Title",
                 matched_terms=["vision"],
                 paper_score=10.0 + idx,
@@ -71,3 +76,33 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(data["active"])
         self.assertEqual(data["counts"]["save"], 1)
+
+    def test_saved_view_lists_only_saved_papers(self):
+        saved_paper = Paper.query.filter_by(title="Paper 0").first()
+        apply_feedback_action(saved_paper.id, "save")
+
+        response = self.client.get("/?view=saved")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Saved Papers", text)
+        self.assertIn("Paper 0", text)
+        self.assertIn("Recently Saved", text)
+
+    def test_category_filter_limits_results(self):
+        response = self.client.get("/?timeframe=all&category=cs.RO")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("https://arxiv.org/abs/2602.1001", text)
+        self.assertNotIn("https://arxiv.org/abs/2602.1000", text)
+        self.assertIn("cs.RO", text)
+
+    def test_resource_filter_limits_results(self):
+        response = self.client.get("/?timeframe=all&resource_filter=available")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("https://example.com/code/0", text)
+        self.assertNotIn("https://arxiv.org/abs/2602.1001", text)
+        self.assertIn("Has resources", text)
