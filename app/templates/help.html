@@ -122,6 +122,110 @@
         </section>
 
         <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900">Paper Organization</h2>
+            <p class="mt-2 text-sm text-gray-500">Ways to keep your reading list tidy beyond Save and Not Interested.</p>
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Collections</h3>
+                    <p class="mt-2 text-sm text-gray-700">Group papers into named folders (e.g. &ldquo;Thesis Ch. 3&rdquo;). Create collections, then use the folder icon on any paper card to file it. Filter the dashboard by collection using the pills at the top.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">User Tags</h3>
+                    <p class="mt-2 text-sm text-gray-700">Add custom tags to any paper with the <strong>+ tag</strong> button. Tags appear as indigo chips and can be removed by clicking the &times; next to them.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Notes</h3>
+                    <p class="mt-2 text-sm text-gray-700">Each paper has a free-text notes field (expand <strong>More details</strong> to see it). Notes auto-save as you type.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Reading Status</h3>
+                    <p class="mt-2 text-sm text-gray-700">Mark papers as <strong>To Read</strong>, <strong>Reading</strong>, or <strong>Read</strong> using the dropdown on each card. You can filter by reading status in <strong>Advanced Filters</strong>.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900">Reference Manager Sync</h2>
+            <p class="mt-2 text-sm text-gray-500">Export or sync papers with external tools.</p>
+            <div class="mt-4 grid gap-4 md:grid-cols-3">
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">BibTeX</h3>
+                    <p class="mt-2 text-sm text-gray-700">Click <strong>BibTeX</strong> on any paper card to copy a single entry. The toolbar <strong>BibTeX</strong> button exports all visible papers at once.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Mendeley</h3>
+                    <p class="mt-2 text-sm text-gray-700">Connect your Mendeley account via OAuth in <a href="/settings?section=automation" class="text-gray-900 underline underline-offset-2">Settings &rarr; Automation</a>. Once connected, use <strong>Sync Saved Papers</strong> to push your library.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Zotero</h3>
+                    <p class="mt-2 text-sm text-gray-700">Enter your Zotero API key and user ID in <a href="/settings?section=automation" class="text-gray-900 underline underline-offset-2">Settings &rarr; Automation</a>. You can sync to a specific Zotero collection if you like.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900">Smart Features</h2>
+            <p class="mt-2 text-sm text-gray-500">Features that run automatically behind the scenes.</p>
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Citation Counts</h3>
+                    <p class="mt-2 text-sm text-gray-700">During each scrape, citation data is fetched from Semantic Scholar. Papers show a blue citation badge you can click to see the full Semantic Scholar page. You can also sort by <strong>Most Cited</strong>.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Follow Author / Mute Topic</h3>
+                    <p class="mt-2 text-sm text-gray-700">Expand a paper&rsquo;s details to find <strong>Follow</strong> and <strong>Mute</strong> buttons. Follow adds the first author to your tracked authors. Mute suppresses future papers with a matching topic tag.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Duplicate Detection</h3>
+                    <p class="mt-2 text-sm text-gray-700">If a new paper has a nearly identical title to one already in the database, it gets an orange <strong>Dup</strong> badge so you know at a glance.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Historical Search</h3>
+                    <p class="mt-2 text-sm text-gray-700">Search for papers in a specific date range using the historical search API. This lets you backfill your inbox with older papers you may have missed.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Scheduled Scrapes</h3>
+                    <p class="mt-2 text-sm text-gray-700">Enable automatic daily scrapes by adding a <code>scheduler</code> section to your <code>config.yaml</code>. Once enabled, the app runs scrapes at your chosen time without needing cron.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Related Papers</h3>
+                    <p class="mt-2 text-sm text-gray-700">Expand a paper&rsquo;s details to see links to similar papers from your library. Similarity is computed from title and abstract text.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900">Power User Tips</h2>
+            <p class="mt-2 text-sm text-gray-500">Shortcuts and tools for moving through papers faster.</p>
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Keyboard Shortcuts</h3>
+                    <p class="mt-2 text-sm text-gray-700">
+                        <strong>j/k</strong> to navigate between papers,
+                        <strong>s</strong> to save,
+                        <strong>u</strong> to upvote,
+                        <strong>x</strong> to skip,
+                        <strong>o</strong> to open on arXiv,
+                        <strong>p</strong> to open PDF,
+                        <strong>d</strong> to toggle details.
+                    </p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Advanced Filters</h3>
+                    <p class="mt-2 text-sm text-gray-700">Click <strong>Advanced Filters</strong> below the search bar to filter by arXiv category, resource availability, reading status, or to show hidden papers.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Saved Searches</h3>
+                    <p class="mt-2 text-sm text-gray-700">After setting up filters, click <strong>Save search</strong> to bookmark the combination. Saved searches appear as quick-access pills above the paper list.</p>
+                </div>
+                <div class="rounded-xl border border-gray-100 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">Bulk Operations</h3>
+                    <p class="mt-2 text-sm text-gray-700">Click <strong>Select</strong> in the toolbar to enter bulk mode. You can then select multiple papers and save, upvote, or skip them all at once.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
             <h2 class="text-lg font-semibold text-gray-900">Settings, Explained Simply</h2>
             <div class="mt-4 grid gap-4 md:grid-cols-2">
                 <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">

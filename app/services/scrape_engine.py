@@ -437,6 +437,47 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
     return client, interests_text
 
 
+def _enrich_results_with_citations(
+    results: list[dict],
+    session: requests.Session,
+    config: dict,
+    now=None,
+) -> None:
+    """Enrich matched results with Semantic Scholar citation data (in-place)."""
+    if not results:
+        return
+
+    from app.services.citations import fetch_citations_batch
+    from app.services.ranking import compute_paper_score
+
+    arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
+    if not arxiv_ids:
+        return
+
+    if now is None:
+        now = now_utc()
+
+    citation_data = fetch_citations_batch(arxiv_ids, session=session)
+    for res in results:
+        arxiv_id = res.get("arxiv_id")
+        if arxiv_id and arxiv_id in citation_data:
+            data = citation_data[arxiv_id]
+            res["citation_count"] = data.get("citation_count")
+            res["influential_citation_count"] = data.get("influential_citation_count")
+            res["semantic_scholar_id"] = data.get("semantic_scholar_id")
+            if res["citation_count"] is not None:
+                res["citation_updated_at"] = now
+            res["paper_score"] = compute_paper_score(
+                match_types=res.get("match_types", []),
+                matched_terms_count=len(res.get("matches", [])),
+                publication_dt=res.get("publication_dt"),
+                resource_count=len(res.get("resource_links", [])),
+                llm_relevance_score=res.get("llm_relevance_score"),
+                citation_count=res.get("citation_count"),
+                config=config,
+            )
+
+
 def execute_scrape(app, event_callback: EventCallback = None, force: bool = False) -> dict:
     config = app.config["SCRAPER_CONFIG"]
     whitelists = config["whitelists"]
@@ -584,31 +625,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
 
         _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
 
-        if results:
-            from app.services.citations import fetch_citations_batch
-            from app.services.ranking import compute_paper_score
-            
-            arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
-            if arxiv_ids:
-                citation_data = fetch_citations_batch(arxiv_ids, session=session)
-                for res in results:
-                    arxiv_id = res.get("arxiv_id")
-                    if arxiv_id and arxiv_id in citation_data:
-                        data = citation_data[arxiv_id]
-                        res["citation_count"] = data.get("citation_count")
-                        res["influential_citation_count"] = data.get("influential_citation_count")
-                        res["semantic_scholar_id"] = data.get("semantic_scholar_id")
-                        if res["citation_count"] is not None:
-                            res["citation_updated_at"] = now
-                        res["paper_score"] = compute_paper_score(
-                            match_types=res.get("match_types", []),
-                            matched_terms_count=len(res.get("matches", [])),
-                            publication_dt=res.get("publication_dt"),
-                            resource_count=len(res.get("resource_links", [])),
-                            llm_relevance_score=res.get("llm_relevance_score"),
-                            citation_count=res.get("citation_count"),
-                            config=config,
-                        )
+        _enrich_results_with_citations(results, session, config, now=now)
 
         _sort_results(results)
         new_count, skipped = _save_results(app, results)
@@ -670,32 +687,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
         if result:
             results.append(result)
 
-    if results:
-        from app.services.citations import fetch_citations_batch
-        from app.services.ranking import compute_paper_score
-        
-        arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
-        if arxiv_ids:
-            citation_data = fetch_citations_batch(arxiv_ids, session=session)
-            now = now_utc()
-            for res in results:
-                arxiv_id = res.get("arxiv_id")
-                if arxiv_id and arxiv_id in citation_data:
-                    data = citation_data[arxiv_id]
-                    res["citation_count"] = data.get("citation_count")
-                    res["influential_citation_count"] = data.get("influential_citation_count")
-                    res["semantic_scholar_id"] = data.get("semantic_scholar_id")
-                    if res["citation_count"] is not None:
-                        res["citation_updated_at"] = now
-                    res["paper_score"] = compute_paper_score(
-                        match_types=res.get("match_types", []),
-                        matched_terms_count=len(res.get("matches", [])),
-                        publication_dt=res.get("publication_dt"),
-                        resource_count=len(res.get("resource_links", [])),
-                        llm_relevance_score=res.get("llm_relevance_score"),
-                        citation_count=res.get("citation_count"),
-                        config=config,
-                    )
+    _enrich_results_with_citations(results, session, config)
 
     _sort_results(results)
     new_count, skipped = _save_results(app, results)

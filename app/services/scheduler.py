@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class ScrapeScheduler:
                 self._timer = None
 
     def _seconds_until(self, time_str: str) -> float:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         hour, minute = (int(x) for x in time_str.split(":"))
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now:
@@ -68,7 +68,7 @@ class ScrapeScheduler:
     def next_run_at(self) -> str | None:
         if not self._enabled:
             return None
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         hour, minute = (int(x) for x in self._daily_at.split(":"))
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now:
