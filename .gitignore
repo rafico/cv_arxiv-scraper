@@ -15,10 +15,13 @@ instance/
 .DS_Store
 *.log
 
-# Gmail OAuth2 secrets — NEVER commit these
+# OAuth2 secrets and API keys — NEVER commit these
 credentials.json
 token.json
 .llm_api_key
+mendeley_credentials.json
+.mendeley_token
+.zotero_credentials
 
 codex-claude-bridge/
 

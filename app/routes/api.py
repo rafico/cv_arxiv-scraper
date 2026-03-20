@@ -12,6 +12,7 @@ from app.services.preferences import (
     save_config,
 )
 from app.services import SCRAPE_JOB_MANAGER, apply_feedback_action, stream_or_start_scrape
+from app.services.bibtex import paper_to_bibtex, papers_to_bibtex
 from app.services.export import generate_html_report
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -64,6 +65,61 @@ def export_html():
             f'attachment; filename="arxiv_report_{timeframe}.html"'
         )
     return response
+
+
+@api_bp.route("/export/bibtex", methods=["GET"])
+def export_bibtex():
+    from datetime import timedelta
+    from app.routes.dashboard import TIMEFRAME_DAYS
+    from app.services.ranking import FEEDBACK_BOOST
+    from app.services.text import now_utc
+
+    timeframe = request.args.get("timeframe", "daily")
+    view = request.args.get("view", "inbox")
+
+    if timeframe not in TIMEFRAME_DAYS:
+        timeframe = "daily"
+
+    query = Paper.query.filter(Paper.is_hidden.is_(False))
+
+    if view == "saved":
+        from app.models import PaperFeedback
+        query = query.join(
+            PaperFeedback,
+            db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == "save"),
+        )
+
+    days = TIMEFRAME_DAYS.get(timeframe)
+    if days is not None:
+        cutoff = now_utc() - timedelta(days=days)
+        cutoff_date = cutoff.date()
+        query = query.filter(
+            db.or_(
+                Paper.publication_dt >= cutoff_date,
+                db.and_(Paper.publication_dt.is_(None), Paper.scraped_at >= cutoff),
+            )
+        )
+
+    papers = query.order_by(
+        (
+            db.func.coalesce(Paper.paper_score, 0.0)
+            + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
+        ).desc(),
+    ).all()
+
+    bib = papers_to_bibtex(papers)
+    response = Response(bib, mimetype="application/x-bibtex")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="arxiv_papers_{timeframe}.bib"'
+    )
+    return response
+
+
+@api_bp.route("/papers/<int:paper_id>/bibtex", methods=["GET"])
+def single_paper_bibtex(paper_id: int):
+    paper = db.session.get(Paper, paper_id) or abort(404)
+    bib = paper_to_bibtex(paper)
+    return Response(bib, mimetype="application/x-bibtex")
 
 
 @api_bp.route("/papers/<int:paper_id>/feedback", methods=["POST"])

@@ -62,19 +62,22 @@ def check_gmail_auth_status(
         return {
             "status": "no_credentials",
             "message": (
-                "credentials.json not found. Download it from the "
-                "Google Cloud Console (OAuth 2.0 Client ID → Web application) "
-                "and place it in the project root."
+                "Upload credentials.json to get started. Create an OAuth 2.0 "
+                "Client ID (Web application type) in Google Cloud Console, "
+                "then upload the JSON file below."
             ),
+            "action": "upload_credentials",
+            "help_url": "https://console.cloud.google.com/apis/credentials",
         }
 
     if not token_path.exists():
         return {
             "status": "no_token",
             "message": (
-                "Gmail not authorized yet. Click 'Authorize Gmail' to "
-                "start the OAuth flow."
+                "Credentials uploaded. Click 'Authorize Gmail' to connect "
+                "your account (send-only access)."
             ),
+            "action": "authorize",
         }
 
     try:
@@ -86,22 +89,31 @@ def check_gmail_auth_status(
     except Exception:
         return {
             "status": "invalid",
-            "message": "token.json is corrupted or unreadable. Re-authorize Gmail.",
+            "message": (
+                "token.json is corrupted or unreadable. Click 'Re-authorize' "
+                "to generate a fresh token."
+            ),
+            "action": "reauthorize",
         }
 
     if creds.expired and creds.refresh_token:
         return {
             "status": "expired",
             "message": (
-                "Access token expired. It will auto-refresh on next send, "
-                "or click 'Re-authorize' to refresh now."
+                "Access token expired but will auto-refresh on next send. "
+                "You can also click 'Re-authorize' to refresh now."
             ),
+            "action": "reauthorize",
         }
 
     if not creds.valid and not creds.refresh_token:
         return {
             "status": "invalid",
-            "message": "Token is invalid and cannot be refreshed. Re-authorize Gmail.",
+            "message": (
+                "Token is invalid and has no refresh token. This usually "
+                "means the token was revoked. Click 'Re-authorize' to fix."
+            ),
+            "action": "reauthorize",
         }
 
     return {
@@ -213,7 +225,131 @@ def finish_oauth_flow(
         os.chmod(token_path, 0o600)
         return {"success": True, "message": "Gmail authorized successfully."}
     except Exception as exc:
-        return {"success": False, "message": f"OAuth flow failed: {exc}"}
+        msg = str(exc)
+        if "redirect_uri_mismatch" in msg.lower() or "redirect uri" in msg.lower():
+            return {
+                "success": False,
+                "message": (
+                    "Redirect URI mismatch. The callback URL configured in "
+                    "Google Cloud Console doesn't match this app's URL. "
+                    "Check that the authorized redirect URI matches exactly."
+                ),
+            }
+        return {"success": False, "message": f"OAuth token exchange failed: {exc}"}
+
+
+def get_setup_instructions(
+    credentials_path: Path | None = None,
+    token_path: Path | None = None,
+    callback_uri: str = "",
+    recipient: str = "",
+) -> list[dict]:
+    """Return step-by-step setup checklist for the settings template.
+
+    Each step has keys: ``step``, ``label``, ``complete``, ``description``.
+    """
+    if credentials_path is None:
+        credentials_path = DEFAULT_CREDENTIALS_PATH
+    if token_path is None:
+        token_path = DEFAULT_TOKEN_PATH
+
+    has_creds = credentials_path.exists()
+    has_token = token_path.exists()
+    has_recipient = bool(recipient)
+
+    token_valid = False
+    if has_token:
+        try:
+            from google.oauth2.credentials import Credentials
+            creds = Credentials.from_authorized_user_file(
+                str(token_path), scopes=[GMAIL_SEND_SCOPE]
+            )
+            token_valid = creds.valid or (creds.expired and creds.refresh_token)
+        except Exception:
+            pass
+
+    return [
+        {
+            "step": 1,
+            "label": "Create Google Cloud credentials",
+            "complete": has_creds,
+            "description": (
+                "Create an OAuth 2.0 Client ID (Web application) in "
+                "Google Cloud Console and upload credentials.json."
+            ),
+        },
+        {
+            "step": 2,
+            "label": "Set redirect URI",
+            "complete": has_creds,
+            "description": (
+                f"Add this as an authorized redirect URI in Google Cloud "
+                f"Console: {callback_uri}" if callback_uri
+                else "Add the app's callback URL as an authorized redirect URI."
+            ),
+        },
+        {
+            "step": 3,
+            "label": "Authorize Gmail",
+            "complete": token_valid,
+            "description": (
+                "Click 'Authorize Gmail' to grant send-only access."
+            ),
+        },
+        {
+            "step": 4,
+            "label": "Set recipient email",
+            "complete": has_recipient,
+            "description": "Enter the email address where digests should go.",
+        },
+    ]
+
+
+def validate_credentials_redirect_uris(
+    callback_uri: str,
+    credentials_path: Path | None = None,
+) -> dict:
+    """Check if the app's callback URI is in credentials.json redirect_uris.
+
+    Returns dict with ``match`` (bool) and ``message``.
+    """
+    import json as _json
+
+    if credentials_path is None:
+        credentials_path = DEFAULT_CREDENTIALS_PATH
+
+    if not credentials_path.exists():
+        return {"match": False, "message": "No credentials.json found."}
+
+    try:
+        data = _json.loads(credentials_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"match": False, "message": "Could not read credentials.json."}
+
+    web = data.get("web", {})
+    redirect_uris = web.get("redirect_uris", [])
+
+    if not redirect_uris:
+        return {
+            "match": False,
+            "message": (
+                "No redirect URIs found in credentials.json. This is normal "
+                "for newly created credentials -- add the callback URI in "
+                "Google Cloud Console."
+            ),
+        }
+
+    if callback_uri in redirect_uris:
+        return {"match": True, "message": "Callback URI matches credentials.json."}
+
+    return {
+        "match": False,
+        "message": (
+            f"Callback URI mismatch. This app uses '{callback_uri}' but "
+            f"credentials.json has: {', '.join(redirect_uris)}. "
+            f"Update the authorized redirect URIs in Google Cloud Console."
+        ),
+    }
 
 
 def _load_gmail_credentials(

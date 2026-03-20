@@ -43,21 +43,19 @@
 
     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 mb-5">
         <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Saved Queue</div>
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Saved</div>
             <div class="mt-2 text-2xl font-semibold text-gray-900">{{ dashboard_overview.saved_count }}</div>
-            <p class="mt-1 text-sm text-gray-500">Papers you marked to revisit later.</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-4">
             <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Last Scrape</div>
             {% if dashboard_overview.latest_scrape %}
             <div class="mt-2 text-base font-semibold text-gray-900">{{ dashboard_overview.latest_scrape.status_label }}</div>
-            <p class="mt-1 text-sm text-gray-500">
+            <p class="mt-1 text-xs text-gray-500">
                 {{ dashboard_overview.latest_scrape.timestamp }}
-                {% if dashboard_overview.latest_scrape.forced %}<span class="text-gray-400">· forced rerun</span>{% endif %}
+                {% if dashboard_overview.latest_scrape.forced %} · forced{% endif %}
             </p>
             {% else %}
             <div class="mt-2 text-base font-semibold text-gray-900">Not run yet</div>
-            <p class="mt-1 text-sm text-gray-500">Run your first scrape to build today's queue.</p>
             {% endif %}
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-4">
@@ -65,21 +63,16 @@
             <div class="mt-2 text-base font-semibold text-gray-900">
                 {{ dashboard_overview.interest_counts.authors }} authors · {{ dashboard_overview.interest_counts.affiliations }} labs · {{ dashboard_overview.interest_counts.titles }} topics
             </div>
-            <p class="mt-1 text-sm text-gray-500">Your ranking signals live in Settings and shape every scrape.</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-4">
             <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Latest Digest</div>
             {% if dashboard_overview.latest_digest %}
             <div class="mt-2 text-base font-semibold text-gray-900">{{ dashboard_overview.latest_digest.status_label }}</div>
-            <p class="mt-1 text-sm text-gray-500">
+            <p class="mt-1 text-xs text-gray-500">
                 {{ dashboard_overview.latest_digest.timestamp }} · {{ dashboard_overview.latest_digest.papers_count }} papers
-            </p>
-            <p class="mt-1 text-xs text-gray-400">
-                {{ 'Preview only' if dashboard_overview.latest_digest.preview_only else dashboard_overview.latest_digest.recipient }}
             </p>
             {% else %}
             <div class="mt-2 text-base font-semibold text-gray-900">Not sent yet</div>
-            <p class="mt-1 text-sm text-gray-500">Preview or send a digest from Settings when your inbox looks right.</p>
             {% endif %}
         </div>
     </div>
@@ -177,6 +170,10 @@
                 <option value="newest" {{ 'selected' if current_filters.sort == 'newest' }}>Newest</option>
                 {% endif %}
             </select>
+            <a href="/api/export/bibtex?timeframe={{ current_filters.timeframe }}&view={{ current_filters.view }}"
+               class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                BibTeX
+            </a>
             {% if current_filters.view == 'inbox' %}
             <a href="/api/export?timeframe={{ current_filters.timeframe }}&download=1"
                class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
@@ -318,13 +315,25 @@
             </div>
             {% endif %}
 
+            {# ── Inline topic tags (first 2) ── #}
+            {% if paper.topic_tags_list %}
+            <div class="flex flex-wrap gap-1 mb-2">
+                {% for tag in paper.topic_tags_list[:2] %}
+                <span class="text-[11px] text-gray-700 bg-gray-100 px-2 py-0.5 rounded">{{ tag }}</span>
+                {% endfor %}
+                {% if paper.topic_tags_list|length > 2 %}
+                <span class="text-[11px] text-gray-400 px-1 py-0.5">+{{ paper.topic_tags_list|length - 2 }}</span>
+                {% endif %}
+            </div>
+            {% endif %}
+
             {# ── Collapsible details ── #}
-            {% set has_details = paper.topic_tags_list or paper.categories_list or paper.resource_links_list or paper.related_papers or paper.follow_recommendation.available or paper.mute_recommendation.available %}
+            {% set has_details = paper.topic_tags_list|length > 2 or paper.categories_list or paper.resource_links_list or paper.related_papers or paper.follow_recommendation.available or paper.mute_recommendation.available %}
             {% if has_details %}
             <div class="card-details hidden" data-card-details>
-                {% if paper.topic_tags_list %}
+                {% if paper.topic_tags_list|length > 2 %}
                 <div class="flex flex-wrap gap-1 mb-2">
-                    {% for tag in paper.topic_tags_list %}
+                    {% for tag in paper.topic_tags_list[2:] %}
                     <span class="text-[11px] text-gray-700 bg-gray-100 px-2 py-0.5 rounded">{{ tag }}</span>
                     {% endfor %}
                 </div>
@@ -407,6 +416,10 @@
                 <a href="{{ paper.link }}" target="_blank"
                    class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300">
                     arXiv
+                </a>
+                <a href="/api/papers/{{ paper.id }}/bibtex"
+                   class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300">
+                    BibTeX
                 </a>
                 <a href="{{ paper.pdf_link }}" target="_blank" class="paper-pdf-link flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
                     PDF

@@ -72,15 +72,14 @@
         <form method="POST" action="/settings" id="settings-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
-                {{ multiline_textarea('titles', 'Title Keywords', 'Matched against paper titles and abstracts.', whitelists.titles) }}
-                {{ multiline_textarea('authors', 'Authors', 'Highest-signal follows. One author per line.', whitelists.authors) }}
-                {{ multiline_textarea('affiliations', 'Affiliations', 'Institution or lab names pulled from PDF headers and arXiv metadata.', whitelists.affiliations) }}
+                {{ multiline_textarea('titles', 'Title Keywords', 'Matched against titles and abstracts.', whitelists.titles) }}
+                {{ multiline_textarea('authors', 'Authors', 'One per line.', whitelists.authors) }}
+                {{ multiline_textarea('affiliations', 'Affiliations', 'Lab or institution names from PDF headers.', whitelists.affiliations) }}
                 <div class="rounded-2xl border border-gray-200 bg-white p-5">
-                    <h3 class="text-sm font-semibold text-gray-900">How To Use This</h3>
-                    <div class="mt-3 space-y-3 text-sm text-gray-500">
-                        <p>Keep authors highly specific. Labs can be broader. Topics should match phrases you actively care about, not every area you read occasionally.</p>
-                        <p>The product works best when you save strong papers and mark weak ones as not interesting. That feedback compounds over time.</p>
-                        <p>Use muted lists below if your inbox is getting noisy in a repeated direction.</p>
+                    <h3 class="text-sm font-semibold text-gray-900">Tips</h3>
+                    <div class="mt-3 space-y-2 text-sm text-gray-500">
+                        <p>Keep authors specific, labs broad, topics focused on what you actively care about.</p>
+                        <p>Save strong papers and skip weak ones -- feedback compounds over time.</p>
                     </div>
                 </div>
             </div>
@@ -139,9 +138,9 @@
                 </div>
 
                 <div class="grid grid-cols-1 gap-5">
-                    {{ multiline_textarea('muted_authors', 'Muted Authors', 'Any paper whose author list matches these names is suppressed from the inbox.', preferences.muted.authors, 5) }}
-                    {{ multiline_textarea('muted_affiliations', 'Muted Affiliations', 'Use this for labs or institutions that are relevant but currently noisy.', preferences.muted.affiliations, 5) }}
-                    {{ multiline_textarea('muted_topics', 'Muted Topics', 'Topic tags to suppress, such as a subfield you no longer want in the inbox.', preferences.muted.topics, 5) }}
+                    {{ multiline_textarea('muted_authors', 'Muted Authors', 'Suppress papers by these authors.', preferences.muted.authors, 5) }}
+                    {{ multiline_textarea('muted_affiliations', 'Muted Affiliations', 'Suppress papers from these labs.', preferences.muted.affiliations, 5) }}
+                    {{ multiline_textarea('muted_topics', 'Muted Topics', 'Suppress papers with these topic tags.', preferences.muted.topics, 5) }}
                 </div>
             </div>
 
@@ -198,33 +197,69 @@
 
                     <div id="setup-steps" class="mt-5 {% if gmail_status.status == 'connected' %}hidden{% endif %}">
                         <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                            <ol class="space-y-3 text-sm text-gray-600">
-                                <li>1. Create a Google Cloud project and enable the Gmail API.</li>
-                                <li>2. Create an OAuth Client ID with the <strong>Web application</strong> type.</li>
-                                <li>3. Add this callback URL as an authorized redirect URI:</li>
-                            </ol>
-                            <div class="mt-3 flex items-center gap-2">
-                                <code id="callback-uri" class="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700">{{ callback_uri }}</code>
-                                <button type="button" onclick="copyCallbackUri()" id="copy-uri-btn"
-                                        class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
-                                    <svg id="copy-icon" class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-                                    </svg>
-                                    <svg id="check-icon" class="w-3.5 h-3.5 mr-1 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                                    </svg>
-                                    <span id="copy-text">Copy</span>
-                                </button>
+                            <div class="space-y-3">
+                                {% for step in gmail_setup_steps %}
+                                <div class="flex items-start gap-3">
+                                    {% if step.complete %}
+                                    <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100">
+                                        <svg class="h-3 w-3 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                                        </svg>
+                                    </span>
+                                    {% else %}
+                                    <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-gray-300 text-[10px] font-bold text-gray-400">
+                                        {{ step.step }}
+                                    </span>
+                                    {% endif %}
+                                    <div class="min-w-0">
+                                        <div class="text-sm font-medium {{ 'text-emerald-700' if step.complete else 'text-gray-900' }}">{{ step.label }}</div>
+                                        <div class="text-xs text-gray-500 mt-0.5">{{ step.description }}</div>
+                                    </div>
+                                </div>
+                                {% endfor %}
                             </div>
-                            <p class="mt-4 text-sm text-gray-600">4. Upload the downloaded <code>credentials.json</code> file:</p>
-                            <form method="POST" action="/settings/upload-credentials" enctype="multipart/form-data" id="upload-creds-form" class="mt-3">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <label for="credentials_file" id="drop-zone"
-                                       class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-white px-4 py-4 text-center transition-colors hover:border-gray-400 hover:bg-gray-50">
-                                    <span class="text-sm text-gray-500" id="upload-label">Drop credentials.json here or browse</span>
-                                    <input type="file" name="credentials_file" id="credentials_file" accept=".json" class="hidden">
-                                </label>
-                            </form>
+
+                            {% if redirect_uri_check and not redirect_uri_check.match %}
+                            <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                {{ redirect_uri_check.message }}
+                            </div>
+                            {% endif %}
+
+                            <div class="mt-4">
+                                <div class="text-xs font-medium text-gray-700 mb-2">Callback URI (add to Google Cloud Console):</div>
+                                <div class="flex items-center gap-2">
+                                    <code id="callback-uri" class="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700">{{ callback_uri }}</code>
+                                    <button type="button" onclick="copyCallbackUri()" id="copy-uri-btn"
+                                            class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                                        <svg id="copy-icon" class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                                        </svg>
+                                        <svg id="check-icon" class="w-3.5 h-3.5 mr-1 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                        </svg>
+                                        <span id="copy-text">Copy</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="mt-4">
+                                <div class="text-xs font-medium text-gray-700 mb-2">Upload credentials.json:</div>
+                                <form method="POST" action="/settings/upload-credentials" enctype="multipart/form-data" id="upload-creds-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <label for="credentials_file" id="drop-zone"
+                                           class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-white px-4 py-4 text-center transition-colors hover:border-gray-400 hover:bg-gray-50">
+                                        <span class="text-sm text-gray-500" id="upload-label">Drop credentials.json here or browse</span>
+                                        <input type="file" name="credentials_file" id="credentials_file" accept=".json" class="hidden">
+                                    </label>
+                                </form>
+                            </div>
+
+                            <div class="mt-3 text-center">
+                                <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener"
+                                   class="text-xs font-medium text-blue-600 hover:text-blue-700">
+                                    Open Google Cloud Console
+                                </a>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -251,6 +286,114 @@
                         </button>
                     </div>
                 </form>
+
+                <div class="rounded-2xl border border-gray-200 bg-white p-5">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-semibold text-gray-900">Mendeley</h3>
+                            <p class="text-sm text-gray-500 mt-1">{{ mendeley_status.message }}</p>
+                        </div>
+                        <span class="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                            <span class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if mendeley_status.status == 'connected' else 'bg-amber-400' if mendeley_status.status in ['expired', 'no_token'] else 'bg-gray-300' }}"></span>
+                            {{ mendeley_status.status.replace('_', ' ').title() }}
+                        </span>
+                    </div>
+
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        {% if mendeley_status.status != 'no_credentials' %}
+                        <form method="POST" action="/settings/mendeley-auth">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="submit"
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-gray-100 text-gray-700 hover:bg-gray-200' if mendeley_status.status == 'connected' else 'bg-gray-900 text-white hover:bg-gray-800' }}">
+                                {{ 'Re-authorize' if mendeley_status.status == 'connected' else 'Authorize Mendeley' }}
+                            </button>
+                        </form>
+                        {% endif %}
+                        {% if mendeley_status.status == 'connected' %}
+                        <form method="POST" action="/settings/mendeley-sync">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="submit"
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                                Sync Saved Papers
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+
+                    {% if mendeley_status.status == 'no_credentials' %}
+                    <div class="mt-4">
+                        <p class="text-xs text-gray-500 mb-2">Upload your Mendeley app credentials (from <a href="https://dev.mendeley.com/myapps.html" target="_blank" rel="noopener" class="text-blue-600 hover:text-blue-700">dev.mendeley.com</a>):</p>
+                        <form method="POST" action="/settings/upload-mendeley-credentials" enctype="multipart/form-data">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <label for="mendeley_credentials_file"
+                                   class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-white px-4 py-3 text-center transition-colors hover:border-gray-400 hover:bg-gray-50">
+                                <span class="text-sm text-gray-500">Drop mendeley_credentials.json here or browse</span>
+                                <input type="file" name="mendeley_credentials_file" id="mendeley_credentials_file" accept=".json" class="hidden"
+                                       onchange="this.form.submit()">
+                            </label>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="rounded-2xl border border-gray-200 bg-white p-5">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-semibold text-gray-900">Zotero</h3>
+                            <p class="text-sm text-gray-500 mt-1">{{ zotero_status.message }}</p>
+                        </div>
+                        <span class="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                            <span class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if zotero_status.status == 'connected' else 'bg-gray-300' }}"></span>
+                            {{ zotero_status.status.replace('_', ' ').title() }}
+                        </span>
+                    </div>
+
+                    <form method="POST" action="/settings/zotero-setup" class="mt-4 space-y-3">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <div>
+                            <label for="zotero_api_key" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                            <input type="password" name="zotero_api_key" id="zotero_api_key" placeholder="From zotero.org/settings/keys"
+                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                        </div>
+                        <div>
+                            <label for="zotero_user_id" class="block text-sm font-medium text-gray-700 mb-1">User ID</label>
+                            <input type="text" name="zotero_user_id" id="zotero_user_id" placeholder="Numeric user ID"
+                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                        </div>
+                        <button type="submit"
+                                class="px-4 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
+                            Save Zotero Credentials
+                        </button>
+                    </form>
+
+                    {% if zotero_status.status == 'connected' %}
+                    <div class="mt-4 flex flex-wrap items-center gap-2">
+                        <form method="POST" action="/settings/zotero-test">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="submit"
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                                Test Connection
+                            </button>
+                        </form>
+                        <form method="POST" action="/settings/zotero-sync" class="flex items-center gap-2">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            {% if zotero_collections %}
+                            <select name="zotero_collection"
+                                    class="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700">
+                                <option value="">My Library</option>
+                                {% for coll in zotero_collections %}
+                                <option value="{{ coll.key }}">{{ coll.name }}</option>
+                                {% endfor %}
+                            </select>
+                            {% endif %}
+                            <button type="submit"
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                                Sync Saved Papers
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
             </div>
 
             <div class="space-y-5">
