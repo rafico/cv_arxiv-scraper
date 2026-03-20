@@ -62,6 +62,10 @@ def _interest_counts(config: dict) -> dict[str, int]:
     return counts
 
 
+def _escape_like_term(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _apply_muted_filters(query: Query, config: dict, *, active: bool) -> Query:
     if not active:
         return query
@@ -69,19 +73,15 @@ def _apply_muted_filters(query: Query, config: dict, *, active: bool) -> Query:
     preferences = get_preferences(config)
     muted = preferences["muted"]
     for author in muted["authors"]:
-        escaped = f"%{author.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%"
+        escaped = f"%{_escape_like_term(author)}%"
         query = query.filter(~Paper.authors.ilike(escaped, escape="\\"))
     for topic in muted["topics"]:
-        escaped = f"%{topic.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%"
+        escaped = f"%{_escape_like_term(topic)}%"
         query = query.filter(~db.cast(Paper.topic_tags, db.Text).ilike(escaped, escape="\\"))
     for affiliation in muted["affiliations"]:
-        escaped = f"%{affiliation.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%"
+        escaped = f"%{_escape_like_term(affiliation)}%"
         query = query.filter(~db.cast(Paper.matched_terms, db.Text).ilike(escaped, escape="\\"))
     return query
-
-
-def _escape_like_term(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _apply_category_filter(query: Query, category: str | None) -> Query:
@@ -105,18 +105,19 @@ def _apply_resource_filter(query: Query, resource_filter: str) -> Query:
 
 
 def _build_filter_options(query: Query) -> dict:
-    category_counts: dict[str, int] = {}
-    resources_available = 0
-    resources_missing = 0
+    base = query.order_by(None)
 
-    rows = query.order_by(None).with_entities(Paper.categories, Paper.resource_links).all()
-    for categories, resource_links in rows:
+    # Resource counts via SQL to avoid loading all rows.
+    resources_expr = db.cast(Paper.resource_links, db.Text)
+    resources_available = base.filter(resources_expr != "[]").count()
+    total = base.count()
+    resources_missing = total - resources_available
+
+    # Category counts still need Python because SQLite has no native JSON unnest.
+    category_counts: dict[str, int] = {}
+    for (categories,) in base.with_entities(Paper.categories).yield_per(500):
         for category in categories or []:
             category_counts[category] = category_counts.get(category, 0) + 1
-        if resource_links:
-            resources_available += 1
-        else:
-            resources_missing += 1
 
     categories = [
         {"label": label, "count": count}

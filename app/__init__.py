@@ -75,6 +75,8 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
     for key, value in normalized_preferences["ranking"].items():
         if value <= 0:
             raise ValueError(f"'preferences.ranking.{key}' must be positive")
+        if value > 1000:
+            raise ValueError(f"'preferences.ranking.{key}' must be at most 1000")
     for key, items in normalized_preferences["muted"].items():
         if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
             raise ValueError(f"'preferences.muted.{key}' must be a list of strings")

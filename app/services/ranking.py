@@ -112,24 +112,29 @@ def explain_score(
     }
 
 
-def recompute_all_paper_scores(app) -> int:
+def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
     from app.models import Paper, db
 
     updated = 0
     with app.app_context():
         config = app.config["SCRAPER_CONFIG"]
-        papers = Paper.query.all()
-        for paper in papers:
-            paper.paper_score = compute_paper_score(
-                match_types=[part.strip() for part in (paper.match_type or "").split("+") if part.strip()],
-                matched_terms_count=len(paper.matched_terms_list),
-                publication_dt=paper.publication_dt,
-                resource_count=len(paper.resource_links_list),
-                llm_relevance_score=paper.llm_relevance_score,
-                config=config,
-            )
-            updated += 1
-        db.session.commit()
+        offset = 0
+        while True:
+            papers = Paper.query.order_by(Paper.id).offset(offset).limit(batch_size).all()
+            if not papers:
+                break
+            for paper in papers:
+                paper.paper_score = compute_paper_score(
+                    match_types=[part.strip() for part in (paper.match_type or "").split("+") if part.strip()],
+                    matched_terms_count=len(paper.matched_terms_list),
+                    publication_dt=paper.publication_dt,
+                    resource_count=len(paper.resource_links_list),
+                    llm_relevance_score=paper.llm_relevance_score,
+                    config=config,
+                )
+                updated += 1
+            db.session.commit()
+            offset += batch_size
     return updated
 
 

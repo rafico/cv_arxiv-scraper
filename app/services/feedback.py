@@ -52,7 +52,7 @@ def apply_feedback_action(paper_id: int, action: str) -> dict:
 
     paper.feedback_score = max(-100, min(100, int(paper.feedback_score or 0) + delta))
 
-    db.session.commit()
+    db.session.flush()
 
     rows = _load_feedback_rows(paper_id)
     counts = {"upvote": 0, "save": 0, "skip": 0}

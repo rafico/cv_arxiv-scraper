@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, abort, current_app, jsonify, request
 
 from app.csrf import validate_csrf_token
-from app.models import Paper
+from app.models import Paper, db
 from app import _validate_config
 from app.services.preferences import (
     append_muted_term,
@@ -87,7 +87,7 @@ def paper_feedback(paper_id: int):
 @api_bp.route("/papers/<int:paper_id>/follow", methods=["POST"])
 def follow_recommendation(paper_id: int):
     validate_csrf_token()
-    paper = Paper.query.get_or_404(paper_id)
+    paper = db.session.get(Paper, paper_id) or abort(404)
 
     term = first_author_name(paper.authors)
     if not term:
@@ -104,7 +104,7 @@ def follow_recommendation(paper_id: int):
 @api_bp.route("/papers/<int:paper_id>/mute", methods=["POST"])
 def mute_recommendation(paper_id: int):
     validate_csrf_token()
-    paper = Paper.query.get_or_404(paper_id)
+    paper = db.session.get(Paper, paper_id) or abort(404)
 
     term = next((tag for tag in paper.topic_tags_list if tag), "")
     if not term:

@@ -192,7 +192,7 @@ class PreFilterCountTests(FlaskDBTestCase):
         def fake_enrich(entries):
             pass
 
-        def fake_process(entries, whitelists, config, llm_client=None, interests_text=""):
+        def fake_process(entries, whitelists, config, llm_client=None, interests_text="", product_config=None):
             for i, entry in enumerate(entries, 1):
                 result = _make_result(entry["link"], entry["title"])
                 result["arxiv_id"] = entry.get("arxiv_id")
@@ -323,7 +323,7 @@ class RollingWindowTests(FlaskDBTestCase):
         ]
         seen_titles: list[str] = []
 
-        def fake_process(entries, whitelists, config, llm_client=None, interests_text=""):
+        def fake_process(entries, whitelists, config, llm_client=None, interests_text="", product_config=None):
             seen_titles.extend(entry["title"] for entry in entries)
             for i, entry in enumerate(entries, 1):
                 result = _make_result(entry["link"], entry["title"])

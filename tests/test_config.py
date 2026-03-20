@@ -116,6 +116,12 @@ class ConfigValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError, msg="positive"):
             _validate_config(cfg)
 
+    def test_preferences_ranking_values_must_not_exceed_upper_bound(self):
+        cfg = self._valid_config()
+        cfg["preferences"]["ranking"]["author_weight"] = 1001
+        with self.assertRaises(ValueError, msg="at most 1000"):
+            _validate_config(cfg)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -116,6 +116,7 @@ def _process_paper_entry(
     session: requests.Session | None = None,
     llm_client: LLMClient | None = None,
     interests_text: str = "",
+    product_config: dict | None = None,
 ) -> dict | None:
     # Phase 1: fast check — title and author (no PDF download).
     fast_matches = _check_fast_matches(entry_data, whitelists)
@@ -152,24 +153,24 @@ def _process_paper_entry(
     if not any(category_matches.values()):
         return None
 
-    config = scraper_config.get("_product_config")
-
-    result = _build_result(
-        entry_data,
-        category_matches,
-        llm_client=llm_client,
-        interests_text=interests_text,
-        config=config,
-    )
-    preferences = get_preferences(config)
+    # Check mute filters before expensive LLM calls.
+    preferences = get_preferences(product_config)
     muted = preferences["muted"]
     if check_author_match(entry_data["authors_list"], muted["authors"]):
         return None
     if check_whitelist_match([entry_data.get("api_affiliations", "")], muted["affiliations"]):
         return None
-    if check_whitelist_match(result["topic_tags"], muted["topics"]):
+    topic_tags = extract_topic_tags(entry_data["title"], entry_data.get("abstract", ""))
+    if check_whitelist_match(topic_tags, muted["topics"]):
         return None
-    return result
+
+    return _build_result(
+        entry_data,
+        category_matches,
+        llm_client=llm_client,
+        interests_text=interests_text,
+        config=product_config,
+    )
 
 
 def _process_entries_parallel(
@@ -178,6 +179,7 @@ def _process_entries_parallel(
     scraper_config: dict,
     llm_client: LLMClient | None = None,
     interests_text: str = "",
+    product_config: dict | None = None,
 ):
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     processed = 0
@@ -194,6 +196,7 @@ def _process_entries_parallel(
                 session,
                 llm_client,
                 interests_text,
+                product_config,
             ): entry
             for entry in entries
         }
@@ -495,15 +498,14 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         )
 
         results: list[dict] = []
-        processing_scraper_config = dict(scraper_config)
-        processing_scraper_config["_product_config"] = config
 
         for processed, matched, result in _process_entries_parallel(
             entries,
             whitelists,
-            processing_scraper_config,
+            scraper_config,
             llm_client,
             interests_text,
+            product_config=config,
         ):
             payload = {"processed": processed, "total": total_entries, "matched": matched}
             if result:
