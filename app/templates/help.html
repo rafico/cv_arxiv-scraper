@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}Help - ArXiv CV Scraper{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl">
+    <div class="mb-8">
+        <h1 class="text-2xl font-bold text-gray-900">Help</h1>
+        <p class="text-sm text-gray-500 mt-1">Learn how to use arXiv CV Scraper to stay on top of computer vision research.</p>
+    </div>
+
+    <div class="space-y-6">
+
+        <!-- What is arXiv CV Scraper -->
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">What is arXiv CV Scraper?</h2>
+            <p class="text-sm text-gray-700 leading-relaxed">
+                arXiv CV Scraper is a personal research paper aggregation tool for computer vision (cs.CV).
+                It scrapes the daily arXiv RSS feed, matches papers against your interests &mdash; authors, institutions, and topics &mdash;
+                and ranks them using a composite scoring system that learns from your feedback.
+            </p>
+            <p class="text-sm text-gray-700 leading-relaxed mt-2">
+                Everything runs locally on your machine. There is no signup, no cloud dependency, and no data leaves your computer
+                unless you choose to send yourself email digests via Gmail.
+            </p>
+        </section>
+
+        <!-- Getting Started -->
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Getting Started</h2>
+            <ol class="space-y-4">
+                <li class="flex gap-3">
+                    <span class="flex-shrink-0 w-7 h-7 rounded-full bg-gray-900 text-white text-sm font-semibold flex items-center justify-center">1</span>
+                    <div>
+                        <p class="text-sm font-medium text-gray-900">Add your interests</p>
+                        <p class="text-xs text-gray-500 mt-0.5">
+                            Go to <a href="/settings?section=interests" class="text-gray-900 underline underline-offset-2">Settings &rarr; Research Setup</a>
+                            and add authors, institutions/labs, and topic keywords you want to track.
+                        </p>
+                    </div>
+                </li>
+                <li class="flex gap-3">
+                    <span class="flex-shrink-0 w-7 h-7 rounded-full bg-gray-900 text-white text-sm font-semibold flex items-center justify-center">2</span>
+                    <div>
+                        <p class="text-sm font-medium text-gray-900">Run a scrape</p>
+                        <p class="text-xs text-gray-500 mt-0.5">
+                            Click the <strong>Run Scrape</strong> button in the top-right corner. The scraper fetches the latest arXiv CS.CV feed,
+                            matches papers against your interests, and scores them. Progress is shown in a live toast notification.
+                        </p>
+                    </div>
+                </li>
+                <li class="flex gap-3">
+                    <span class="flex-shrink-0 w-7 h-7 rounded-full bg-gray-900 text-white text-sm font-semibold flex items-center justify-center">3</span>
+                    <div>
+                        <p class="text-sm font-medium text-gray-900">Triage your papers</p>
+                        <p class="text-xs text-gray-500 mt-0.5">
+                            Browse matched papers on the <a href="/" class="text-gray-900 underline underline-offset-2">Papers</a> dashboard.
+                            Use <strong>Upvote</strong>, <strong>Save</strong>, or <strong>Skip</strong> to give feedback &mdash; the system learns
+                            from your actions and adjusts future rankings.
+                        </p>
+                    </div>
+                </li>
+            </ol>
+        </section>
+
+        <!-- Dashboard -->
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Using the Dashboard</h2>
+
+            <div class="space-y-4 text-sm text-gray-700">
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">Views</h3>
+                    <p class="leading-relaxed">
+                        Switch between <strong>Inbox</strong> (all matched papers) and <strong>Saved</strong> (your shortlisted papers)
+                        using the tabs at the top of the page.
+                    </p>
+                </div>
+
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">Filters &amp; Search</h3>
+                    <p class="leading-relaxed">
+                        Filter by <strong>timeframe</strong> (Daily, Weekly, Monthly, All Time),
+                        <strong>match type</strong> (Author, Affiliation, Title), or use <strong>free-text search</strong>
+                        to find papers across titles, authors, matched terms, and summaries.
+                    </p>
+                </div>
+
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">Sorting</h3>
+                    <p class="leading-relaxed">
+                        <strong>Trending</strong> sorts by combined score (match strength + feedback boost).
+                        <strong>Newest</strong> sorts by publication date.
+                    </p>
+                </div>
+
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">Paper Cards</h3>
+                    <p class="leading-relaxed">
+                        Each card shows the title, authors, publication date, match type badges
+                        (<span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700">Author</span>
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">Affiliation</span>
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700">Title</span>),
+                        composite score, auto-generated summary, topic tags, and related papers.
+                    </p>
+                </div>
+
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">Feedback Actions</h3>
+                    <ul class="list-disc list-inside space-y-1 text-gray-600">
+                        <li><strong>Upvote</strong> &mdash; marks a paper as highly relevant and boosts similar future papers</li>
+                        <li><strong>Save</strong> &mdash; adds the paper to your permanent shortlist with the strongest boost</li>
+                        <li><strong>Skip</strong> &mdash; suppresses the paper and reduces ranking of similar content</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- Settings -->
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Settings Overview</h2>
+            <div class="space-y-4 text-sm text-gray-700">
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">Research Setup</h3>
+                    <p class="leading-relaxed">
+                        Add authors, institutions/labs, and topic keywords to track. Papers matching these signals
+                        will appear in your feed. One entry per line.
+                    </p>
+                </div>
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">Ranking</h3>
+                    <p class="leading-relaxed">
+                        Adjust the weight given to author, affiliation, and title matches.
+                        Configure the recency half-life to control how quickly older papers decay in score.
+                        Manage muted authors, topics, and affiliations to hide unwanted content.
+                    </p>
+                </div>
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">Automation</h3>
+                    <p class="leading-relaxed">
+                        Set up email digests by configuring a recipient address and connecting your Gmail account via OAuth.
+                        Once authorized, you can send yourself a digest of matched papers or automate it with a cron job.
+                    </p>
+                </div>
+                <div>
+                    <h3 class="font-medium text-gray-900 mb-1">LLM / AI</h3>
+                    <p class="leading-relaxed">
+                        Optionally enable AI-generated summaries using OpenRouter or a local Ollama instance.
+                        When enabled, each matched paper receives a concise summary and an AI relevance score
+                        that feeds into the overall ranking.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- How Scoring Works -->
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">How Scoring Works</h2>
+            <p class="text-sm text-gray-700 leading-relaxed mb-3">
+                Each paper receives a composite score that determines its ranking. The score is calculated from several components:
+            </p>
+            <div class="rounded-xl bg-gray-50 border border-gray-100 p-4 text-sm font-mono text-gray-700">
+                Score = (Match + Terms + Resources + AI) &times; Recency + Feedback
+            </div>
+            <ul class="mt-3 space-y-2 text-sm text-gray-600">
+                <li><strong>Match score</strong> &mdash; points for each type of match (Author, Affiliation, Title), weighted by your settings</li>
+                <li><strong>Term score</strong> &mdash; bonus for each matched whitelist term (multiple matches stack)</li>
+                <li><strong>Resource score</strong> &mdash; small bonus for papers with code or data links</li>
+                <li><strong>AI bonus</strong> &mdash; LLM relevance score (only when LLM is enabled)</li>
+                <li><strong>Recency multiplier</strong> &mdash; exponential decay based on paper age (configurable half-life)</li>
+                <li><strong>Feedback bonus</strong> &mdash; accumulated from your upvotes, saves, and skips</li>
+            </ul>
+            <p class="text-sm text-gray-500 mt-3">
+                You can view the full score breakdown for any paper by clicking on its score badge in the dashboard.
+            </p>
+        </section>
+
+        <!-- Tips -->
+        <section class="rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3">Tips</h2>
+            <ul class="space-y-2 text-sm text-gray-700">
+                <li class="flex gap-2">
+                    <span class="text-gray-400 shrink-0">&bull;</span>
+                    <span><strong>Follow &amp; Mute from paper cards</strong> &mdash; use the quick actions on any paper to follow its primary author or mute a topic without leaving the dashboard.</span>
+                </li>
+                <li class="flex gap-2">
+                    <span class="text-gray-400 shrink-0">&bull;</span>
+                    <span><strong>Force re-scrape</strong> &mdash; if today's feed was already scraped, the system will offer a "Run Again" option to force a fresh fetch.</span>
+                </li>
+                <li class="flex gap-2">
+                    <span class="text-gray-400 shrink-0">&bull;</span>
+                    <span><strong>Export reports</strong> &mdash; download an HTML report of your matched papers for any timeframe from the dashboard.</span>
+                </li>
+                <li class="flex gap-2">
+                    <span class="text-gray-400 shrink-0">&bull;</span>
+                    <span><strong>Multiple matches rank higher</strong> &mdash; a paper by a tracked author from a tracked lab on a tracked topic will receive the highest composite score.</span>
+                </li>
+                <li class="flex gap-2">
+                    <span class="text-gray-400 shrink-0">&bull;</span>
+                    <span><strong>Feedback improves over time</strong> &mdash; the more you upvote and save, the better the ranking adapts to your actual preferences.</span>
+                </li>
+            </ul>
+        </section>
+
+    </div>
+</div>
+{% endblock %}

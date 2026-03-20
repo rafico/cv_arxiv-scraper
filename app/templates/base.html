@@ -31,6 +31,11 @@
                                   {% if request.endpoint and 'settings' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900 hover:bg-gray-50{% endif %}">
                             Settings
                         </a>
+                        <a href="/help"
+                           class="px-3 py-1.5 rounded-md font-medium
+                                  {% if request.endpoint == 'help.view_help' %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900 hover:bg-gray-50{% endif %}">
+                            Help
+                        </a>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -63,6 +68,10 @@
             <a href="/settings" class="block px-3 py-2 rounded-md text-sm font-medium
                 {% if request.endpoint and 'settings' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900{% endif %}">
                 Settings
+            </a>
+            <a href="/help" class="block px-3 py-2 rounded-md text-sm font-medium
+                {% if request.endpoint == 'help.view_help' %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900{% endif %}">
+                Help
             </a>
         </div>
     </div>

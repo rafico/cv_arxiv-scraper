@@ -112,10 +112,12 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
 def _register_blueprints(app: Flask) -> None:
     from app.routes.api import api_bp
     from app.routes.dashboard import dashboard_bp
+    from app.routes.help import help_bp
     from app.routes.settings import settings_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(help_bp)
     app.register_blueprint(api_bp)
 
 
