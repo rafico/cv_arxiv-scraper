@@ -307,8 +307,19 @@
                 {% endfor %}
             </div>
 
+            {# ── Why it matched (always visible) ── #}
+            {% if paper.matched_terms_list %}
+            <div class="mb-3">
+                <div class="flex flex-wrap gap-1">
+                    {% for term in paper.matched_terms_list %}
+                    <span class="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
             {# ── Collapsible details ── #}
-            {% set has_details = paper.topic_tags_list or paper.categories_list or paper.matched_terms_list or paper.resource_links_list or paper.related_papers or paper.follow_recommendation.available or paper.mute_recommendation.available %}
+            {% set has_details = paper.topic_tags_list or paper.categories_list or paper.resource_links_list or paper.related_papers or paper.follow_recommendation.available or paper.mute_recommendation.available %}
             {% if has_details %}
             <div class="card-details hidden" data-card-details>
                 {% if paper.topic_tags_list %}
@@ -324,17 +335,6 @@
                     {% for category in paper.categories_list[:4] %}
                     <span class="text-[11px] text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{{ category }}</span>
                     {% endfor %}
-                </div>
-                {% endif %}
-
-                {% if paper.matched_terms_list %}
-                <div class="mb-3">
-                    <div class="text-[11px] text-gray-500 mb-1">Why it matched</div>
-                    <div class="flex flex-wrap gap-1">
-                        {% for term in paper.matched_terms_list %}
-                        <span class="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium">{{ term }}</span>
-                        {% endfor %}
-                    </div>
                 </div>
                 {% endif %}
 
