@@ -1,0 +1,26 @@
+{% extends "help/base.html" %}
+
+{% block doc_content %}
+<!-- FAQ -->
+<section id="faq" class="scroll-mt-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Common Questions</h2>
+    <div class="space-y-6">
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">Do I need Gmail?</h3>
+            <p class="mt-2 text-sm text-gray-600">No. Gmail is only for sending yourself digests by email. You can use the app normally without setting it up.</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">Do I need the AI features?</h3>
+            <p class="mt-2 text-sm text-gray-600">No. They are optional. The app can still match and rank papers using your authors, labs, and topics.</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">Why is my inbox empty?</h3>
+            <p class="mt-2 text-sm text-gray-600">Usually this means your tracked terms are very narrow, or there were no matches in the selected timeframe. Try broader topics or switch to a wider timeframe.</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">What should I learn first if I am not technical?</h3>
+            <p class="mt-2 text-sm text-gray-600">Learn just three things: add interests, run a scrape, and review papers with Save or Not Interested. Everything else can wait.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

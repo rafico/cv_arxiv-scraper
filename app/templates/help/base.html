@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Help - ArXiv CV Scraper{% endblock %}
+
+{% block content %}
+<div class="flex flex-col lg:flex-row gap-8">
+    <!-- Sidebar TOC (Sphinx-style) -->
+    <aside class="hidden lg:block w-64 shrink-0">
+        <div class="sticky top-6 overflow-y-auto max-h-[calc(100vh-3rem)] rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <h3 class="text-sm font-bold text-gray-900 mb-3 uppercase tracking-wider">Contents</h3>
+            <nav class="space-y-1.5 text-sm" id="toc-nav">
+                <a href="{{ url_for('help.view_page', page='start') }}" class="block transition-colors {% if active_page == 'start' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Quick Start</a>
+                <a href="{{ url_for('help.view_page', page='ui') }}" class="block transition-colors {% if active_page == 'ui' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">UI Guide & Main Buttons</a>
+                <a href="{{ url_for('help.view_page', page='features') }}" class="block transition-colors {% if active_page == 'features' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Smart Features & Power Tips</a>
+                <a href="{{ url_for('help.view_page', page='settings') }}" class="block transition-colors {% if active_page == 'settings' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Settings & Ranking</a>
+                <a href="{{ url_for('help.view_page', page='faq') }}" class="block transition-colors {% if active_page == 'faq' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Common Questions</a>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="flex-1 min-w-0 max-w-4xl">
+        <div class="mb-8 border-b border-gray-200 pb-5">
+            <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">Help Documentation</h1>
+            <p class="mt-2 text-base text-gray-500">
+                A plain-English guide to finding useful computer vision papers without checking arXiv all day.
+            </p>
+        </div>
+
+        <div class="space-y-12">
+            {% block doc_content %}{% endblock %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,94 @@
+{% extends "help/base.html" %}
+
+{% block doc_content %}
+<!-- Sync -->
+<section id="sync" class="scroll-mt-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Reference Manager Sync</h2>
+    <div class="grid gap-4 md:grid-cols-3">
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">BibTeX</h3>
+            <p class="text-sm text-gray-600">Click <strong>BibTeX</strong> on any paper card to copy a single entry. The toolbar <strong>BibTeX</strong> button exports all visible papers at once.</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Mendeley</h3>
+            <p class="text-sm text-gray-600">Connect your Mendeley account via OAuth in <a href="/settings?section=automation" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>. Once connected, use <strong>Sync Saved Papers</strong> to push your library.</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Zotero</h3>
+            <p class="text-sm text-gray-600">Enter your Zotero API key and user ID in <a href="/settings?section=automation" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>. You can sync to a specific Zotero collection if you like.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Smart Features -->
+<section id="smart-features" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Smart Features</h2>
+    <div class="grid gap-x-8 gap-y-6 md:grid-cols-2">
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Citation Counts</h3>
+            <p class="mt-1 text-sm text-gray-600">During each scrape, citation data is fetched from Semantic Scholar. Papers show a blue citation badge you can click to see the full page. Sort by <strong>Most Cited</strong>.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Follow Author / Mute Topic</h3>
+            <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to find <strong>Follow</strong> and <strong>Mute</strong> buttons. Follow adds the author to tracked authors. Mute suppresses papers with that topic tag.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Duplicate Detection</h3>
+            <p class="mt-1 text-sm text-gray-600">If a new paper has a nearly identical title to one already in the database, it gets an orange <strong>Dup</strong> badge so you know at a glance.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Historical Search</h3>
+            <p class="mt-1 text-sm text-gray-600">Search for papers in a specific date range using the historical search API. Backfill your inbox with older papers you may have missed.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Scheduled Scrapes</h3>
+            <p class="mt-1 text-sm text-gray-600">Enable automatic daily scrapes by adding a <code>scheduler</code> section to your <code>config.yaml</code>. The app runs scrapes at your chosen time without needing cron.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Related Papers</h3>
+            <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to see links to similar papers from your library. Similarity is computed from title and abstract text.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Power User -->
+<section id="power-user" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Power User Tips</h2>
+    
+    <h3 class="text-lg font-bold text-gray-900 mt-6 mb-3">Keyboard Shortcuts</h3>
+    <div class="overflow-x-auto rounded-xl border border-gray-200">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shortcut</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">j</kbd> / <kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">k</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Navigate between papers</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">s</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Save paper</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">u</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Upvote</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">x</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Skip (Not Interested)</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">o</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Open on arXiv</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">p</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Open PDF</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">d</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Toggle details</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mt-8 grid gap-6 md:grid-cols-3">
+        <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Advanced Filters</h3>
+            <p class="text-sm text-gray-600">Click <strong>Advanced Filters</strong> below the search bar to filter by arXiv category, resource availability, reading status, or to show hidden papers.</p>
+        </div>
+        <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Saved Searches</h3>
+            <p class="text-sm text-gray-600">After setting up filters, click <strong>Save search</strong> to bookmark the combination. Saved searches appear as quick-access pills.</p>
+        </div>
+        <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Bulk Operations</h3>
+            <p class="text-sm text-gray-600">Click <strong>Select</strong> in the toolbar to enter bulk mode. Select multiple papers and save, upvote, or skip them all at once.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

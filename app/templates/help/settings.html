@@ -1,0 +1,54 @@
+{% extends "help/base.html" %}
+
+{% block doc_content %}
+<!-- Settings -->
+<section id="settings-guide" class="scroll-mt-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Settings, Explained Simply</h2>
+    <div class="space-y-4">
+        <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
+            <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-900 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Start Here</span></div>
+            <div>
+                <h3 class="text-base font-bold text-gray-900">Research Setup</h3>
+                <p class="mt-1 text-sm text-gray-600">This is the most important section. Add authors, labs, and topic keywords. One item per line is enough.</p>
+            </div>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
+            <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
+            <div>
+                <h3 class="text-base font-bold text-gray-900">Ranking</h3>
+                <p class="mt-1 text-sm text-gray-600">Fine-tunes how strongly the app reacts to authors, labs, topics, freshness, and muted terms. Safe to ignore at first.</p>
+            </div>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
+            <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
+            <div>
+                <h3 class="text-base font-bold text-gray-900">Automation</h3>
+                <p class="mt-1 text-sm text-gray-600">Use this only if you want email digests or external sync. The app works fine without it.</p>
+            </div>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
+            <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
+            <div>
+                <h3 class="text-base font-bold text-gray-900">LLM / AI</h3>
+                <p class="mt-1 text-sm text-gray-600">Adds AI summaries and an extra relevance score. Useful, but not required to get value from the app.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Ranking -->
+<section id="ranking" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">How Ranking Works</h2>
+    <div class="help-admonition bg-gray-50 border-l-4 border-gray-400 p-4 rounded-r-lg mb-4">
+        <p class="text-sm text-gray-700">You do not need to understand the scoring formula to use the app well. If something looks out of place, use <strong>Save</strong>, <strong>Upvote</strong>, or <strong>Not Interested</strong> and the ranking will adjust over time.</p>
+    </div>
+    
+    <p class="text-sm text-gray-600 mb-3">In plain English, papers usually rise to the top when:</p>
+    <ul class="space-y-2 text-sm text-gray-600 pl-5 list-disc marker:text-gray-400">
+        <li class="pl-1">They match more of the authors, labs, or topics you entered.</li>
+        <li class="pl-1">They are newer.</li>
+        <li class="pl-1">You have previously saved or upvoted similar papers.</li>
+        <li class="pl-1">AI scoring is enabled and the paper looks relevant.</li>
+    </ul>
+</section>
+{% endblock %}
