@@ -3,327 +3,432 @@
 {% block title %}Help - ArXiv CV Scraper{% endblock %}
 
 {% block content %}
-<div class="max-w-5xl">
-    <div class="mb-8">
-        <h1 class="text-2xl font-bold text-gray-900">Help</h1>
-        <p class="mt-1 text-sm text-gray-500">
-            A plain-English guide to finding useful computer vision papers without checking arXiv all day.
-        </p>
-    </div>
+<div class="flex flex-col lg:flex-row gap-8">
+    <!-- Sidebar TOC (Sphinx-style) -->
+    <aside class="hidden lg:block w-64 shrink-0">
+        <div class="sticky top-6 overflow-y-auto max-h-[calc(100vh-3rem)] rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <h3 class="text-sm font-bold text-gray-900 mb-3 uppercase tracking-wider">Contents</h3>
+            <nav class="space-y-1.5 text-sm" id="toc-nav">
+                <a href="#quick-start" class="block text-gray-600 hover:text-gray-900 transition-colors">Quick Start</a>
+                <a href="#workflow" class="block text-gray-600 hover:text-gray-900 transition-colors">Your Normal Workflow</a>
+                <a href="#ui-guide" class="block text-gray-600 hover:text-gray-900 transition-colors">UI Guide & Main Buttons</a>
+                <a href="#paper-organization" class="block text-gray-600 hover:text-gray-900 transition-colors">Paper Organization</a>
+                <a href="#sync" class="block text-gray-600 hover:text-gray-900 transition-colors">Reference Manager Sync</a>
+                <a href="#smart-features" class="block text-gray-600 hover:text-gray-900 transition-colors">Smart Features</a>
+                <a href="#power-user" class="block text-gray-600 hover:text-gray-900 transition-colors">Power User Tips</a>
+                <a href="#settings-guide" class="block text-gray-600 hover:text-gray-900 transition-colors">Settings Explained</a>
+                <a href="#ranking" class="block text-gray-600 hover:text-gray-900 transition-colors">How Ranking Works</a>
+                <a href="#faq" class="block text-gray-600 hover:text-gray-900 transition-colors">Common Questions</a>
+            </nav>
+        </div>
+    </aside>
 
-    <div class="space-y-6">
-        <section class="rounded-2xl border border-gray-200 bg-gradient-to-br from-gray-50 to-white p-6">
-            <div class="grid gap-4 lg:grid-cols-[1.4fr,1fr] lg:items-start">
-                <div>
-                    <h2 class="text-lg font-semibold text-gray-900">Start Here</h2>
-                    <p class="mt-2 text-sm leading-relaxed text-gray-700">
-                        If you are new, focus on the basics first. You can ignore Gmail and AI until the basics are working.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-200 bg-white p-4">
-                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Quick Start</div>
-                    <ol class="mt-3 space-y-2 text-sm text-gray-700">
-                        <li>1. Add a few authors, labs, or topics in <a href="/settings?section=interests" class="text-gray-900 underline underline-offset-2">Settings &rarr; Research Setup</a>.</li>
-                        <li>2. Click <strong>Run Scrape</strong> to collect matching papers.</li>
-                        <li>3. On the <a href="/" class="text-gray-900 underline underline-offset-2">Papers</a> page, use <strong>Save</strong> for good papers and <strong>Not Interested</strong> for bad matches.</li>
-                    </ol>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">What This App Does</h2>
-            <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">It finds papers for you</h3>
-                    <p class="mt-2 text-sm leading-relaxed text-gray-700">
-                        The app checks the arXiv computer vision feed and pulls in papers that match the authors, labs, and topics you care about.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">It stays on your machine</h3>
-                    <p class="mt-2 text-sm leading-relaxed text-gray-700">
-                        There is no signup and no separate cloud account. Your data stays local unless you choose to send yourself email digests.
-                    </p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">Your Normal Workflow</h2>
-            <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Step 1</div>
-                    <h3 class="mt-2 text-sm font-semibold text-gray-900">Tell it what you care about</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        In <strong>Research Setup</strong>, enter one item per line. Start small: a few authors, a few labs, and a few topic phrases.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Step 2</div>
-                    <h3 class="mt-2 text-sm font-semibold text-gray-900">Run a scrape</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Press <strong>Run Scrape</strong>. The app will fetch recent papers and build your inbox.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Step 3</div>
-                    <h3 class="mt-2 text-sm font-semibold text-gray-900">Review the inbox</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Open the <strong>Papers</strong> page. Save the papers you want to keep, and mark weak matches as <strong>Not Interested</strong>.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Step 4</div>
-                    <h3 class="mt-2 text-sm font-semibold text-gray-900">Come back to Saved</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        The <strong>Saved</strong> tab is your shortlist. Use it for papers you want to revisit, cite, or share.
-                    </p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">What The Main Buttons Mean</h2>
-            <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Run Scrape</h3>
-                    <p class="mt-2 text-sm text-gray-700">Checks arXiv for recent papers and refreshes your inbox.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Inbox</h3>
-                    <p class="mt-2 text-sm text-gray-700">Shows papers that matched your interests and still need review.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Saved</h3>
-                    <p class="mt-2 text-sm text-gray-700">Your keep list. Use this for papers worth coming back to.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Save</h3>
-                    <p class="mt-2 text-sm text-gray-700">Marks a paper as important and keeps it in your shortlist.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Upvote</h3>
-                    <p class="mt-2 text-sm text-gray-700">Tells the app, "this is relevant." It helps similar papers move up.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Not Interested</h3>
-                    <p class="mt-2 text-sm text-gray-700">Hides a weak match and teaches the app to show less of that kind of paper.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Search and filters</h3>
-                    <p class="mt-2 text-sm text-gray-700">Use these when your list gets long. They help you narrow by topic, match type, timeframe, and more.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Export and BibTeX</h3>
-                    <p class="mt-2 text-sm text-gray-700">Download your current paper list when you want to save or share it outside the app.</p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">Paper Organization</h2>
-            <p class="mt-2 text-sm text-gray-500">Ways to keep your reading list tidy beyond Save and Not Interested.</p>
-            <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Collections</h3>
-                    <p class="mt-2 text-sm text-gray-700">Group papers into named folders (e.g. &ldquo;Thesis Ch. 3&rdquo;). Create collections, then use the folder icon on any paper card to file it. Filter the dashboard by collection using the pills at the top.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">User Tags</h3>
-                    <p class="mt-2 text-sm text-gray-700">Add custom tags to any paper with the <strong>+ tag</strong> button. Tags appear as indigo chips and can be removed by clicking the &times; next to them.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Notes</h3>
-                    <p class="mt-2 text-sm text-gray-700">Each paper has a free-text notes field (expand <strong>More details</strong> to see it). Notes auto-save as you type.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Reading Status</h3>
-                    <p class="mt-2 text-sm text-gray-700">Mark papers as <strong>To Read</strong>, <strong>Reading</strong>, or <strong>Read</strong> using the dropdown on each card. You can filter by reading status in <strong>Advanced Filters</strong>.</p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">Reference Manager Sync</h2>
-            <p class="mt-2 text-sm text-gray-500">Export or sync papers with external tools.</p>
-            <div class="mt-4 grid gap-4 md:grid-cols-3">
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">BibTeX</h3>
-                    <p class="mt-2 text-sm text-gray-700">Click <strong>BibTeX</strong> on any paper card to copy a single entry. The toolbar <strong>BibTeX</strong> button exports all visible papers at once.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Mendeley</h3>
-                    <p class="mt-2 text-sm text-gray-700">Connect your Mendeley account via OAuth in <a href="/settings?section=automation" class="text-gray-900 underline underline-offset-2">Settings &rarr; Automation</a>. Once connected, use <strong>Sync Saved Papers</strong> to push your library.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Zotero</h3>
-                    <p class="mt-2 text-sm text-gray-700">Enter your Zotero API key and user ID in <a href="/settings?section=automation" class="text-gray-900 underline underline-offset-2">Settings &rarr; Automation</a>. You can sync to a specific Zotero collection if you like.</p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">Smart Features</h2>
-            <p class="mt-2 text-sm text-gray-500">Features that run automatically behind the scenes.</p>
-            <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Citation Counts</h3>
-                    <p class="mt-2 text-sm text-gray-700">During each scrape, citation data is fetched from Semantic Scholar. Papers show a blue citation badge you can click to see the full Semantic Scholar page. You can also sort by <strong>Most Cited</strong>.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Follow Author / Mute Topic</h3>
-                    <p class="mt-2 text-sm text-gray-700">Expand a paper&rsquo;s details to find <strong>Follow</strong> and <strong>Mute</strong> buttons. Follow adds the first author to your tracked authors. Mute suppresses future papers with a matching topic tag.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Duplicate Detection</h3>
-                    <p class="mt-2 text-sm text-gray-700">If a new paper has a nearly identical title to one already in the database, it gets an orange <strong>Dup</strong> badge so you know at a glance.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Historical Search</h3>
-                    <p class="mt-2 text-sm text-gray-700">Search for papers in a specific date range using the historical search API. This lets you backfill your inbox with older papers you may have missed.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Scheduled Scrapes</h3>
-                    <p class="mt-2 text-sm text-gray-700">Enable automatic daily scrapes by adding a <code>scheduler</code> section to your <code>config.yaml</code>. Once enabled, the app runs scrapes at your chosen time without needing cron.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Related Papers</h3>
-                    <p class="mt-2 text-sm text-gray-700">Expand a paper&rsquo;s details to see links to similar papers from your library. Similarity is computed from title and abstract text.</p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">Power User Tips</h2>
-            <p class="mt-2 text-sm text-gray-500">Shortcuts and tools for moving through papers faster.</p>
-            <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Keyboard Shortcuts</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        <strong>j/k</strong> to navigate between papers,
-                        <strong>s</strong> to save,
-                        <strong>u</strong> to upvote,
-                        <strong>x</strong> to skip,
-                        <strong>o</strong> to open on arXiv,
-                        <strong>p</strong> to open PDF,
-                        <strong>d</strong> to toggle details.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Advanced Filters</h3>
-                    <p class="mt-2 text-sm text-gray-700">Click <strong>Advanced Filters</strong> below the search bar to filter by arXiv category, resource availability, reading status, or to show hidden papers.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Saved Searches</h3>
-                    <p class="mt-2 text-sm text-gray-700">After setting up filters, click <strong>Save search</strong> to bookmark the combination. Saved searches appear as quick-access pills above the paper list.</p>
-                </div>
-                <div class="rounded-xl border border-gray-100 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Bulk Operations</h3>
-                    <p class="mt-2 text-sm text-gray-700">Click <strong>Select</strong> in the toolbar to enter bulk mode. You can then select multiple papers and save, upvote, or skip them all at once.</p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">Settings, Explained Simply</h2>
-            <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <div class="flex items-center justify-between gap-3">
-                        <h3 class="text-sm font-semibold text-gray-900">Research Setup</h3>
-                        <span class="rounded-full bg-gray-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white">Start Here</span>
-                    </div>
-                    <p class="mt-2 text-sm text-gray-700">
-                        This is the most important section. Add authors, labs, and topic keywords. One item per line is enough.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <div class="flex items-center justify-between gap-3">
-                        <h3 class="text-sm font-semibold text-gray-900">Ranking</h3>
-                        <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-600">Optional</span>
-                    </div>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Fine-tunes how strongly the app reacts to authors, labs, topics, freshness, and muted terms. Safe to ignore at first.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <div class="flex items-center justify-between gap-3">
-                        <h3 class="text-sm font-semibold text-gray-900">Automation</h3>
-                        <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-600">Optional</span>
-                    </div>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Use this only if you want email digests or external sync. The app works fine without it.
-                    </p>
-                </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <div class="flex items-center justify-between gap-3">
-                        <h3 class="text-sm font-semibold text-gray-900">LLM / AI</h3>
-                        <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-600">Optional</span>
-                    </div>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Adds AI summaries and an extra relevance score. Useful, but not required to get value from the app.
-                    </p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">How Ranking Works</h2>
-            <p class="mt-2 text-sm leading-relaxed text-gray-700">
-                You do not need to understand the scoring formula to use the app well. In plain English, papers usually rise to the top when:
+    <!-- Main Content -->
+    <div class="flex-1 min-w-0 max-w-4xl">
+        <div class="mb-8 border-b border-gray-200 pb-5">
+            <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">Help Documentation</h1>
+            <p class="mt-2 text-base text-gray-500">
+                A plain-English guide to finding useful computer vision papers without checking arXiv all day.
             </p>
-            <ul class="mt-3 space-y-2 text-sm text-gray-700">
-                <li class="flex gap-2">
-                    <span class="shrink-0 text-gray-400">&bull;</span>
-                    <span>They match more of the authors, labs, or topics you entered.</span>
-                </li>
-                <li class="flex gap-2">
-                    <span class="shrink-0 text-gray-400">&bull;</span>
-                    <span>They are newer.</span>
-                </li>
-                <li class="flex gap-2">
-                    <span class="shrink-0 text-gray-400">&bull;</span>
-                    <span>You have previously saved or upvoted similar papers.</span>
-                </li>
-                <li class="flex gap-2">
-                    <span class="shrink-0 text-gray-400">&bull;</span>
-                    <span>AI scoring is enabled and the paper looks relevant.</span>
-                </li>
-            </ul>
-            <p class="mt-3 text-sm text-gray-500">
-                If something looks out of place, do not worry about the math. Use <strong>Save</strong>, <strong>Upvote</strong>, or <strong>Not Interested</strong> and the ranking will adjust over time.
-            </p>
-        </section>
+        </div>
 
-        <section class="rounded-2xl border border-gray-200 bg-white p-6">
-            <h2 class="text-lg font-semibold text-gray-900">Common Questions</h2>
-            <div class="mt-4 space-y-4">
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Do I need Gmail?</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        No. Gmail is only for sending yourself digests by email. You can use the app normally without setting it up.
-                    </p>
+        <div class="space-y-12">
+            <!-- Quick Start -->
+            <section id="quick-start" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Quick Start</h2>
+                
+                <div class="help-admonition bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg mb-6">
+                    <div class="flex items-start">
+                        <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        <div>
+                            <h4 class="text-sm font-bold text-blue-900">Note: Start simple</h4>
+                            <p class="mt-1 text-sm text-blue-800">If you are new, focus on the basics first. You can ignore Gmail and AI until the core app is working for you.</p>
+                        </div>
+                    </div>
                 </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Do I need the AI features?</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        No. They are optional. The app can still match and rank papers using your authors, labs, and topics.
-                    </p>
+
+                <div class="grid gap-6 md:grid-cols-2">
+                    <div class="space-y-4">
+                        <div class="flex gap-4">
+                            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">1</div>
+                            <div>
+                                <h3 class="text-base font-semibold text-gray-900">Add interests</h3>
+                                <p class="mt-1 text-sm text-gray-600">Add authors, labs, or topics in <a href="/settings?section=interests" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Research Setup</a>.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">2</div>
+                            <div>
+                                <h3 class="text-base font-semibold text-gray-900">Run Scrape</h3>
+                                <p class="mt-1 text-sm text-gray-600">Click the <strong>Run Scrape</strong> button in the top navigation to collect matching papers.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">3</div>
+                            <div>
+                                <h3 class="text-base font-semibold text-gray-900">Review Inbox</h3>
+                                <p class="mt-1 text-sm text-gray-600">On the <a href="/" class="font-medium text-blue-600 hover:text-blue-800">Papers</a> page, use <strong>Save</strong> for good papers and <strong>Not Interested</strong> for bad matches.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <figure class="rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
+                            <img src="{{ url_for('static', filename='help/navbar_runscrape.webp') }}" alt="Navbar showing Run Scrape button" class="w-full rounded-lg" onerror="handleImgError(this)">
+                            <figcaption class="mt-2 text-center text-xs text-gray-500">Click "Run Scrape" to fetch recent arXiv papers.</figcaption>
+                        </figure>
+                    </div>
                 </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">Why is my inbox empty?</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Usually this means your tracked terms are very narrow, or there were no matches in the selected timeframe. Try broader topics or switch to a wider timeframe.
-                    </p>
+            </section>
+
+            <!-- Workflow -->
+            <section id="workflow" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Your Normal Workflow</h2>
+                <div class="mt-4 grid gap-6 md:grid-cols-2">
+                    <div class="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                        <div class="bg-gray-50 px-5 py-3 border-b border-gray-100">
+                            <div class="text-xs font-bold uppercase tracking-wider text-gray-500">Step 1</div>
+                            <h3 class="mt-1 text-base font-semibold text-gray-900">Tell it what you care about</h3>
+                        </div>
+                        <div class="p-5">
+                            <p class="text-sm text-gray-600 mb-4">In <strong>Research Setup</strong>, enter one item per line. Start small: a few authors, a few labs, and a few topic phrases.</p>
+                            <img src="{{ url_for('static', filename='help/settings_research.webp') }}" alt="Settings Research Setup tab" class="w-full rounded border border-gray-100" onerror="handleImgError(this)">
+                        </div>
+                    </div>
+                    
+                    <div class="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                        <div class="bg-gray-50 px-5 py-3 border-b border-gray-100">
+                            <div class="text-xs font-bold uppercase tracking-wider text-gray-500">Step 2</div>
+                            <h3 class="mt-1 text-base font-semibold text-gray-900">Run a scrape</h3>
+                        </div>
+                        <div class="p-5">
+                            <p class="text-sm text-gray-600 mb-4">Press <strong>Run Scrape</strong>. The app will fetch recent papers and build your inbox with matches.</p>
+                            <div class="help-admonition bg-amber-50 border-l-4 border-amber-500 p-3 rounded-r">
+                                <p class="text-xs text-amber-800"><strong>Tip:</strong> You only need to scrape once a day. ArXiv typically updates its feed at 8pm EST.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                        <div class="bg-gray-50 px-5 py-3 border-b border-gray-100">
+                            <div class="text-xs font-bold uppercase tracking-wider text-gray-500">Step 3</div>
+                            <h3 class="mt-1 text-base font-semibold text-gray-900">Review the inbox</h3>
+                        </div>
+                        <div class="p-5">
+                            <p class="text-sm text-gray-600 mb-4">Open the <strong>Papers</strong> page. Save the papers you want to keep, and mark weak matches as <strong>Not Interested</strong>.</p>
+                            <img src="{{ url_for('static', filename='help/papers_dashboard.webp') }}" alt="Dashboard displaying papers" class="w-full rounded border border-gray-100" onerror="handleImgError(this)">
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                        <div class="bg-gray-50 px-5 py-3 border-b border-gray-100">
+                            <div class="text-xs font-bold uppercase tracking-wider text-gray-500">Step 4</div>
+                            <h3 class="mt-1 text-base font-semibold text-gray-900">Come back to Saved</h3>
+                        </div>
+                        <div class="p-5">
+                            <p class="text-sm text-gray-600">The <strong>Saved</strong> tab is your shortlist. Use it for papers you want to revisit, cite, or share.</p>
+                        </div>
+                    </div>
                 </div>
-                <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">What should I learn first if I am not technical?</h3>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Learn just three things: add interests, run a scrape, and review papers with Save or Not Interested. Everything else can wait.
-                    </p>
+            </section>
+
+            <!-- UI Guide -->
+            <section id="ui-guide" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">UI Guide & Main Buttons</h2>
+                
+                <figure class="mb-8 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                    <img src="{{ url_for('static', filename='help/paper_cards.webp') }}" alt="Paper cards with action buttons" class="w-full rounded-lg border border-gray-100" onerror="handleImgError(this)">
+                    <figcaption class="mt-3 text-center text-sm text-gray-600">Paper cards display metadata, matching tags, and actionable buttons.</figcaption>
+                </figure>
+
+                <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div class="rounded-xl bg-gray-50 p-4 border border-gray-100">
+                        <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <span class="px-2 py-0.5 bg-gray-900 text-white rounded text-xs">Run Scrape</span>
+                        </h3>
+                        <p class="mt-2 text-sm text-gray-600">Checks arXiv for recent papers and refreshes your inbox.</p>
+                    </div>
+                    <div class="rounded-xl bg-gray-50 p-4 border border-gray-100">
+                        <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <span class="px-2 py-0.5 bg-gray-900 text-white rounded-full text-xs">Inbox</span>
+                        </h3>
+                        <p class="mt-2 text-sm text-gray-600">Shows papers that matched your interests and still need review.</p>
+                    </div>
+                    <div class="rounded-xl bg-gray-50 p-4 border border-gray-100">
+                        <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-xs">Saved</span>
+                        </h3>
+                        <p class="mt-2 text-sm text-gray-600">Your keep list. Use this for papers worth coming back to.</p>
+                    </div>
+                    <div class="rounded-xl bg-white p-4 border border-gray-200">
+                        <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs">Save</span>
+                        </h3>
+                        <p class="mt-2 text-sm text-gray-600">Marks a paper as important and keeps it in your shortlist.</p>
+                    </div>
+                    <div class="rounded-xl bg-white p-4 border border-gray-200">
+                        <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs text-blue-600">Upvote</span>
+                        </h3>
+                        <p class="mt-2 text-sm text-gray-600">Tells the app, "this is relevant." It helps similar papers move up.</p>
+                    </div>
+                    <div class="rounded-xl bg-white p-4 border border-gray-200">
+                        <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs text-rose-600">Not Interested</span>
+                        </h3>
+                        <p class="mt-2 text-sm text-gray-600">Hides a weak match and teaches the app to show less of that kind of paper.</p>
+                    </div>
                 </div>
-            </div>
-        </section>
+            </section>
+
+            <!-- Paper Organization -->
+            <section id="paper-organization" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Paper Organization</h2>
+                <p class="text-sm text-gray-600 mb-6">Ways to keep your reading list tidy beyond Save and Not Interested.</p>
+                
+                <div class="space-y-6">
+                    <div class="flex gap-4 items-start">
+                        <div class="p-2 bg-indigo-50 rounded-lg text-indigo-600 shrink-0">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">Collections</h3>
+                            <p class="mt-1 text-sm text-gray-600">Group papers into named folders (e.g. &ldquo;Thesis Ch. 3&rdquo;). Create collections, then use the folder icon on any paper card to file it. Filter the dashboard by collection using the pills at the top.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-4 items-start">
+                        <div class="p-2 bg-indigo-50 rounded-lg text-indigo-600 shrink-0">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">User Tags</h3>
+                            <p class="mt-1 text-sm text-gray-600">Add custom tags to any paper with the <strong>+ tag</strong> button. Tags appear as indigo chips and can be removed by clicking the &times; next to them.</p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4 items-start">
+                        <div class="p-2 bg-indigo-50 rounded-lg text-indigo-600 shrink-0">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">Notes</h3>
+                            <p class="mt-1 text-sm text-gray-600">Each paper has a free-text notes field (expand <strong>More details</strong> to see it). Notes auto-save as you type.</p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4 items-start">
+                        <div class="p-2 bg-indigo-50 rounded-lg text-indigo-600 shrink-0">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">Reading Status</h3>
+                            <p class="mt-1 text-sm text-gray-600">Mark papers as <strong>To Read</strong>, <strong>Reading</strong>, or <strong>Read</strong> using the dropdown on each card. You can filter by reading status in <strong>Advanced Filters</strong>.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sync -->
+            <section id="sync" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Reference Manager Sync</h2>
+                <div class="grid gap-4 md:grid-cols-3">
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                        <h3 class="text-sm font-bold text-gray-900 mb-2">BibTeX</h3>
+                        <p class="text-sm text-gray-600">Click <strong>BibTeX</strong> on any paper card to copy a single entry. The toolbar <strong>BibTeX</strong> button exports all visible papers at once.</p>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                        <h3 class="text-sm font-bold text-gray-900 mb-2">Mendeley</h3>
+                        <p class="text-sm text-gray-600">Connect your Mendeley account via OAuth in <a href="/settings?section=automation" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>. Once connected, use <strong>Sync Saved Papers</strong> to push your library.</p>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                        <h3 class="text-sm font-bold text-gray-900 mb-2">Zotero</h3>
+                        <p class="text-sm text-gray-600">Enter your Zotero API key and user ID in <a href="/settings?section=automation" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>. You can sync to a specific Zotero collection if you like.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Smart Features -->
+            <section id="smart-features" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Smart Features</h2>
+                <div class="grid gap-x-8 gap-y-6 md:grid-cols-2">
+                    <div>
+                        <h3 class="text-base font-bold text-gray-900">Citation Counts</h3>
+                        <p class="mt-1 text-sm text-gray-600">During each scrape, citation data is fetched from Semantic Scholar. Papers show a blue citation badge you can click to see the full page. Sort by <strong>Most Cited</strong>.</p>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-gray-900">Follow Author / Mute Topic</h3>
+                        <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to find <strong>Follow</strong> and <strong>Mute</strong> buttons. Follow adds the author to tracked authors. Mute suppresses papers with that topic tag.</p>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-gray-900">Duplicate Detection</h3>
+                        <p class="mt-1 text-sm text-gray-600">If a new paper has a nearly identical title to one already in the database, it gets an orange <strong>Dup</strong> badge so you know at a glance.</p>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-gray-900">Historical Search</h3>
+                        <p class="mt-1 text-sm text-gray-600">Search for papers in a specific date range using the historical search API. Backfill your inbox with older papers you may have missed.</p>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-gray-900">Scheduled Scrapes</h3>
+                        <p class="mt-1 text-sm text-gray-600">Enable automatic daily scrapes by adding a <code>scheduler</code> section to your <code>config.yaml</code>. The app runs scrapes at your chosen time without needing cron.</p>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-gray-900">Related Papers</h3>
+                        <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to see links to similar papers from your library. Similarity is computed from title and abstract text.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Power User -->
+            <section id="power-user" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Power User Tips</h2>
+                
+                <h3 class="text-lg font-bold text-gray-900 mt-6 mb-3">Keyboard Shortcuts</h3>
+                <div class="overflow-x-auto rounded-xl border border-gray-200">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shortcut</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">j</kbd> / <kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">k</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Navigate between papers</td></tr>
+                            <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">s</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Save paper</td></tr>
+                            <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">u</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Upvote</td></tr>
+                            <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">x</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Skip (Not Interested)</td></tr>
+                            <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">o</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Open on arXiv</td></tr>
+                            <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">p</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Open PDF</td></tr>
+                            <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">d</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Toggle details</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="mt-8 grid gap-6 md:grid-cols-3">
+                    <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+                        <h3 class="text-sm font-bold text-gray-900 mb-2">Advanced Filters</h3>
+                        <p class="text-sm text-gray-600">Click <strong>Advanced Filters</strong> below the search bar to filter by arXiv category, resource availability, reading status, or to show hidden papers.</p>
+                    </div>
+                    <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+                        <h3 class="text-sm font-bold text-gray-900 mb-2">Saved Searches</h3>
+                        <p class="text-sm text-gray-600">After setting up filters, click <strong>Save search</strong> to bookmark the combination. Saved searches appear as quick-access pills.</p>
+                    </div>
+                    <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+                        <h3 class="text-sm font-bold text-gray-900 mb-2">Bulk Operations</h3>
+                        <p class="text-sm text-gray-600">Click <strong>Select</strong> in the toolbar to enter bulk mode. Select multiple papers and save, upvote, or skip them all at once.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings -->
+            <section id="settings-guide" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Settings, Explained Simply</h2>
+                <div class="space-y-4">
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
+                        <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-900 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Start Here</span></div>
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">Research Setup</h3>
+                            <p class="mt-1 text-sm text-gray-600">This is the most important section. Add authors, labs, and topic keywords. One item per line is enough.</p>
+                        </div>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
+                        <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">Ranking</h3>
+                            <p class="mt-1 text-sm text-gray-600">Fine-tunes how strongly the app reacts to authors, labs, topics, freshness, and muted terms. Safe to ignore at first.</p>
+                        </div>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
+                        <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">Automation</h3>
+                            <p class="mt-1 text-sm text-gray-600">Use this only if you want email digests or external sync. The app works fine without it.</p>
+                        </div>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
+                        <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">LLM / AI</h3>
+                            <p class="mt-1 text-sm text-gray-600">Adds AI summaries and an extra relevance score. Useful, but not required to get value from the app.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Ranking -->
+            <section id="ranking" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">How Ranking Works</h2>
+                <div class="help-admonition bg-gray-50 border-l-4 border-gray-400 p-4 rounded-r-lg mb-4">
+                    <p class="text-sm text-gray-700">You do not need to understand the scoring formula to use the app well. If something looks out of place, use <strong>Save</strong>, <strong>Upvote</strong>, or <strong>Not Interested</strong> and the ranking will adjust over time.</p>
+                </div>
+                
+                <p class="text-sm text-gray-600 mb-3">In plain English, papers usually rise to the top when:</p>
+                <ul class="space-y-2 text-sm text-gray-600 pl-5 list-disc marker:text-gray-400">
+                    <li class="pl-1">They match more of the authors, labs, or topics you entered.</li>
+                    <li class="pl-1">They are newer.</li>
+                    <li class="pl-1">You have previously saved or upvoted similar papers.</li>
+                    <li class="pl-1">AI scoring is enabled and the paper looks relevant.</li>
+                </ul>
+            </section>
+
+            <!-- FAQ -->
+            <section id="faq" class="scroll-mt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Common Questions</h2>
+                <div class="space-y-6">
+                    <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <h3 class="text-base font-bold text-gray-900">Do I need Gmail?</h3>
+                        <p class="mt-2 text-sm text-gray-600">No. Gmail is only for sending yourself digests by email. You can use the app normally without setting it up.</p>
+                    </div>
+                    <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <h3 class="text-base font-bold text-gray-900">Do I need the AI features?</h3>
+                        <p class="mt-2 text-sm text-gray-600">No. They are optional. The app can still match and rank papers using your authors, labs, and topics.</p>
+                    </div>
+                    <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <h3 class="text-base font-bold text-gray-900">Why is my inbox empty?</h3>
+                        <p class="mt-2 text-sm text-gray-600">Usually this means your tracked terms are very narrow, or there were no matches in the selected timeframe. Try broader topics or switch to a wider timeframe.</p>
+                    </div>
+                    <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <h3 class="text-base font-bold text-gray-900">What should I learn first if I am not technical?</h3>
+                        <p class="mt-2 text-sm text-gray-600">Learn just three things: add interests, run a scrape, and review papers with Save or Not Interested. Everything else can wait.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Simple ScrollSpy for TOC
+    document.addEventListener('DOMContentLoaded', function() {
+        const sections = document.querySelectorAll('section[id]');
+        const navLinks = document.querySelectorAll('#toc-nav a');
+        
+        function highlightToc() {
+            let scrollY = window.pageYOffset;
+            let currentSection = '';
+            
+            sections.forEach(section => {
+                const sectionHeight = section.offsetHeight;
+                const sectionTop = section.offsetTop - 100;
+                
+                if (scrollY > sectionTop && scrollY <= sectionTop + sectionHeight) {
+                    currentSection = section.getAttribute('id');
+                }
+            });
+            
+            navLinks.forEach(link => {
+                link.classList.remove('text-gray-900', 'font-bold');
+                link.classList.add('text-gray-600');
+                if (link.getAttribute('href') === '#' + currentSection) {
+                    link.classList.remove('text-gray-600');
+                    link.classList.add('text-gray-900', 'font-bold');
+                }
+            });
+        }
+        
+        window.addEventListener('scroll', highlightToc);
+        highlightToc(); // Run once on load
+    });
+</script>
 {% endblock %}
