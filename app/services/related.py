@@ -30,6 +30,28 @@ def cosine_similarity(vec_a: Counter[str], vec_b: Counter[str]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def find_duplicates(
+    title: str,
+    existing_titles: dict[int, str],
+    *,
+    threshold: float = 0.92,
+) -> list[tuple[int, float]]:
+    """Return (paper_id, similarity) pairs where title similarity >= threshold."""
+    target_vec = build_vector(title.lower())
+    if not target_vec:
+        return []
+
+    results: list[tuple[int, float]] = []
+    for paper_id, existing_title in existing_titles.items():
+        other_vec = build_vector(existing_title.lower())
+        sim = cosine_similarity(target_vec, other_vec)
+        if sim >= threshold:
+            results.append((paper_id, sim))
+
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results
+
+
 def top_related_papers(
     paper_id: int,
     vectors_by_id: dict[int, Counter[str]],

@@ -37,6 +37,28 @@ class JSONList(TypeDecorator):
             # Legacy: raw comma-separated text that isn't valid JSON at all.
             return [item.strip() for item in str(value).split(",") if item.strip()]
 
+class JSONDict(TypeDecorator):
+    """Custom JSON dict type for SQLite."""
+    impl = TEXT
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return "{}"
+        if not isinstance(value, dict):
+            raise ValueError(f"JSONDict expected a dict, got {type(value).__name__}: {value!r}")
+        return json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if not value:
+            return {}
+        try:
+            val = json.loads(value)
+            return val if isinstance(val, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+
 class Paper(db.Model):
     __tablename__ = "papers"
     __table_args__ = (
@@ -72,6 +94,13 @@ class Paper(db.Model):
     feedback_score = db.Column(db.Integer, nullable=False, default=0)
     is_hidden = db.Column(db.Boolean, nullable=False, default=False)
 
+    reading_status = db.Column(db.String(16), nullable=True)
+    user_notes = db.Column(db.Text, nullable=True, default="")
+    user_tags = db.Column(JSONList, nullable=False, default=list)
+    duplicate_of_id = db.Column(db.Integer, db.ForeignKey("papers.id"), nullable=True)
+    source_feed_id = db.Column(db.Integer, db.ForeignKey("feed_sources.id"), nullable=True)
+    recommendation_score = db.Column(db.Float, nullable=True)
+
     # Legacy string dates are preserved for compatibility with older rows.
     publication_date = db.Column(db.Text)
     scraped_date = db.Column(db.Text, nullable=False)
@@ -94,6 +123,10 @@ class Paper(db.Model):
         return self.categories or []
 
     @property
+    def user_tags_list(self) -> list[str]:
+        return self.user_tags or []
+
+    @property
     def resource_links_list(self) -> list[dict]:
         return self.resource_links or []
 
@@ -101,6 +134,69 @@ class Paper(db.Model):
     def rank_score(self) -> float:
         from app.services.ranking import combined_rank_score
         return combined_rank_score(float(self.paper_score or 0.0), int(self.feedback_score or 0))
+
+
+class Collection(db.Model):
+    __tablename__ = "collections"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False, unique=True)
+    description = db.Column(db.Text, nullable=True, default="")
+    color = db.Column(db.String(7), nullable=True)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
+
+    papers = db.relationship("PaperCollection", back_populates="collection", cascade="all, delete-orphan")
+
+
+class PaperCollection(db.Model):
+    __tablename__ = "paper_collections"
+    __table_args__ = (
+        db.UniqueConstraint("paper_id", "collection_id", name="uq_paper_collection"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    collection_id = db.Column(db.Integer, db.ForeignKey("collections.id", ondelete="CASCADE"), nullable=False, index=True)
+    added_at = db.Column(db.DateTime, server_default=db.func.now())
+
+    paper = db.relationship("Paper")
+    collection = db.relationship("Collection", back_populates="papers")
+
+
+class PaperRelation(db.Model):
+    __tablename__ = "paper_relations"
+    __table_args__ = (
+        db.UniqueConstraint("paper_id", "related_paper_id", "relation_type", name="uq_paper_relation"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    related_paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    relation_type = db.Column(db.String(32), nullable=False, default="similar")
+    similarity_score = db.Column(db.Float, nullable=True)
+
+
+class SavedSearch(db.Model):
+    __tablename__ = "saved_searches"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False)
+    filters = db.Column(JSONDict, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    last_used_at = db.Column(db.DateTime, nullable=True)
+
+
+class FeedSource(db.Model):
+    __tablename__ = "feed_sources"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False)
+    url = db.Column(db.Text, nullable=False, unique=True)
+    feed_type = db.Column(db.String(32), nullable=False, default="arxiv_rss")
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    last_fetched_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
 
 
 class PaperFeedback(db.Model):

@@ -153,4 +153,13 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         ensure_schema()
 
     _register_blueprints(app)
+
+    # Start built-in scheduler if configured.
+    scheduler_config = app.config["SCRAPER_CONFIG"].get("scheduler", {})
+    if scheduler_config.get("enabled"):
+        from app.services.scheduler import SCRAPE_SCHEDULER
+
+        daily_at = str(scheduler_config.get("daily_at", "08:00"))
+        SCRAPE_SCHEDULER.start(app, daily_at=daily_at)
+
     return app

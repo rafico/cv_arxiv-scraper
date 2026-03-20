@@ -24,6 +24,12 @@ PAPER_COLUMN_DEFS = {
     "is_hidden": "INTEGER NOT NULL DEFAULT 0",
     "publication_dt": "DATE",
     "scraped_at": "DATETIME",
+    "reading_status": "TEXT",
+    "user_notes": "TEXT DEFAULT ''",
+    "user_tags": "TEXT NOT NULL DEFAULT '[]'",
+    "duplicate_of_id": "INTEGER REFERENCES papers(id)",
+    "source_feed_id": "INTEGER REFERENCES feed_sources(id)",
+    "recommendation_score": "REAL",
 }
 
 INDEX_STATEMENTS = [
@@ -81,12 +87,26 @@ def ensure_schema() -> None:
 
     db.session.commit()
 
-    # Ensure feedback table exists even on older DBs.
-    from app.models import DigestRun, PaperFeedback, ScrapeRun  # local import to avoid circular dependency
+    # Ensure all tables exist even on older DBs.
+    from app.models import (  # local import to avoid circular dependency
+        Collection,
+        DigestRun,
+        FeedSource,
+        PaperCollection,
+        PaperFeedback,
+        PaperRelation,
+        SavedSearch,
+        ScrapeRun,
+    )
 
     PaperFeedback.__table__.create(bind=db.engine, checkfirst=True)
     ScrapeRun.__table__.create(bind=db.engine, checkfirst=True)
     DigestRun.__table__.create(bind=db.engine, checkfirst=True)
+    FeedSource.__table__.create(bind=db.engine, checkfirst=True)
+    Collection.__table__.create(bind=db.engine, checkfirst=True)
+    PaperCollection.__table__.create(bind=db.engine, checkfirst=True)
+    PaperRelation.__table__.create(bind=db.engine, checkfirst=True)
+    SavedSearch.__table__.create(bind=db.engine, checkfirst=True)
 
     for statement in INDEX_STATEMENTS:
         db.session.execute(text(statement))

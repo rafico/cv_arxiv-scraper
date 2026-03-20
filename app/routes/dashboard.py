@@ -6,7 +6,7 @@ from flask import Blueprint, current_app, render_template, request
 from flask_sqlalchemy.query import Query
 
 from app.csrf import get_or_create_csrf_token
-from app.models import DigestRun, Paper, PaperFeedback, ScrapeRun, db
+from app.models import Collection, DigestRun, Paper, PaperCollection, PaperFeedback, SavedSearch, ScrapeRun, db
 from app.services.feedback import get_feedback_snapshot
 from app.services.preferences import first_author_name, get_preferences
 from app.services.related import build_vector, top_related_papers
@@ -24,7 +24,7 @@ TIMEFRAME_DAYS = {
 }
 
 VIEW_OPTIONS = {"inbox", "saved"}
-SORT_OPTIONS = {"trending", "newest", "saved"}
+SORT_OPTIONS = {"trending", "newest", "saved", "recommended"}
 RESOURCE_FILTER_OPTIONS = {"all", "available", "missing"}
 
 
@@ -264,13 +264,20 @@ def index():
     if view not in VIEW_OPTIONS:
         view = "inbox"
 
+    collection_id = request.args.get("collection", type=int)
+
     query = Paper.query
-    if view == "saved":
+    if collection_id:
+        query = query.join(
+            PaperCollection,
+            db.and_(PaperCollection.paper_id == Paper.id, PaperCollection.collection_id == collection_id),
+        )
+    elif view == "saved":
         query = query.join(
             PaperFeedback,
             db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == "save"),
         )
-    query = _apply_muted_filters(query, config, active=view != "saved")
+    query = _apply_muted_filters(query, config, active=view != "saved" and not collection_id)
 
     include_hidden = request.args.get("include_hidden") == "1"
     if not include_hidden:
@@ -294,13 +301,27 @@ def index():
             db.or_(
                 Paper.title.ilike(search, escape="\\"),
                 Paper.authors.ilike(search, escape="\\"),
+                Paper.abstract_text.ilike(search, escape="\\"),
                 # cast() is a no-op on SQLite (underlying storage is TEXT);
                 # revisit if migrating to PostgreSQL.
                 db.cast(Paper.matched_terms, db.Text).ilike(search, escape="\\"),
                 Paper.summary_text.ilike(search, escape="\\"),
                 db.cast(Paper.topic_tags, db.Text).ilike(search, escape="\\"),
+                db.cast(Paper.user_tags, db.Text).ilike(search, escape="\\"),
             )
         )
+
+    reading_status = request.args.get("reading_status", "").strip()
+    if reading_status:
+        if reading_status == "unread":
+            query = query.filter(Paper.reading_status.is_(None))
+        else:
+            query = query.filter(Paper.reading_status == reading_status)
+
+    author_filter = request.args.get("author", "").strip()
+    if author_filter:
+        escaped_author = f"%{_escape_like_term(author_filter)}%"
+        query = query.filter(Paper.authors.ilike(escaped_author, escape="\\"))
 
     category = request.args.get("category", "").strip()
     resource_filter = request.args.get("resource_filter", "all").strip()
@@ -313,7 +334,7 @@ def index():
 
     default_sort = "saved" if view == "saved" else "trending"
     sort = request.args.get("sort", default_sort)
-    valid_sorts = {"saved", "newest"} if view == "saved" else {"trending", "newest"}
+    valid_sorts = {"saved", "newest"} if view == "saved" else {"trending", "newest", "recommended"}
     if sort not in valid_sorts or sort not in SORT_OPTIONS:
         sort = default_sort
 
@@ -325,6 +346,12 @@ def index():
         )
     elif sort == "newest":
         query = query.order_by(Paper.publication_dt.desc(), Paper.scraped_at.desc())
+    elif sort == "recommended":
+        query = query.order_by(
+            db.func.coalesce(Paper.recommendation_score, 0.0).desc(),
+            Paper.publication_dt.desc(),
+            Paper.scraped_at.desc(),
+        )
     else:
         query = query.order_by(
             (db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST).desc(),
@@ -369,8 +396,13 @@ def index():
             "include_hidden": include_hidden,
             "category": category,
             "resource_filter": resource_filter,
+            "reading_status": reading_status,
+            "author": author_filter,
+            "collection": collection_id,
         },
         filter_options=filter_options,
         dashboard_overview=_build_dashboard_overview(config),
+        collections=Collection.query.order_by(Collection.name).all(),
+        saved_searches=SavedSearch.query.order_by(SavedSearch.created_at.desc()).all(),
         csrf_token=get_or_create_csrf_token(),
     )

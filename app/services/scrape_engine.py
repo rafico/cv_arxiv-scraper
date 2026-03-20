@@ -243,6 +243,7 @@ def _identity_keys(data: dict) -> set[str]:
 
 def _save_results(app, results: list[dict]) -> tuple[int, int]:
     from app.models import Paper, db
+    from app.services.related import find_duplicates
 
     now = now_utc()
     today_str = now.date().isoformat()
@@ -252,12 +253,23 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
     with app.app_context():
         existing_keys = _get_existing_ids(app, results)
 
+        # Build title map for duplicate detection.
+        existing_titles: dict[int, str] = {}
+        for pid, ptitle in db.session.query(Paper.id, Paper.title).yield_per(500):
+            existing_titles[pid] = ptitle
+
         seen_keys: set[str] = set()
         for result in results:
             identity_keys = _identity_keys(result)
             if any(key in existing_keys or key in seen_keys for key in identity_keys):
                 skipped += 1
                 continue
+
+            # Check for near-duplicate titles.
+            duplicate_of_id = None
+            dups = find_duplicates(result["title"], existing_titles)
+            if dups:
+                duplicate_of_id = dups[0][0]
 
             seen_keys.update(identity_keys)
             paper = Paper(
@@ -279,6 +291,7 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 publication_dt=result.get("publication_dt"),
                 scraped_date=today_str,
                 scraped_at=now,
+                duplicate_of_id=duplicate_of_id,
             )
             db.session.add(paper)
             try:
@@ -438,7 +451,32 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
 
     try:
         _emit(event_callback, "status", {"phase": "feed", "message": "Fetching RSS feed..."})
-        entries = parse_feed_entries(scraper_config["feed_url"])
+
+        # Collect feed URLs: primary config feed + any enabled FeedSource entries.
+        feed_urls = [scraper_config["feed_url"]]
+        try:
+            from app.models import FeedSource, db as _db
+
+            with app.app_context():
+                extra_sources = FeedSource.query.filter_by(enabled=True).all()
+                for src in extra_sources:
+                    if src.url not in feed_urls:
+                        feed_urls.append(src.url)
+        except Exception:
+            pass  # FeedSource table may not exist yet.
+
+        entries: list[dict] = []
+        feed_errors: list[Exception] = []
+        for feed_url in feed_urls:
+            try:
+                entries.extend(parse_feed_entries(feed_url))
+            except Exception as exc:
+                LOGGER.warning("Failed to parse feed %s: %s", feed_url, exc)
+                feed_errors.append(exc)
+
+        # If every feed failed, propagate the first error.
+        if feed_errors and not entries and len(feed_errors) == len(feed_urls):
+            raise feed_errors[0]
         rolling_window_days = max(0, int(scraper_config.get("rolling_window_days", 0)))
         if rolling_window_days > 0:
             _emit(

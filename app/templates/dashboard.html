@@ -114,11 +114,32 @@
                   {{ 'bg-emerald-600 text-white' if current_filters.view == 'saved' else 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' }}">
             Saved {{ dashboard_overview.saved_count }}
         </a>
+        {% for col in collections %}
+        <a href="{{ url_for('dashboard.index', collection=col.id, timeframe='all') }}"
+           class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                  {{ 'bg-indigo-600 text-white' if current_filters.collection == col.id else 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100' }}">
+            {{ col.name }}
+        </a>
+        {% endfor %}
         <a href="/settings"
            class="px-3 py-1.5 text-sm font-medium rounded-full bg-white border border-gray-200 text-gray-600 hover:bg-gray-50">
             Edit Interests
         </a>
     </div>
+
+    {# ── Saved searches bar ── #}
+    {% if saved_searches %}
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+        <span class="text-xs text-gray-400">Saved searches:</span>
+        {% for ss in saved_searches %}
+        {% set ss_filters = ss.filters if ss.filters is mapping else {} %}
+        <a href="{{ url_for('dashboard.index', **ss_filters) }}"
+           class="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+            {{ ss.name }}
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     {% if current_filters.view == 'inbox' %}
     <div class="flex flex-wrap items-center gap-2 mb-3">
@@ -155,7 +176,7 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
                 <input type="text" name="q" id="q" value="{{ current_filters.q or '' }}"
-                       placeholder="Search title, author, topics..."
+                       placeholder="Search title, author, abstract, topics..."
                        class="w-full rounded-lg border border-gray-200 bg-gray-50 pl-10 pr-3 py-2 text-sm
                               focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
             </div>
@@ -168,6 +189,7 @@
                 {% else %}
                 <option value="trending" {{ 'selected' if current_filters.sort == 'trending' }}>Trending</option>
                 <option value="newest" {{ 'selected' if current_filters.sort == 'newest' }}>Newest</option>
+                <option value="recommended" {{ 'selected' if current_filters.sort == 'recommended' }}>Recommended</option>
                 {% endif %}
             </select>
             <a href="/api/export/bibtex?timeframe={{ current_filters.timeframe }}&view={{ current_filters.view }}"
@@ -184,7 +206,7 @@
     </div>
 
     {# ── Advanced filters (collapsible) ── #}
-    {% set has_advanced_filters = current_filters.category or current_filters.resource_filter != 'all' or current_filters.include_hidden %}
+    {% set has_advanced_filters = current_filters.category or current_filters.resource_filter != 'all' or current_filters.include_hidden or current_filters.reading_status or current_filters.author %}
     <div class="mb-4">
         <button type="button" onclick="toggleAdvancedFilters()"
                 class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors">
@@ -217,6 +239,15 @@
                         <option value="available" {{ 'selected' if current_filters.resource_filter == 'available' }}>Has resources ({{ filter_options.resources.available }})</option>
                         <option value="missing" {{ 'selected' if current_filters.resource_filter == 'missing' }}>No resources ({{ filter_options.resources.missing }})</option>
                     </select>
+                    <select name="reading_status" id="reading_status"
+                            onchange="document.getElementById('filter-form').submit();"
+                            class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                        <option value="" {{ 'selected' if not current_filters.reading_status }}>All statuses</option>
+                        <option value="unread" {{ 'selected' if current_filters.reading_status == 'unread' }}>Unread</option>
+                        <option value="to_read" {{ 'selected' if current_filters.reading_status == 'to_read' }}>To Read</option>
+                        <option value="reading" {{ 'selected' if current_filters.reading_status == 'reading' }}>Reading</option>
+                        <option value="read" {{ 'selected' if current_filters.reading_status == 'read' }}>Read</option>
+                    </select>
                     {% if current_filters.view == 'inbox' %}
                     <label class="inline-flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
                         <input type="checkbox" id="include_hidden_toggle" {{ 'checked' if current_filters.include_hidden }}
@@ -243,10 +274,17 @@
         <div></div>
         {% endif %}
         {% set has_non_default_filters = current_filters.q or current_filters.match_type or current_filters.include_hidden or current_filters.category or current_filters.resource_filter != 'all' or (current_filters.view == 'inbox' and (current_filters.timeframe != 'daily' or current_filters.sort != 'trending')) or (current_filters.view == 'saved' and (current_filters.timeframe != 'all' or current_filters.sort != 'saved')) %}
-        {% if has_non_default_filters %}
-        <a href="{{ url_for('dashboard.index', view=current_filters.view, timeframe='all' if current_filters.view == 'saved' else 'daily', sort='saved' if current_filters.view == 'saved' else 'trending') }}"
-           class="text-gray-500 hover:text-gray-700">Reset filters</a>
-        {% endif %}
+        <div class="flex items-center gap-3">
+            {% if has_non_default_filters %}
+            <button type="button" onclick="promptSaveSearch()"
+                    class="text-indigo-500 hover:text-indigo-700">Save search</button>
+            <a href="{{ url_for('dashboard.index', view=current_filters.view, timeframe='all' if current_filters.view == 'saved' else 'daily', sort='saved' if current_filters.view == 'saved' else 'trending') }}"
+               class="text-gray-500 hover:text-gray-700">Reset filters</a>
+            {% endif %}
+            <button type="button" onclick="toggleBulkMode()"
+                    id="bulk-mode-toggle"
+                    class="text-gray-400 hover:text-gray-600 text-xs">Select</button>
+        </div>
     </div>
 </form>
 
@@ -272,6 +310,9 @@
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold {{ BADGE[mtype].bg }} {{ BADGE[mtype].text }}">{{ mtype }}</span>
                 {% endif %}
                 {% endfor %}
+                {% if paper.duplicate_of_id %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-orange-50 text-orange-700">Dup</span>
+                {% endif %}
                 {% if paper.llm_relevance_score is not none %}
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700">
                     AI: {{ paper.llm_relevance_score|round|int }}/10
@@ -286,13 +327,15 @@
             <h2 class="text-sm font-semibold text-gray-900 leading-snug mb-1.5 line-clamp-2 group-hover:text-blue-600 transition-colors">
                 <a href="{{ paper.link }}" target="_blank">{{ paper.title }}</a>
             </h2>
-            <p class="text-xs text-gray-500 mb-2 line-clamp-1">{{ paper.authors }}</p>
+            <p class="text-xs text-gray-500 mb-2 line-clamp-1">
+                {% for author in paper.authors.split(', ') %}{% if not loop.first %}, {% endif %}<a href="{{ url_for('dashboard.index', author=author.strip(), timeframe='all') }}" class="hover:text-blue-600 hover:underline" onclick="event.stopPropagation()">{{ author.strip() }}</a>{% endfor %}
+            </p>
 
             {# ── Summary ── #}
             <p class="text-xs text-gray-600 leading-relaxed mb-3 line-clamp-3">{{ paper.summary_text }}</p>
 
-            {# ── Feedback buttons (always visible for quick triage) ── #}
-            <div class="flex items-center gap-2 mb-3">
+            {# ── Feedback buttons + reading status (always visible for quick triage) ── #}
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
                 {% for action, meta in FEEDBACK.items() %}
                 <button type="button"
                         onclick="sendFeedback({{ paper.id }}, '{{ action }}', this)"
@@ -302,6 +345,13 @@
                     {{ meta.label }} <span class="count">{{ paper.feedback_counts[action] }}</span>
                 </button>
                 {% endfor %}
+                <select onchange="setReadingStatus({{ paper.id }}, this.value, this)"
+                        class="reading-status-select ml-auto px-2 py-1 text-[11px] rounded border border-gray-200 bg-white text-gray-600 cursor-pointer">
+                    <option value="" {{ 'selected' if not paper.reading_status }}>Status</option>
+                    <option value="to_read" {{ 'selected' if paper.reading_status == 'to_read' }}>To Read</option>
+                    <option value="reading" {{ 'selected' if paper.reading_status == 'reading' }}>Reading</option>
+                    <option value="read" {{ 'selected' if paper.reading_status == 'read' }}>Read</option>
+                </select>
             </div>
 
             {# ── Why it matched (always visible) ── #}
@@ -327,8 +377,18 @@
             </div>
             {% endif %}
 
+            {# ── User tags (indigo) ── #}
+            <div class="flex flex-wrap gap-1 mb-2 user-tags-container" data-paper-id="{{ paper.id }}">
+                {% for tag in paper.user_tags_list %}
+                <span class="user-tag inline-flex items-center gap-0.5 text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded cursor-pointer hover:bg-indigo-100"
+                      onclick="removeTag({{ paper.id }}, '{{ tag }}', this)">{{ tag }} &times;</span>
+                {% endfor %}
+                <button type="button" onclick="promptAddTag({{ paper.id }}, this)"
+                        class="text-[11px] text-indigo-400 hover:text-indigo-600 px-1 py-0.5">+ tag</button>
+            </div>
+
             {# ── Collapsible details ── #}
-            {% set has_details = paper.topic_tags_list|length > 2 or paper.categories_list or paper.resource_links_list or paper.related_papers or paper.follow_recommendation.available or paper.mute_recommendation.available %}
+            {% set has_details = true %}
             {% if has_details %}
             <div class="card-details hidden" data-card-details>
                 {% if paper.topic_tags_list|length > 2 %}
@@ -373,6 +433,15 @@
                     </div>
                 </details>
 
+                {# ── User notes ── #}
+                <div class="mb-3">
+                    <textarea data-paper-id="{{ paper.id }}"
+                              oninput="debounceSaveNotes({{ paper.id }}, this)"
+                              placeholder="Add a note..."
+                              class="notes-textarea w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 focus:ring-2 focus:ring-indigo-300 focus:border-transparent outline-none resize-none"
+                              rows="2">{{ paper.user_notes or '' }}</textarea>
+                </div>
+
                 {% if paper.follow_recommendation.available or paper.mute_recommendation.available %}
                 <div class="flex flex-wrap items-center gap-2 mb-3">
                     {% if paper.follow_recommendation.available %}
@@ -413,6 +482,20 @@
 
             {# ── Footer links ── #}
             <div class="mt-auto pt-3 border-t border-gray-100 flex items-center gap-2">
+                {% if collections %}
+                <div class="relative" data-collection-dropdown>
+                    <button type="button" onclick="toggleCollectionDropdown(this)"
+                            class="px-2 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                    </button>
+                    <div class="collection-menu hidden absolute bottom-full left-0 mb-1 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-10 py-1">
+                        {% for col in collections %}
+                        <button type="button" onclick="togglePaperCollection({{ paper.id }}, {{ col.id }}, this)"
+                                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">{{ col.name }}</button>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
                 <a href="{{ paper.link }}" target="_blank"
                    class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300">
                     arXiv
@@ -669,6 +752,191 @@
             button.disabled = false;
             button.style.opacity = "";
         }
+    }
+
+    /* ── Reading status ── */
+    async function setReadingStatus(paperId, status, select) {
+        try {
+            const response = await fetch(`/api/papers/${paperId}/reading-status`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ status: status || null }),
+            });
+            if (!response.ok) select.value = "";
+        } catch (error) { console.error("Reading status failed", error); }
+    }
+
+    /* ── User notes ── */
+    const notesTimers = {};
+    function debounceSaveNotes(paperId, textarea) {
+        clearTimeout(notesTimers[paperId]);
+        notesTimers[paperId] = setTimeout(async () => {
+            try {
+                await fetch(`/api/papers/${paperId}/notes`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                    body: JSON.stringify({ notes: textarea.value }),
+                });
+            } catch (error) { console.error("Save notes failed", error); }
+        }, 600);
+    }
+
+    /* ── User tags ── */
+    function promptAddTag(paperId, button) {
+        const existing = button.parentElement.querySelector('.tag-input');
+        if (existing) { existing.focus(); return; }
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'tag name';
+        input.className = 'tag-input text-[11px] border border-indigo-200 rounded px-1.5 py-0.5 w-20 outline-none focus:ring-1 focus:ring-indigo-300';
+        input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && input.value.trim()) {
+                e.preventDefault();
+                await addTag(paperId, input.value.trim(), button);
+                input.remove();
+            } else if (e.key === 'Escape') { input.remove(); }
+        });
+        input.addEventListener('blur', () => setTimeout(() => input.remove(), 200));
+        button.parentElement.insertBefore(input, button);
+        input.focus();
+    }
+
+    async function addTag(paperId, tag, button) {
+        try {
+            const response = await fetch(`/api/papers/${paperId}/tags`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ tag }),
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const container = button.parentElement;
+            container.querySelectorAll('.user-tag').forEach(el => el.remove());
+            data.user_tags.forEach(t => {
+                const span = document.createElement('span');
+                span.className = 'user-tag inline-flex items-center gap-0.5 text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded cursor-pointer hover:bg-indigo-100';
+                span.textContent = t + ' \u00d7';
+                span.onclick = () => removeTag(paperId, t, span);
+                container.insertBefore(span, button);
+            });
+        } catch (error) { console.error("Add tag failed", error); }
+    }
+
+    async function removeTag(paperId, tag, element) {
+        try {
+            const response = await fetch(`/api/papers/${paperId}/tags`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ tag }),
+            });
+            if (response.ok) element.remove();
+        } catch (error) { console.error("Remove tag failed", error); }
+    }
+
+    /* ── Collections ── */
+    function toggleCollectionDropdown(button) {
+        const menu = button.nextElementSibling;
+        document.querySelectorAll('.collection-menu').forEach(m => { if (m !== menu) m.classList.add('hidden'); });
+        menu.classList.toggle('hidden');
+    }
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-collection-dropdown]')) {
+            document.querySelectorAll('.collection-menu').forEach(m => m.classList.add('hidden'));
+        }
+    });
+
+    async function togglePaperCollection(paperId, collectionId, button) {
+        try {
+            const response = await fetch(`/api/collections/${collectionId}/papers`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ paper_id: paperId }),
+            });
+            if (response.ok) {
+                button.classList.add('text-indigo-600', 'font-semibold');
+                setTimeout(() => {
+                    button.closest('.collection-menu').classList.add('hidden');
+                }, 300);
+            }
+        } catch (error) { console.error("Collection add failed", error); }
+    }
+
+    /* ── Saved searches ── */
+    function promptSaveSearch() {
+        const name = prompt("Name for this saved search:");
+        if (!name || !name.trim()) return;
+        const filters = {};
+        const form = document.getElementById('filter-form');
+        new FormData(form).forEach((value, key) => { if (value) filters[key] = value; });
+        fetch('/api/saved-searches', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+            body: JSON.stringify({ name: name.trim(), filters }),
+        }).then(r => { if (r.ok) window.location.reload(); });
+    }
+
+    /* ── Bulk selection ── */
+    let bulkMode = false;
+    const selectedPapers = new Set();
+
+    function toggleBulkMode() {
+        bulkMode = !bulkMode;
+        const toggle = document.getElementById('bulk-mode-toggle');
+        toggle.textContent = bulkMode ? 'Cancel Select' : 'Select';
+        toggle.classList.toggle('text-indigo-600', bulkMode);
+        document.querySelectorAll('.paper-card').forEach(card => {
+            let cb = card.querySelector('.bulk-checkbox');
+            if (bulkMode && !cb) {
+                cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'bulk-checkbox absolute top-2 right-2 w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 z-10';
+                cb.addEventListener('change', () => {
+                    const id = parseInt(card.dataset.paperId);
+                    if (cb.checked) selectedPapers.add(id); else selectedPapers.delete(id);
+                    updateBulkBar();
+                });
+                card.style.position = 'relative';
+                card.prepend(cb);
+            } else if (!bulkMode && cb) {
+                cb.remove();
+            }
+        });
+        if (!bulkMode) { selectedPapers.clear(); updateBulkBar(); }
+    }
+
+    function updateBulkBar() {
+        let bar = document.getElementById('bulk-action-bar');
+        if (selectedPapers.size === 0) { if (bar) bar.remove(); return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'bulk-action-bar';
+            bar.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white rounded-xl px-5 py-3 shadow-xl flex items-center gap-3 z-50';
+            document.body.appendChild(bar);
+        }
+        bar.innerHTML = `
+            <span class="text-sm font-medium">${selectedPapers.size} selected</span>
+            <button onclick="bulkAction('save')" class="px-3 py-1 text-xs rounded-lg bg-emerald-500 hover:bg-emerald-600">Save All</button>
+            <button onclick="bulkAction('upvote')" class="px-3 py-1 text-xs rounded-lg bg-blue-500 hover:bg-blue-600">Upvote All</button>
+            <button onclick="bulkAction('skip')" class="px-3 py-1 text-xs rounded-lg bg-rose-500 hover:bg-rose-600">Skip All</button>
+            <button onclick="bulkExportBibtex()" class="px-3 py-1 text-xs rounded-lg bg-gray-700 hover:bg-gray-600">BibTeX</button>
+        `;
+    }
+
+    async function bulkAction(action) {
+        const ids = Array.from(selectedPapers);
+        try {
+            await fetch('/api/papers/bulk-feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+                body: JSON.stringify({ paper_ids: ids, action }),
+            });
+            window.location.reload();
+        } catch (error) { console.error('Bulk action failed', error); }
+    }
+
+    function bulkExportBibtex() {
+        const ids = Array.from(selectedPapers).join(',');
+        window.open(`/api/papers/bulk-bibtex?ids=${ids}`, '_blank');
     }
 
     /* ── Keyboard shortcuts ── */
