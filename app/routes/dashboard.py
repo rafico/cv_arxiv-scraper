@@ -23,8 +23,10 @@ TIMEFRAME_DAYS = {
     "all": None,
 }
 
+from app.enums import FeedbackAction, SortOption
+
 VIEW_OPTIONS = {"inbox", "saved"}
-SORT_OPTIONS = {"trending", "newest", "saved", "recommended"}
+SORT_OPTIONS = {option.value for option in SortOption}
 RESOURCE_FILTER_OPTIONS = {"all", "available", "missing"}
 
 
@@ -185,7 +187,7 @@ def _build_dashboard_overview(config: dict) -> dict:
             "recipient": latest_digest.recipient,
         }
 
-    saved_count = PaperFeedback.query.filter_by(action="save").count()
+    saved_count = PaperFeedback.query.filter_by(action=FeedbackAction.SAVE.value).count()
 
     return {
         "saved_count": saved_count,
@@ -275,7 +277,7 @@ def index():
     elif view == "saved":
         query = query.join(
             PaperFeedback,
-            db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == "save"),
+            db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == FeedbackAction.SAVE.value),
         )
     query = _apply_muted_filters(query, config, active=view != "saved" and not collection_id)
 
@@ -334,7 +336,7 @@ def index():
 
     default_sort = "saved" if view == "saved" else "trending"
     sort = request.args.get("sort", default_sort)
-    valid_sorts = {"saved", "newest"} if view == "saved" else {"trending", "newest", "recommended"}
+    valid_sorts = {"saved", "newest", "citations"} if view == "saved" else {"trending", "newest", "recommended", "citations"}
     if sort not in valid_sorts or sort not in SORT_OPTIONS:
         sort = default_sort
 
@@ -346,6 +348,12 @@ def index():
         )
     elif sort == "newest":
         query = query.order_by(Paper.publication_dt.desc(), Paper.scraped_at.desc())
+    elif sort == SortOption.CITATIONS.value:
+        query = query.order_by(
+            db.func.coalesce(Paper.citation_count, 0).desc(),
+            Paper.publication_dt.desc(),
+            Paper.scraped_at.desc(),
+        )
     elif sort == "recommended":
         query = query.order_by(
             db.func.coalesce(Paper.recommendation_score, 0.0).desc(),

@@ -13,6 +13,7 @@ DEFAULT_PREFERENCES = {
         "affiliation_weight": 26.0,
         "title_weight": 14.0,
         "ai_weight": 5.0,
+        "citation_weight": 0.05,
         "freshness_half_life_days": 14.0,
     },
     "muted": {

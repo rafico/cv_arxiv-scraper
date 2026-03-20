@@ -186,13 +186,13 @@ class PreFilterCountTests(FlaskDBTestCase):
             _make_entry("https://arxiv.org/abs/new1", "New One"),
         ]
 
-        def fake_parse_feed(url):
+        def fake_parse_feed(url, session=None):
             return fake_entries
 
-        def fake_enrich(entries):
+        def fake_enrich(entries, session=None):
             pass
 
-        def fake_process(entries, whitelists, config, llm_client=None, interests_text="", product_config=None):
+        def fake_process(entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None):
             for i, entry in enumerate(entries, 1):
                 result = _make_result(entry["link"], entry["title"])
                 result["arxiv_id"] = entry.get("arxiv_id")
@@ -323,7 +323,7 @@ class RollingWindowTests(FlaskDBTestCase):
         ]
         seen_titles: list[str] = []
 
-        def fake_process(entries, whitelists, config, llm_client=None, interests_text="", product_config=None):
+        def fake_process(entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None):
             seen_titles.extend(entry["title"] for entry in entries)
             for i, entry in enumerate(entries, 1):
                 result = _make_result(entry["link"], entry["title"])

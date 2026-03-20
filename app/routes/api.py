@@ -14,6 +14,7 @@ from app.services.preferences import (
 from app.services import SCRAPE_JOB_MANAGER, apply_feedback_action, stream_or_start_scrape
 from app.services.bibtex import paper_to_bibtex, papers_to_bibtex
 from app.services.export import generate_html_report
+from app.enums import FeedbackAction, ReadingStatus
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -54,6 +55,32 @@ def scrape_stream():
     )
 
 
+@api_bp.route("/search/historical", methods=["POST"])
+def search_historical():
+    from datetime import datetime
+    from app.services.scrape_engine import execute_historical_scrape
+
+    validate_csrf_token()
+    payload = request.get_json(silent=True) or {}
+    
+    categories = payload.get("categories", ["cs.CV"])
+    start_date_str = payload.get("start_date")
+    end_date_str = payload.get("end_date")
+    
+    if not start_date_str or not end_date_str:
+        return jsonify({"error": "start_date and end_date are required"}), 400
+        
+    try:
+        start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        end_dt = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "Dates must be in YYYY-MM-DD format"}), 400
+
+    app = current_app._get_current_object()
+    summary = execute_historical_scrape(app, categories, start_dt, end_dt)
+    return jsonify(summary)
+
+
 @api_bp.route("/export", methods=["GET"])
 def export_html():
     app = current_app._get_current_object()
@@ -86,7 +113,7 @@ def export_bibtex():
         from app.models import PaperFeedback
         query = query.join(
             PaperFeedback,
-            db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == "save"),
+            db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == FeedbackAction.SAVE.value),
         )
 
     days = TIMEFRAME_DAYS.get(timeframe)
@@ -122,7 +149,7 @@ def single_paper_bibtex(paper_id: int):
     return Response(bib, mimetype="application/x-bibtex")
 
 
-VALID_READING_STATUSES = {"to_read", "reading", "read"}
+VALID_READING_STATUSES = {status.value for status in ReadingStatus}
 
 
 @api_bp.route("/papers/<int:paper_id>/reading-status", methods=["POST"])

@@ -35,6 +35,7 @@ def resolve_ranking_preferences(config: dict | None = None) -> dict[str, float]:
         "Affiliation": float(preferences["ranking"]["affiliation_weight"]),
         "Title": float(preferences["ranking"]["title_weight"]),
         "ai_weight": float(preferences["ranking"]["ai_weight"]),
+        "citation_weight": float(preferences.get("ranking", {}).get("citation_weight", 0.5)),
         "half_life_days": float(preferences["ranking"]["freshness_half_life_days"]),
     }
 
@@ -62,6 +63,7 @@ def compute_paper_score(
     publication_dt: date | None,
     resource_count: int,
     llm_relevance_score: float | None = None,
+    citation_count: int | None = None,
     config: dict | None = None,
 ) -> float:
     preferences = resolve_ranking_preferences(config)
@@ -73,9 +75,14 @@ def compute_paper_score(
         if llm_relevance_score is not None
         else 0.0
     )
+    citation_bonus = 0.0
+    if citation_count and citation_count > 0:
+        import math
+        citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
+
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
 
-    return round((match_score + term_score + resource_score + llm_bonus) * recency, 3)
+    return round((match_score + term_score + resource_score + llm_bonus + citation_bonus) * recency, 3)
 
 
 def explain_score(
@@ -85,6 +92,7 @@ def explain_score(
     publication_dt: date | None,
     resource_count: int,
     llm_relevance_score: float | None = None,
+    citation_count: int | None = None,
     feedback_score: int = 0,
     config: dict | None = None,
 ) -> dict[str, float]:
@@ -97,14 +105,20 @@ def explain_score(
         if llm_relevance_score is not None
         else 0.0
     )
+    citation_bonus = 0.0
+    if citation_count and citation_count > 0:
+        import math
+        citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
+
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
-    base_score = round((match_score + term_score + resource_score + ai_bonus) * recency, 3)
+    base_score = round((match_score + term_score + resource_score + ai_bonus + citation_bonus) * recency, 3)
     feedback_bonus = round(feedback_score * FEEDBACK_BOOST, 3)
     return {
         "match_score": round(match_score, 3),
         "term_score": round(term_score, 3),
         "resource_score": round(resource_score, 3),
         "ai_bonus": round(ai_bonus, 3),
+        "citation_bonus": round(citation_bonus, 3),
         "recency_multiplier": round(recency, 3),
         "base_score": base_score,
         "feedback_bonus": feedback_bonus,
@@ -130,6 +144,7 @@ def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
                     publication_dt=paper.publication_dt,
                     resource_count=len(paper.resource_links_list),
                     llm_relevance_score=paper.llm_relevance_score,
+                    citation_count=paper.citation_count,
                     config=config,
                 )
                 updated += 1

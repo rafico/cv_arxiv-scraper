@@ -30,6 +30,10 @@ PAPER_COLUMN_DEFS = {
     "duplicate_of_id": "INTEGER REFERENCES papers(id)",
     "source_feed_id": "INTEGER REFERENCES feed_sources(id)",
     "recommendation_score": "REAL",
+    "citation_count": "INTEGER",
+    "influential_citation_count": "INTEGER",
+    "semantic_scholar_id": "TEXT",
+    "citation_updated_at": "DATETIME",
 }
 
 INDEX_STATEMENTS = [

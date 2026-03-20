@@ -6,8 +6,9 @@ from collections import defaultdict
 
 from app.models import Paper, PaperFeedback, db
 from app.services.ranking import combined_rank_score, compute_feedback_delta
+from app.enums import FeedbackAction
 
-ALLOWED_ACTIONS = {"upvote", "save", "skip"}
+ALLOWED_ACTIONS = {action.value for action in FeedbackAction}
 
 
 def _load_feedback_rows(paper_id: int) -> list[PaperFeedback]:
@@ -38,30 +39,30 @@ def apply_feedback_action(paper_id: int, action: str) -> dict:
 
         # "Not interested" should be exclusive with positive signals so papers
         # don't end up simultaneously hidden and saved/upvoted.
-        if action == "skip":
-            for conflicting_action in ("upvote", "save"):
+        if action == FeedbackAction.SKIP.value:
+            for conflicting_action in (FeedbackAction.UPVOTE.value, FeedbackAction.SAVE.value):
                 row = rows_by_action.get(conflicting_action)
                 if row:
                     db.session.delete(row)
                     delta -= compute_feedback_delta(conflicting_action)
-        elif action in {"upvote", "save"}:
-            skip_row = rows_by_action.get("skip")
+        elif action in {FeedbackAction.UPVOTE.value, FeedbackAction.SAVE.value}:
+            skip_row = rows_by_action.get(FeedbackAction.SKIP.value)
             if skip_row:
                 db.session.delete(skip_row)
-                delta -= compute_feedback_delta("skip")
+                delta -= compute_feedback_delta(FeedbackAction.SKIP.value)
 
     paper.feedback_score = max(-100, min(100, int(paper.feedback_score or 0) + delta))
 
     db.session.flush()
 
     rows = _load_feedback_rows(paper_id)
-    counts = {"upvote": 0, "save": 0, "skip": 0}
+    counts = {FeedbackAction.UPVOTE.value: 0, FeedbackAction.SAVE.value: 0, FeedbackAction.SKIP.value: 0}
     active_actions = []
     for row in rows:
         counts[row.action] = counts.get(row.action, 0) + 1
         active_actions.append(row.action)
 
-    paper.is_hidden = "skip" in active_actions
+    paper.is_hidden = FeedbackAction.SKIP.value in active_actions
     db.session.commit()
 
     return {
@@ -89,7 +90,7 @@ def get_feedback_snapshot(paper_ids: list[int]) -> dict[int, dict]:
 
     snapshot: dict[int, dict] = defaultdict(
         lambda: {
-            "counts": {"upvote": 0, "save": 0, "skip": 0},
+            "counts": {FeedbackAction.UPVOTE.value: 0, FeedbackAction.SAVE.value: 0, FeedbackAction.SKIP.value: 0},
             "active_actions": set(),
         }
     )

@@ -51,8 +51,13 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
     scraper = config["scraper"]
     if not isinstance(scraper, dict):
         raise ValueError("'scraper' must be a dict")
+    feed_urls = scraper.get("feed_urls")
     feed_url = scraper.get("feed_url")
-    if not isinstance(feed_url, str) or not feed_url.strip():
+    if not feed_urls and not feed_url:
+        raise ValueError("Must provide either 'scraper.feed_urls' or 'scraper.feed_url'")
+    if feed_urls and (not isinstance(feed_urls, list) or not all(isinstance(u, str) and u.strip() for u in feed_urls)):
+        raise ValueError("'scraper.feed_urls' must be a list of non-empty strings")
+    if feed_url and (not isinstance(feed_url, str) or not feed_url.strip()):
         raise ValueError("'scraper.feed_url' must be a non-empty string")
 
     # --- whitelists section ---

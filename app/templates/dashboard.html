@@ -186,10 +186,12 @@
                 {% if current_filters.view == 'saved' %}
                 <option value="saved" {{ 'selected' if current_filters.sort == 'saved' }}>Recently Saved</option>
                 <option value="newest" {{ 'selected' if current_filters.sort == 'newest' }}>Newest Paper</option>
+                <option value="citations" {{ 'selected' if current_filters.sort == 'citations' }}>Most Cited</option>
                 {% else %}
                 <option value="trending" {{ 'selected' if current_filters.sort == 'trending' }}>Trending</option>
                 <option value="newest" {{ 'selected' if current_filters.sort == 'newest' }}>Newest</option>
                 <option value="recommended" {{ 'selected' if current_filters.sort == 'recommended' }}>Recommended</option>
+                <option value="citations" {{ 'selected' if current_filters.sort == 'citations' }}>Most Cited</option>
                 {% endif %}
             </select>
             <a href="/api/export/bibtex?timeframe={{ current_filters.timeframe }}&view={{ current_filters.view }}"
@@ -318,6 +320,12 @@
                     AI: {{ paper.llm_relevance_score|round|int }}/10
                 </span>
                 {% endif %}
+                {% if paper.citation_count is not none %}
+                <a {% if paper.semantic_scholar_id %}href="https://www.semanticscholar.org/paper/{{ paper.semantic_scholar_id }}" target="_blank"{% endif %} class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors" title="Citations on Semantic Scholar">
+                    <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                    {{ paper.citation_count }}
+                </a>
+                {% endif %}
                 <span class="text-[11px] text-gray-400 ml-auto tabular-nums">
                     {{ paper.publication_dt or paper.scraped_date }}
                 </span>
@@ -428,6 +436,7 @@
                         <div class="rounded-lg bg-white px-2 py-1.5">Term matches: {{ '%.1f'|format(paper.score_breakdown.term_score) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Resources: {{ '%.1f'|format(paper.score_breakdown.resource_score) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">AI boost: {{ '%.1f'|format(paper.score_breakdown.ai_bonus) }}</div>
+                        <div class="rounded-lg bg-white px-2 py-1.5">Citations: {{ '%.1f'|format(paper.score_breakdown.citation_bonus|default(0.0)) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Freshness x{{ '%.2f'|format(paper.score_breakdown.recency_multiplier) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Feedback: {{ '%.1f'|format(paper.score_breakdown.feedback_bonus) }}</div>
                     </div>

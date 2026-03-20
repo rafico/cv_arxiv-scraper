@@ -12,3 +12,4 @@ google-auth-oauthlib>=1.2.0
 google-api-python-client>=2.127.0
 requests-oauthlib>=1.3.0
 gunicorn>=22.0.0
+arxiv>=2.1.3

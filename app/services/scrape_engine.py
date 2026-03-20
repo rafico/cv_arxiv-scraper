@@ -125,28 +125,33 @@ def _process_paper_entry(
     link = entry_data["link"]
     pdf_url = link.replace("/abs/", "/pdf/")
     affiliation_matches: list[str] = []
-    try:
-        pdf_response = request_with_backoff(
-            "GET",
-            pdf_url,
-            timeout=30,
-            attempts=scraper_config.get("pdf_attempts", 2),
-            base_delay=1.0,
-            session=session,
-        )
-        affiliation_text = extract_affiliation_text(
-            pdf_response.content,
-            lines_start=scraper_config.get("pdf_lines_start", 2),
-            max_header_lines=scraper_config.get(
-                "pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)
-            ),
-            smart_header=scraper_config.get("pdf_smart_header", True),
-        )
-        api_affiliations = entry_data.get("api_affiliations", "")
-        affiliation_sources = [text for text in [affiliation_text, api_affiliations] if text]
-        affiliation_matches = check_whitelist_match(affiliation_sources, whitelists["affiliations"])
-    except Exception as exc:
-        LOGGER.warning("Error fetching PDF for %s: %s", link, exc)
+    
+    api_affiliations = entry_data.get("api_affiliations", "")
+    if api_affiliations:
+        affiliation_matches = check_whitelist_match([api_affiliations], whitelists["affiliations"])
+
+    if not affiliation_matches:
+        try:
+            pdf_response = request_with_backoff(
+                "GET",
+                pdf_url,
+                timeout=30,
+                attempts=scraper_config.get("pdf_attempts", 2),
+                base_delay=1.0,
+                session=session,
+            )
+            affiliation_text = extract_affiliation_text(
+                pdf_response.content,
+                lines_start=scraper_config.get("pdf_lines_start", 2),
+                max_header_lines=scraper_config.get(
+                    "pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)
+                ),
+                smart_header=scraper_config.get("pdf_smart_header", True),
+            )
+            if affiliation_text:
+                affiliation_matches = check_whitelist_match([affiliation_text], whitelists["affiliations"])
+        except Exception as exc:
+            LOGGER.warning("Error fetching PDF for %s: %s", link, exc)
 
     category_matches = {**fast_matches, "Affiliation": affiliation_matches}
 
@@ -177,6 +182,7 @@ def _process_entries_parallel(
     entries: list[dict],
     whitelists: dict,
     scraper_config: dict,
+    session: requests.Session,
     llm_client: LLMClient | None = None,
     interests_text: str = "",
     product_config: dict | None = None,
@@ -184,7 +190,6 @@ def _process_entries_parallel(
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     processed = 0
     matched = 0
-    session = create_session(pool_size=max_workers)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -292,6 +297,10 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 scraped_date=today_str,
                 scraped_at=now,
                 duplicate_of_id=duplicate_of_id,
+                citation_count=result.get("citation_count"),
+                influential_citation_count=result.get("influential_citation_count"),
+                semantic_scholar_id=result.get("semantic_scholar_id"),
+                citation_updated_at=result.get("citation_updated_at"),
             )
             db.session.add(paper)
             try:
@@ -450,10 +459,15 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
     scrape_run_id = _create_scrape_run(app, now, force=force)
 
     try:
+        max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
+        session = create_session(pool_size=max_workers)
+
         _emit(event_callback, "status", {"phase": "feed", "message": "Fetching RSS feed..."})
 
         # Collect feed URLs: primary config feed + any enabled FeedSource entries.
-        feed_urls = [scraper_config["feed_url"]]
+        feed_urls = scraper_config.get("feed_urls") or []
+        if scraper_config.get("feed_url") and scraper_config["feed_url"] not in feed_urls:
+            feed_urls.append(scraper_config["feed_url"])
         try:
             from app.models import FeedSource, db as _db
 
@@ -469,7 +483,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         feed_errors: list[Exception] = []
         for feed_url in feed_urls:
             try:
-                entries.extend(parse_feed_entries(feed_url))
+                entries.extend(parse_feed_entries(feed_url, session=session))
             except Exception as exc:
                 LOGGER.warning("Failed to parse feed %s: %s", feed_url, exc)
                 feed_errors.append(exc)
@@ -488,7 +502,10 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
                 },
             )
             try:
-                recent_entries = fetch_recent_papers(rolling_window_days, scraper_config["feed_url"])
+                recent_entries = []
+                for f_url in feed_urls:
+                    recent = fetch_recent_papers(rolling_window_days, f_url, session=session)
+                    recent_entries.extend(recent)
             except Exception as exc:
                 LOGGER.warning("Rolling-window fetch failed: %s", exc)
                 recent_entries = []
@@ -527,7 +544,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             "status",
             {"phase": "affiliations", "message": "Fetching metadata from arXiv API..."},
         )
-        enrich_entries_with_api_metadata(entries)
+        enrich_entries_with_api_metadata(entries, session=session)
 
         _emit(
             event_callback,
@@ -541,6 +558,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             entries,
             whitelists,
             scraper_config,
+            session,
             llm_client,
             interests_text,
             product_config=config,
@@ -565,6 +583,33 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
                 _emit(event_callback, "progress", payload)
 
         _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
+
+        if results:
+            from app.services.citations import fetch_citations_batch
+            from app.services.ranking import compute_paper_score
+            
+            arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
+            if arxiv_ids:
+                citation_data = fetch_citations_batch(arxiv_ids, session=session)
+                for res in results:
+                    arxiv_id = res.get("arxiv_id")
+                    if arxiv_id and arxiv_id in citation_data:
+                        data = citation_data[arxiv_id]
+                        res["citation_count"] = data.get("citation_count")
+                        res["influential_citation_count"] = data.get("influential_citation_count")
+                        res["semantic_scholar_id"] = data.get("semantic_scholar_id")
+                        if res["citation_count"] is not None:
+                            res["citation_updated_at"] = now
+                        res["paper_score"] = compute_paper_score(
+                            match_types=res.get("match_types", []),
+                            matched_terms_count=len(res.get("matches", [])),
+                            publication_dt=res.get("publication_dt"),
+                            resource_count=len(res.get("resource_links", [])),
+                            llm_relevance_score=res.get("llm_relevance_score"),
+                            citation_count=res.get("citation_count"),
+                            config=config,
+                        )
+
         _sort_results(results)
         new_count, skipped = _save_results(app, results)
         summary = _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
@@ -593,3 +638,66 @@ def stream_or_start_scrape(app, force: bool = False):
     from app.services.jobs import SCRAPE_JOB_MANAGER
 
     return SCRAPE_JOB_MANAGER.stream_for_request(app, force=force)
+
+
+def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt: date) -> dict:
+    from app.services.enrichment import query_arxiv_api, enrich_entries_with_api_metadata
+    from app.services.http_client import create_session
+
+    config = app.config["SCRAPER_CONFIG"]
+    whitelists = config["whitelists"]
+    scraper_config = config["scraper"]
+    max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
+    session = create_session(pool_size=max_workers)
+
+    entries = query_arxiv_api(categories, start_dt, end_dt, max_results=2000)
+    total_entries = len(entries)
+    if not entries:
+        return _build_summary(0, 0, 0, 0)
+        
+    existing_ids = _get_existing_ids(app, entries)
+    pre_filtered = 0
+    if existing_ids:
+        filtered_entries = [e for e in entries if not _identity_keys(e).intersection(existing_ids)]
+        pre_filtered = len(entries) - len(filtered_entries)
+        entries = filtered_entries
+
+    llm_client, interests_text = _create_llm_client(app)
+    enrich_entries_with_api_metadata(entries, session=session)
+
+    results = []
+    for processed, matched, result in _process_entries_parallel(entries, whitelists, scraper_config, session, llm_client, interests_text, config):
+        if result:
+            results.append(result)
+
+    if results:
+        from app.services.citations import fetch_citations_batch
+        from app.services.ranking import compute_paper_score
+        
+        arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
+        if arxiv_ids:
+            citation_data = fetch_citations_batch(arxiv_ids, session=session)
+            now = now_utc()
+            for res in results:
+                arxiv_id = res.get("arxiv_id")
+                if arxiv_id and arxiv_id in citation_data:
+                    data = citation_data[arxiv_id]
+                    res["citation_count"] = data.get("citation_count")
+                    res["influential_citation_count"] = data.get("influential_citation_count")
+                    res["semantic_scholar_id"] = data.get("semantic_scholar_id")
+                    if res["citation_count"] is not None:
+                        res["citation_updated_at"] = now
+                    res["paper_score"] = compute_paper_score(
+                        match_types=res.get("match_types", []),
+                        matched_terms_count=len(res.get("matches", [])),
+                        publication_dt=res.get("publication_dt"),
+                        resource_count=len(res.get("resource_links", [])),
+                        llm_relevance_score=res.get("llm_relevance_score"),
+                        citation_count=res.get("citation_count"),
+                        config=config,
+                    )
+
+    _sort_results(results)
+    new_count, skipped = _save_results(app, results)
+    return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
+

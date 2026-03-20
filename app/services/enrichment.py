@@ -11,6 +11,7 @@ import defusedxml.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse
 
+import arxiv
 import feedparser
 import pdfplumber
 
@@ -70,8 +71,8 @@ def extract_author_names(entry: feedparser.FeedParserDict) -> list[str]:
     return [name for name in re.split(r",\s*|\s+and\s+", raw_authors) if name]
 
 
-def parse_feed_entries(feed_url: str) -> list[dict]:
-    response = request_with_backoff("GET", feed_url, timeout=30)
+def parse_feed_entries(feed_url: str, session: requests.Session | None = None) -> list[dict]:
+    response = request_with_backoff("GET", feed_url, timeout=30, session=session)
     feed = feedparser.parse(response.content)
 
     entries = []
@@ -147,7 +148,38 @@ def _parse_atom_entry(entry) -> dict:
     }
 
 
-def fetch_recent_papers(days: int, feed_url: str) -> list[dict]:
+def query_arxiv_api(categories: list[str], start_dt: date, end_dt: date, max_results: int = 1000) -> list[dict]:
+    from app.services.arxiv_adapter import result_to_entry
+
+    client = arxiv.Client(
+        page_size=_ARXIV_API_BATCH_SIZE,
+        delay_seconds=_ARXIV_API_DELAY,
+        num_retries=3
+    )
+
+    cat_query = " OR ".join(f"cat:{c}" for c in categories)
+    from_ts = start_dt.strftime("%Y%m%d0000")
+    to_ts = end_dt.strftime("%Y%m%d2359")
+    query_str = f"({cat_query}) AND submittedDate:[{from_ts} TO {to_ts}]"
+
+    search = arxiv.Search(
+        query=query_str,
+        max_results=max_results,
+        sort_by=arxiv.SortCriterion.SubmittedDate,
+        sort_order=arxiv.SortOrder.Descending
+    )
+
+    results = []
+    try:
+        for result in client.results(search):
+            results.append(result_to_entry(result))
+    except Exception as e:
+        LOGGER.error(f"arxiv.py client failed: {e}")
+
+    return results
+
+
+def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | None = None) -> list[dict]:
     category = _extract_category_from_feed_url(feed_url)
     if not category or days <= 0:
         return []
@@ -159,6 +191,15 @@ def fetch_recent_papers(days: int, feed_url: str) -> list[dict]:
     to_ts = end_date.strftime("%Y%m%d2359")
     batch_size = _ARXIV_API_BATCH_SIZE
     entries: list[dict] = []
+
+    try:
+        LOGGER.info("Running arxiv.py shadow mode query for %s", category)
+        shadow_entries = query_arxiv_api([category], start_date, end_date, max_results=2000)
+        shadow_ids = {e["arxiv_id"] for e in shadow_entries if e.get("arxiv_id")}
+    except Exception as exc:
+        LOGGER.error("Shadow mode failed: %s", exc)
+        shadow_ids = set()
+
     start = 0
 
     while True:
@@ -179,6 +220,7 @@ def fetch_recent_papers(days: int, feed_url: str) -> list[dict]:
             timeout=30,
             attempts=3,
             base_delay=1.5,
+            session=session,
         )
         root = ET.fromstring(response.text)
         batch_entries = [_parse_atom_entry(entry) for entry in root.findall("atom:entry", _ATOM_NS)]
@@ -189,6 +231,27 @@ def fetch_recent_papers(days: int, feed_url: str) -> list[dict]:
         if len(batch_entries) < batch_size:
             break
         start += batch_size
+
+    # Deduplication
+    unique_entries = []
+    seen = set()
+    for entry in entries:
+        aid = entry.get("arxiv_id")
+        if aid and aid not in seen:
+            seen.add(aid)
+            unique_entries.append(entry)
+    entries = unique_entries
+
+    fetched_ids = {e["arxiv_id"] for e in entries if e.get("arxiv_id")}
+    missing_in_shadow = fetched_ids - shadow_ids
+    missing_in_legacy = shadow_ids - fetched_ids
+
+    if missing_in_shadow:
+        LOGGER.warning("Shadow mode mismatch: arxiv.py missed %d papers. Sample: %s", len(missing_in_shadow), list(missing_in_shadow)[:5])
+    if missing_in_legacy:
+        LOGGER.warning("Shadow mode mismatch: legacy xml parser missed %d papers. Sample: %s", len(missing_in_legacy), list(missing_in_legacy)[:5])
+    if not missing_in_shadow and not missing_in_legacy and fetched_ids:
+        LOGGER.info("Shadow mode success: arxiv.py results match legacy results perfectly.")
 
     LOGGER.info("Fetched %d rolling-window entries for %s", len(entries), category)
     return entries
@@ -227,7 +290,7 @@ def extract_resource_links(*texts: str | None) -> list[dict[str, str]]:
     return links
 
 
-def _fetch_api_metadata(arxiv_ids: list[str]) -> dict[str, dict]:
+def _fetch_api_metadata(arxiv_ids: list[str], session: requests.Session | None = None) -> dict[str, dict]:
     metadata: dict[str, dict] = {}
 
     for index in range(0, len(arxiv_ids), _ARXIV_API_BATCH_SIZE):
@@ -245,6 +308,7 @@ def _fetch_api_metadata(arxiv_ids: list[str]) -> dict[str, dict]:
                 timeout=30,
                 attempts=3,
                 base_delay=1.5,
+                session=session,
             )
         except Exception as exc:
             LOGGER.warning("arXiv API batch request failed: %s", exc)
@@ -292,13 +356,13 @@ def _fetch_api_metadata(arxiv_ids: list[str]) -> dict[str, dict]:
     return metadata
 
 
-def enrich_entries_with_api_metadata(entries: list[dict]) -> None:
+def enrich_entries_with_api_metadata(entries: list[dict], session: requests.Session | None = None) -> None:
     arxiv_ids = [entry["arxiv_id"] for entry in entries if entry.get("arxiv_id")]
     if not arxiv_ids:
         return
 
     LOGGER.info("Querying arXiv API metadata for %d papers...", len(arxiv_ids))
-    metadata = _fetch_api_metadata(arxiv_ids)
+    metadata = _fetch_api_metadata(arxiv_ids, session=session)
 
     enriched = 0
     for entry in entries:

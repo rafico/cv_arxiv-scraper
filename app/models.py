@@ -100,6 +100,10 @@ class Paper(db.Model):
     duplicate_of_id = db.Column(db.Integer, db.ForeignKey("papers.id"), nullable=True)
     source_feed_id = db.Column(db.Integer, db.ForeignKey("feed_sources.id"), nullable=True)
     recommendation_score = db.Column(db.Float, nullable=True)
+    citation_count = db.Column(db.Integer, nullable=True)
+    influential_citation_count = db.Column(db.Integer, nullable=True)
+    semantic_scholar_id = db.Column(db.Text, nullable=True)
+    citation_updated_at = db.Column(db.DateTime, nullable=True)
 
     # Legacy string dates are preserved for compatibility with older rows.
     publication_date = db.Column(db.Text)
