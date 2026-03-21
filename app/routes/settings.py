@@ -112,6 +112,7 @@ def view_settings():
     )
     redirect_uri_check = validate_credentials_redirect_uris(callback_uri)
 
+    from app.services.cron import get_cron_status
     from app.services.mendeley import MendeleyClient
     from app.services.zotero import ZoteroClient
 
@@ -123,6 +124,7 @@ def view_settings():
         if zotero_status["status"] == "connected"
         else []
     )
+    cron_config = get_cron_status()
 
     return render_template(
         "settings.html",
@@ -148,6 +150,7 @@ def view_settings():
         mendeley_status=mendeley_status,
         zotero_status=zotero_status,
         zotero_collections=zotero_collections,
+        cron_config=cron_config,
     )
 
 
@@ -395,6 +398,29 @@ def digest_preview():
     response = current_app.response_class(preview["html"], mimetype="text/html")
     response.headers["X-Digest-Subject"] = preview["subject"]
     return response
+
+
+# ── Cron scheduling endpoint ─────────────────────────────────────────
+
+
+@settings_bp.route("/settings/cron", methods=["POST"])
+def manage_cron():
+    validate_csrf_token()
+
+    from app.services.cron import install_cron_job, remove_cron_job
+
+    action = request.form.get("cron_action", "install")
+
+    if action == "remove":
+        result = remove_cron_job()
+    else:
+        hour = int(request.form.get("cron_hour", 8))
+        minute = int(request.form.get("cron_minute", 0))
+        mode = request.form.get("cron_mode", "full")
+        result = install_cron_job(hour, minute, mode)
+
+    flash(result["message"], "success" if result["success"] else "error")
+    return redirect(url_for("settings.view_settings", section="automation"))
 
 
 # ── Mendeley endpoints ───────────────────────────────────────────────

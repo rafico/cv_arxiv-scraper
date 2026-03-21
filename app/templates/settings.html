@@ -190,9 +190,13 @@
             {{ auto_subtab('auto-integrations', 'Email & Integrations') }}
             {{ auto_subtab('auto-digest', 'Digest') }}
             {{ auto_subtab('auto-monitoring', 'Monitoring') }}
+            {{ auto_subtab('auto-scheduling', 'Scheduling') }}
         </div>
 
         <div data-auto-section="auto-integrations">
+        <div class="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+            <p class="text-sm text-blue-800">Connect your email and reference-manager accounts here. <strong>Gmail</strong> is used to send your daily digest emails. <strong>Mendeley</strong> and <strong>Zotero</strong> let you sync papers you save in the app to your reference library. Each service requires a one-time authorization.</p>
+        </div>
         <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
                 <div class="rounded-2xl border border-gray-200 bg-white p-5">
                     <div class="flex items-center justify-between gap-3">
@@ -297,14 +301,17 @@
                 <form method="POST" action="/settings/email" id="email-form" class="rounded-2xl border border-gray-200 bg-white p-5">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <h3 class="text-base font-semibold text-gray-900">Email Delivery</h3>
+                    <p class="text-sm text-gray-500 mt-1">Where digest emails are sent and how the subject line appears in your inbox.</p>
                     <div class="mt-4 space-y-4">
                         <div>
                             <label for="email_recipient" class="block text-sm font-medium text-gray-700 mb-1">Recipient Email</label>
+                            <p class="text-xs text-gray-400 mb-1">The address that will receive your daily paper digest.</p>
                             <input type="email" name="email_recipient" id="email_recipient" value="{{ email_config.recipient }}" placeholder="you@example.com"
                                    class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
                         </div>
                         <div>
                             <label for="email_subject_prefix" class="block text-sm font-medium text-gray-700 mb-1">Subject Prefix</label>
+                            <p class="text-xs text-gray-400 mb-1">Text prepended to the email subject, e.g. "ArXiv Digest" becomes "ArXiv Digest -- 2026-03-21".</p>
                             <input type="text" name="email_subject_prefix" id="email_subject_prefix" value="{{ email_config.subject_prefix }}" placeholder="ArXiv Digest"
                                    class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
                         </div>
@@ -429,6 +436,9 @@
 
         <div data-auto-section="auto-digest" class="hidden">
         <div class="max-w-2xl space-y-5">
+                <div class="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                    <p class="text-sm text-blue-800">Preview the email digest that would be sent right now, based on papers currently in your database. Use <strong>Send Test Digest</strong> to deliver a real email to your configured recipient. This does not affect scheduling -- it is a one-time manual send.</p>
+                </div>
                 <div class="rounded-2xl border border-gray-200 bg-white p-5">
                     <div class="flex items-start justify-between gap-3">
                         <div>
@@ -469,6 +479,9 @@
 
         <div data-auto-section="auto-monitoring" class="hidden">
         <div class="max-w-3xl space-y-5">
+                <div class="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                    <p class="text-sm text-blue-800">A dashboard showing the health of your automation pipeline. See how many papers are ready for the next digest, whether the last scrape or digest succeeded or failed, and browse the history of recent runs. Use this to troubleshoot issues or confirm everything is running smoothly.</p>
+                </div>
                 <div class="rounded-2xl border border-gray-200 bg-white p-5">
                     <div class="flex items-center justify-between gap-3">
                         <div>
@@ -534,6 +547,118 @@
                 </div>
         </div>
         </div>{# /auto-monitoring #}
+
+        <div data-auto-section="auto-scheduling" class="hidden">
+        <div class="max-w-2xl space-y-5">
+                <div class="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                    <p class="text-sm text-blue-800">Schedule the app to run automatically every day using your system's <strong>crontab</strong> (Linux/macOS). This installs a cron job that scrapes new papers from arXiv and optionally sends a digest email at your chosen time. The cron job runs independently of whether this web UI is open.</p>
+                </div>
+
+                <form method="POST" action="/settings/cron" id="cron-form" class="rounded-2xl border border-gray-200 bg-white p-5">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <h3 class="text-base font-semibold text-gray-900">Daily Cron Job</h3>
+                    <p class="text-sm text-gray-500 mt-1">Install or remove a crontab entry that runs the scraper and digest pipeline daily.</p>
+
+                    <div class="mt-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="cron_hour" class="block text-sm font-medium text-gray-700 mb-1">Hour (UTC, 0-23)</label>
+                                <input type="number" name="cron_hour" id="cron_hour" min="0" max="23"
+                                       value="{{ cron_config.hour if cron_config else 8 }}"
+                                       class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                            </div>
+                            <div>
+                                <label for="cron_minute" class="block text-sm font-medium text-gray-700 mb-1">Minute (0-59)</label>
+                                <input type="number" name="cron_minute" id="cron_minute" min="0" max="59"
+                                       value="{{ cron_config.minute if cron_config else 0 }}"
+                                       class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                            </div>
+                        </div>
+
+                        <fieldset class="space-y-2">
+                            <legend class="text-sm font-medium text-gray-700">What to run</legend>
+                            <p class="text-xs text-gray-400">Choose which pipeline steps the cron job executes each day.</p>
+                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                                <input type="radio" name="cron_mode" value="full"
+                                       {{ 'checked' if not cron_config or cron_config.mode == 'full' }}
+                                       class="accent-gray-900">
+                                Scrape + Send Digest
+                                <span class="text-xs text-gray-400">(recommended)</span>
+                            </label>
+                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                                <input type="radio" name="cron_mode" value="scrape"
+                                       {{ 'checked' if cron_config and cron_config.mode == 'scrape' }}
+                                       class="accent-gray-900">
+                                Scrape only
+                                <span class="text-xs text-gray-400">(fetch papers but don't email)</span>
+                            </label>
+                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                                <input type="radio" name="cron_mode" value="digest"
+                                       {{ 'checked' if cron_config and cron_config.mode == 'digest' }}
+                                       class="accent-gray-900">
+                                Send Digest only
+                                <span class="text-xs text-gray-400">(email already-scraped papers)</span>
+                            </label>
+                        </fieldset>
+                    </div>
+
+                    <div class="mt-5 flex flex-wrap gap-2">
+                        <button type="submit" name="cron_action" value="install"
+                                class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
+                            {{ 'Update Cron Job' if cron_config and cron_config.installed else 'Install Cron Job' }}
+                        </button>
+                        {% if cron_config and cron_config.installed %}
+                        <button type="submit" name="cron_action" value="remove"
+                                class="px-5 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+                            Remove Cron Job
+                        </button>
+                        {% endif %}
+                    </div>
+                </form>
+
+                <div class="rounded-2xl border border-gray-200 bg-white p-5">
+                    <h3 class="text-base font-semibold text-gray-900">Current Status</h3>
+                    {% if cron_config and cron_config.installed %}
+                    <div class="mt-3 flex items-start gap-3">
+                        <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100">
+                            <svg class="h-3 w-3 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </span>
+                        <div>
+                            <div class="text-sm font-medium text-emerald-700">Cron job installed</div>
+                            <div class="text-xs text-gray-500 mt-0.5">Runs daily at {{ '%02d'|format(cron_config.hour) }}:{{ '%02d'|format(cron_config.minute) }} UTC
+                                ({{ cron_config.mode_label }})</div>
+                            <div class="mt-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                                <code class="text-xs text-gray-600 break-all">{{ cron_config.cron_line }}</code>
+                            </div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="mt-3 flex items-start gap-3">
+                        <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100">
+                            <span class="h-2 w-2 rounded-full bg-gray-300"></span>
+                        </span>
+                        <div>
+                            <div class="text-sm font-medium text-gray-500">No cron job installed</div>
+                            <div class="text-xs text-gray-400 mt-0.5">Use the form above to schedule daily automation.</div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400 mb-2">How it works</div>
+                    <ul class="text-xs text-gray-500 space-y-1.5 list-disc list-inside">
+                        <li>Installs a standard Linux/macOS crontab entry for the current user.</li>
+                        <li>The cron job runs <code class="bg-white px-1 rounded">digest_cli.py</code> (scrape + email) or <code class="bg-white px-1 rounded">scrape_cli.py</code> (scrape only) from the project directory.</li>
+                        <li>Output is logged to <code class="bg-white px-1 rounded">cron.log</code> in the project root.</li>
+                        <li>The web server does not need to be running for the cron job to work.</li>
+                        <li>To inspect or edit manually: run <code class="bg-white px-1 rounded">crontab -e</code> in your terminal.</li>
+                    </ul>
+                </div>
+        </div>
+        </div>{# /auto-scheduling #}
     </section>
 
     <section id="ai" data-section="ai" class="mb-4 {{ '' if section == 'ai' else 'hidden' }}">
