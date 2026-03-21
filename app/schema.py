@@ -217,15 +217,39 @@ def ensure_schema() -> None:
         )
 
     if updates:
-        db.session.execute(
-            text(
-                """
-                UPDATE papers
-                SET publication_dt = :publication_dt,
-                    scraped_at = :scraped_at
-                WHERE id = :id
-                """
-            ),
-            updates,
-        )
-        db.session.commit()
+        try:
+            db.session.execute(
+                text(
+                    """
+                    UPDATE papers
+                    SET publication_dt = :publication_dt,
+                        scraped_at = :scraped_at
+                    WHERE id = :id
+                    """
+                ),
+                updates,
+            )
+            db.session.commit()
+        except Exception:
+            # FTS5 triggers can fail if the index is out of sync.
+            # Rebuild FTS and retry.
+            db.session.rollback()
+            try:
+                db.session.execute(
+                    text("INSERT INTO papers_fts(papers_fts) VALUES('rebuild')")
+                )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+            db.session.execute(
+                text(
+                    """
+                    UPDATE papers
+                    SET publication_dt = :publication_dt,
+                        scraped_at = :scraped_at
+                    WHERE id = :id
+                    """
+                ),
+                updates,
+            )
+            db.session.commit()
