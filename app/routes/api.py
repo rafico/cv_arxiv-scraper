@@ -81,6 +81,46 @@ def search_historical():
     return jsonify(summary)
 
 
+@api_bp.route("/search", methods=["GET"])
+def search_papers():
+    """Local hybrid search endpoint."""
+    from app.services.search import search_bm25, search_hybrid, search_semantic
+
+    q = request.args.get("q", "").strip()
+    mode = request.args.get("mode", "hybrid")
+    top_k = min(int(request.args.get("limit", 30)), 100)
+
+    if not q:
+        return jsonify({"query": "", "mode": mode, "results": []})
+
+    if mode == "keyword":
+        raw = search_bm25(q, limit=top_k)
+        results = [{"paper_id": pid, "score": score} for pid, score in raw]
+    elif mode == "semantic":
+        raw = search_semantic(q, top_k=top_k)
+        results = [{"paper_id": pid, "score": score} for pid, score in raw]
+    else:
+        results = search_hybrid(q, top_k=top_k)
+
+    # Enrich with paper data
+    paper_ids = [r["paper_id"] for r in results]
+    papers_by_id = {p.id: p for p in Paper.query.filter(Paper.id.in_(paper_ids)).all()} if paper_ids else {}
+
+    enriched = []
+    for r in results:
+        paper = papers_by_id.get(r["paper_id"])
+        if paper:
+            enriched.append({
+                **r,
+                "title": paper.title,
+                "authors": paper.authors,
+                "arxiv_id": paper.arxiv_id,
+                "abstract": paper.abstract_text[:300] if paper.abstract_text else "",
+            })
+
+    return jsonify({"query": q, "mode": mode, "results": enriched})
+
+
 @api_bp.route("/export", methods=["GET"])
 def export_html():
     app = current_app._get_current_object()
@@ -218,14 +258,28 @@ def paper_feedback(paper_id: int):
     if not isinstance(action, str):
         return jsonify({"error": "Missing 'action'"}), 400
 
+    reason = payload.get("reason")
+    note = payload.get("note")
+
     try:
-        result = apply_feedback_action(paper_id, action)
+        result = apply_feedback_action(paper_id, action, reason=reason, note=note)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except LookupError as exc:
         return jsonify({"error": str(exc)}), 404
 
     return jsonify(result)
+
+
+@api_bp.route("/papers/<int:paper_id>/explain", methods=["GET"])
+def paper_explain(paper_id: int):
+    """Return ranking explanations for a paper."""
+    from app.services.ranking import generate_ranking_explanation
+
+    paper = db.session.get(Paper, paper_id) or abort(404)
+    config = current_app.config["SCRAPER_CONFIG"]
+    explanations = generate_ranking_explanation(paper, config=config)
+    return jsonify({"paper_id": paper.id, "explanations": explanations})
 
 
 @api_bp.route("/papers/<int:paper_id>/follow", methods=["POST"])

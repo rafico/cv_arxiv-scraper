@@ -25,12 +25,32 @@
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Smart Features</h2>
     <div class="grid gap-x-8 gap-y-6 md:grid-cols-2">
         <div>
+            <h3 class="text-base font-bold text-gray-900">Hybrid Search</h3>
+            <p class="mt-1 text-sm text-gray-600">Use the search bar to find papers by keyword, semantic meaning, or both. Toggle between <strong>Keyword</strong>, <strong>Semantic</strong>, and <strong>Hybrid</strong> modes using the dropdown next to the search box. Hybrid mode combines BM25 full-text search with SPECTER2 embedding similarity for the best results.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Ranking Explanations</h3>
+            <p class="mt-1 text-sm text-gray-600">Each paper shows <em>why</em> it was recommended. Expand the score details to see reasons like &ldquo;Matched author: Kaiming He&rdquo;, &ldquo;Highly cited (342 citations)&rdquo;, or &ldquo;Similar to saved: NeRF in the Wild&rdquo;. Look for the amber bullet points below the score breakdown.</p>
+        </div>
+        <div>
             <h3 class="text-base font-bold text-gray-900">Citation Counts</h3>
             <p class="mt-1 text-sm text-gray-600">During each scrape, citation data is fetched from Semantic Scholar. Papers show a blue citation badge you can click to see the full page. Sort by <strong>Most Cited</strong>.</p>
         </div>
         <div>
+            <h3 class="text-base font-bold text-gray-900">OpenAlex Enrichment</h3>
+            <p class="mt-1 text-sm text-gray-600">Papers are enriched with data from <a href="https://openalex.org" target="_blank" class="font-medium text-blue-600 hover:text-blue-800">OpenAlex</a>: topic classifications, open-access status, and additional citation counts. Enable or configure in <code>config.yaml</code> under <code>openalex</code>.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Priority &amp; Shared</h3>
+            <p class="mt-1 text-sm text-gray-600">Beyond Save and Skip, you can mark papers as <strong>Priority</strong> for must-reads or <strong>Shared</strong> when you send them to colleagues. These stronger signals improve future recommendations more than a regular save.</p>
+        </div>
+        <div>
             <h3 class="text-base font-bold text-gray-900">Follow Author / Mute Topic</h3>
             <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to find <strong>Follow</strong> and <strong>Mute</strong> buttons. Follow adds the author to tracked authors. Mute suppresses papers with that topic tag.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Related Papers</h3>
+            <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to see links to similar papers from your library. Similarity uses SPECTER2 scientific paper embeddings for high-quality semantic matching, with TF-IDF fallback when embeddings are unavailable.</p>
         </div>
         <div>
             <h3 class="text-base font-bold text-gray-900">Duplicate Detection</h3>
@@ -44,17 +64,13 @@
             <h3 class="text-base font-bold text-gray-900">Scheduled Scrapes</h3>
             <p class="mt-1 text-sm text-gray-600">Enable automatic daily scrapes by adding a <code>scheduler</code> section to your <code>config.yaml</code>. The app runs scrapes at your chosen time without needing cron.</p>
         </div>
-        <div>
-            <h3 class="text-base font-bold text-gray-900">Related Papers</h3>
-            <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to see links to similar papers from your library. Similarity is computed from title and abstract text.</p>
-        </div>
     </div>
 </section>
 
 <!-- Power User -->
 <section id="power-user" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Power User Tips</h2>
-    
+
     <h3 class="text-lg font-bold text-gray-900 mt-6 mb-3">Keyboard Shortcuts</h3>
     <div class="overflow-x-auto rounded-xl border border-gray-200">
         <table class="min-w-full divide-y divide-gray-200">
@@ -68,6 +84,7 @@
                 <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">j</kbd> / <kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">k</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Navigate between papers</td></tr>
                 <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">s</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Save paper</td></tr>
                 <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">x</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Skip (Not Interested)</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">!</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Mark as Priority</td></tr>
                 <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">o</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Open on arXiv</td></tr>
                 <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">p</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Open PDF</td></tr>
                 <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">d</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Toggle details</td></tr>

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from functools import lru_cache
 from math import sqrt
 
 from app.services.text import STOP_WORDS, tokenize
+
+LOGGER = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=512)
@@ -52,6 +55,21 @@ def find_duplicates(
     return results
 
 
+def top_related_papers_embedding(paper_id: int, top_k: int = 3) -> list[int]:
+    """Use FAISS embeddings to find related papers. Returns paper IDs or empty list."""
+    try:
+        from app.services.embeddings import get_embedding_service
+
+        service = get_embedding_service()
+        if service.index_count() == 0:
+            return []
+        results = service.search_by_id(paper_id, top_k=top_k)
+        return [pid for pid, _score in results]
+    except Exception:
+        LOGGER.debug("Embedding-based related papers unavailable", exc_info=True)
+        return []
+
+
 def top_related_papers(
     paper_id: int,
     vectors_by_id: dict[int, Counter[str]],
@@ -59,6 +77,12 @@ def top_related_papers(
     top_k: int = 3,
     min_similarity: float = 0.18,
 ) -> list[int]:
+    # Try embedding-based similarity first (higher quality)
+    embedding_results = top_related_papers_embedding(paper_id, top_k=top_k)
+    if embedding_results:
+        return embedding_results
+
+    # Fall back to TF-IDF
     target = vectors_by_id.get(paper_id)
     if not target:
         return []

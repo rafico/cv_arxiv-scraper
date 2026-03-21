@@ -301,6 +301,11 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 influential_citation_count=result.get("influential_citation_count"),
                 semantic_scholar_id=result.get("semantic_scholar_id"),
                 citation_updated_at=result.get("citation_updated_at"),
+                openalex_id=result.get("openalex_id"),
+                openalex_topics=result.get("openalex_topics", []),
+                oa_status=result.get("oa_status"),
+                referenced_works_count=result.get("referenced_works_count"),
+                openalex_cited_by_count=result.get("openalex_cited_by_count"),
             )
             db.session.add(paper)
             try:
@@ -331,6 +336,30 @@ def _generate_thumbnails(app, results: list[dict], session: requests.Session) ->
     with ThreadPoolExecutor(max_workers=3) as executor:
         for _ in executor.map(worker, results):
             pass
+
+
+def _generate_embeddings(app, results: list[dict]) -> None:
+    """Generate SPECTER2 embeddings for newly scraped papers and add to the FAISS index."""
+    try:
+        from app.models import Paper, db
+        from app.services.embeddings import get_embedding_service
+
+        service = get_embedding_service(app)
+        with app.app_context():
+            paper_ids = []
+            texts = []
+            for result in results:
+                paper = Paper.query.filter_by(link=result["link"]).first()
+                if paper and not service.has_paper(paper.id):
+                    paper_ids.append(paper.id)
+                    texts.append(f"{paper.title} {paper.abstract_text or ''}")
+
+            if paper_ids:
+                added = service.add_papers(paper_ids, texts)
+                service.save()
+                LOGGER.info("Generated embeddings for %d papers", added)
+    except Exception:
+        LOGGER.warning("Embedding generation failed (non-fatal)", exc_info=True)
 
 
 def _build_summary(new_count: int, skipped: int, total_matched: int, total_in_feed: int) -> dict:
@@ -495,6 +524,37 @@ def _enrich_results_with_citations(
             )
 
 
+def _enrich_results_with_openalex(
+    results: list[dict],
+    session,
+    config: dict,
+) -> None:
+    """Enrich matched results with OpenAlex metadata (in-place)."""
+    openalex_config = config.get("openalex", {})
+    if not openalex_config.get("enabled", True):
+        return
+    if not results:
+        return
+
+    from app.services.openalex import fetch_openalex_batch
+
+    arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
+    if not arxiv_ids:
+        return
+
+    email = openalex_config.get("email") or None
+    openalex_data = fetch_openalex_batch(arxiv_ids, session=session, email=email)
+    for res in results:
+        arxiv_id = res.get("arxiv_id")
+        if arxiv_id and arxiv_id in openalex_data:
+            data = openalex_data[arxiv_id]
+            res["openalex_id"] = data.get("openalex_id")
+            res["openalex_topics"] = data.get("openalex_topics", [])
+            res["oa_status"] = data.get("oa_status")
+            res["openalex_cited_by_count"] = data.get("openalex_cited_by_count")
+            res["referenced_works_count"] = data.get("referenced_works_count")
+
+
 def execute_scrape(app, event_callback: EventCallback = None, force: bool = False) -> dict:
     config = app.config["SCRAPER_CONFIG"]
     whitelists = config["whitelists"]
@@ -643,12 +703,16 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
 
         _enrich_results_with_citations(results, session, config, now=now)
+        _enrich_results_with_openalex(results, session, config)
 
         _sort_results(results)
         new_count, skipped = _save_results(app, results)
 
         _emit(event_callback, "status", {"phase": "thumbnails", "message": "Generating PDF thumbnails..."})
         _generate_thumbnails(app, results, session)
+
+        _emit(event_callback, "status", {"phase": "embeddings", "message": "Generating embeddings..."})
+        _generate_embeddings(app, results)
 
         summary = _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
         _emit(event_callback, "done", summary)
@@ -709,11 +773,13 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
             results.append(result)
 
     _enrich_results_with_citations(results, session, config)
+    _enrich_results_with_openalex(results, session, config)
 
     _sort_results(results)
     new_count, skipped = _save_results(app, results)
-    
+
     _generate_thumbnails(app, results, session)
+    _generate_embeddings(app, results)
 
     return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
 

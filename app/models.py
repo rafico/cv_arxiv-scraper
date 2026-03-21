@@ -105,6 +105,12 @@ class Paper(db.Model):
     semantic_scholar_id = db.Column(db.Text, nullable=True)
     citation_updated_at = db.Column(db.DateTime, nullable=True)
 
+    openalex_id = db.Column(db.Text, nullable=True)
+    openalex_topics = db.Column(JSONList, nullable=False, default=list)
+    oa_status = db.Column(db.String(32), nullable=True)
+    referenced_works_count = db.Column(db.Integer, nullable=True)
+    openalex_cited_by_count = db.Column(db.Integer, nullable=True)
+
     # Legacy string dates are preserved for compatibility with older rows.
     publication_date = db.Column(db.Text)
     scraped_date = db.Column(db.Text, nullable=False)
@@ -213,6 +219,8 @@ class PaperFeedback(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
     action = db.Column(db.String(16), nullable=False)
+    reason = db.Column(db.String(64), nullable=True)
+    note = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
 
     paper = db.relationship("Paper", back_populates="feedback")

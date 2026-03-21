@@ -13,10 +13,13 @@ Stop drowning in the arXiv firehose. This tool scrapes the [arXiv cs.CV](https:/
 ## Why use this?
 
 - **Personalized ranking** — Papers are scored by how well they match your interests (authors you follow, labs you track, topics you study), not just recency.
+- **Ranking explanations** — Each paper shows *why* it was recommended: matched authors, citation counts, similarity to saved papers, and more.
+- **Hybrid search** — Find papers using keyword (BM25), semantic (SPECTER2 embeddings), or combined search modes.
+- **Semantic paper similarity** — Related papers are found using SPECTER2 scientific document embeddings via a FAISS vector index — much higher quality than keyword matching.
+- **OpenAlex enrichment** — Papers are enriched with topic classifications, open-access status, and additional citation data from OpenAlex.
 - **Zero signup, local-first** — Core scraping and ranking run locally. Gmail digest and optional LLM features require extra setup only if you want them.
-- **Triage workflow** — Upvote, save, or skip papers. Your feedback tunes future rankings so the best papers rise to the top.
+- **Rich triage workflow** — Save, skip, mark priority, or share papers. Your feedback tunes future rankings so the best papers rise to the top.
 - **Auto-generated summaries & tags** — Each matched paper gets a short plain-language summary and topic tags so you can scan faster.
-- **Related paper recommendations** — Lightweight embedding similarity finds related work you might have missed.
 - **Flexible time windows** — Browse today's papers, this week's, this month's, or everything.
 - **Daily email digest** — Get matched papers delivered to your inbox via Gmail (OAuth2, send-only scope).
 
@@ -81,6 +84,33 @@ scraper:
   pdf_smart_header: true  # extract affiliations from PDF headers
 ```
 
+### OpenAlex enrichment
+
+```yaml
+openalex:
+  enabled: true
+  email: ""              # Set your email for the polite pool (higher rate limits)
+```
+
+---
+
+## Semantic Search & Embeddings
+
+Papers are embedded using [SPECTER2](https://huggingface.co/allenai/specter2), a scientific document embedding model trained on citation graphs. These embeddings power:
+
+- **Related papers** — High-quality similarity computed from paper meaning, not just shared keywords
+- **Semantic search** — Find papers by concept even when the exact terms don't match
+- **Hybrid search** — Combines keyword (BM25 via SQLite FTS5) and semantic search using Reciprocal Rank Fusion
+
+Embeddings are stored in a FAISS sidecar index alongside the SQLite database (`instance/faiss_index/`).
+
+The first scrape will download the SPECTER2 model (~420MB) to `~/.cache/huggingface/`. Subsequent runs load it from cache.
+
+To backfill embeddings for existing papers:
+```bash
+python -c "from app import create_app; from app.services.embed_backfill import backfill_embeddings; backfill_embeddings(create_app())"
+```
+
 ---
 
 ## Daily Email Digest
@@ -134,19 +164,27 @@ Each paper receives a composite score based on:
 | **Affiliation match** | Medium | Paper from a lab in your `affiliations` list |
 | **Title keyword match** | Lower | Title contains a term from your `titles` list |
 | **Recency** | Decay | Newer papers get a gentle boost (14-day half-life) |
-| **Your feedback** | Adaptive | Upvoted/saved papers are boosted; skipped papers sink |
+| **Your feedback** | Adaptive | Saved/priority papers are boosted; skipped papers sink |
+| **Citations** | Log-scaled | Citation counts from Semantic Scholar + OpenAlex |
+| **AI relevance** | Optional | LLM-rated relevance score when enabled |
 
 Multiple matches stack — a paper by a tracked author at a tracked lab on a tracked topic ranks highest.
+
+Each paper also displays **ranking explanations** — human-readable reasons like "Matched author: Kaiming He", "Highly cited (342 citations)", or "Similar to saved: NeRF in the Wild".
 
 ---
 
 ## Dashboard features
 
+- **Hybrid search** — Search by keyword, semantic meaning, or both (toggle between modes)
 - **Filter by match type** — Show only Author / Affiliation / Title matches, or all
-- **Sort** — By score (trending) or by date (newest first)
+- **Sort** — By score (trending), date (newest), recommendations, or citations
 - **Time windows** — Daily, weekly, monthly, or all-time views
-- **Search** — Free-text search across titles and authors
-- **Feedback buttons** — Upvote, save, or skip each paper to train your rankings
+- **Feedback buttons** — Save, Priority, Skip, or Share papers to train rankings
+- **Ranking explanations** — See why each paper was recommended
+- **OpenAlex enrichment** — Topic badges and open-access status indicators
+- **Collections** — Organize papers into color-coded reading lists
+- **Notes & tags** — Annotate papers with personal notes and custom tags
 - **Metadata chips** — See categories, arXiv comments, DOI links, and resource badges at a glance
 - **Pagination** — Browse large result sets without slowdowns
 
@@ -160,7 +198,9 @@ Multiple matches stack — a paper by a tracked author at a tracked lab on a tra
 | `/settings` | GET/POST | Whitelist editor |
 | `/api/scrape` | POST | Start (or join) a background scrape job |
 | `/api/scrape/stream` | GET | SSE event stream from the active scrape |
-| `/api/papers/<id>/feedback` | POST | Toggle `upvote` / `save` / `skip` on a paper |
+| `/api/search?q=...&mode=hybrid` | GET | Hybrid search (keyword / semantic / hybrid) |
+| `/api/papers/<id>/feedback` | POST | Toggle feedback action (save/skip/priority/shared) |
+| `/api/papers/<id>/explain` | GET | Get ranking explanations for a paper |
 
 **SSE event types:** `status`, `feed`, `progress`, `match`, `done`, `scrape_error`
 
@@ -173,25 +213,31 @@ Multiple matches stack — a paper by a tracked author at a tracked lab on a tra
 ├── app/
 │   ├── __init__.py              # Flask app factory
 │   ├── models.py                # SQLAlchemy models
-│   ├── schema.py                # DB migrations / indexes
+│   ├── schema.py                # DB migrations / indexes / FTS5
+│   ├── enums.py                 # Enums (FeedbackAction, SortOption, etc.)
 │   ├── scraper.py               # Backward-compatible scraping facade
 │   ├── services/
 │   │   ├── scrape_engine.py     # Core scrape + dedup logic
+│   │   ├── embeddings.py        # SPECTER2 embeddings + FAISS index
+│   │   ├── embed_backfill.py    # Backfill embeddings for existing papers
+│   │   ├── search.py            # Hybrid search (BM25 + semantic)
+│   │   ├── openalex.py          # OpenAlex enrichment
 │   │   ├── jobs.py              # Background job manager (SSE)
 │   │   ├── matching.py          # Whitelist matching engine
-│   │   ├── ranking.py           # Composite scoring algorithm
+│   │   ├── ranking.py           # Scoring, explanations, feedback weights
 │   │   ├── feedback.py          # User feedback handling
 │   │   ├── enrichment.py        # Metadata enrichment (DOI, categories)
+│   │   ├── citations.py         # Semantic Scholar citations
 │   │   ├── summary.py           # Auto-generated summaries & tags
 │   │   ├── related.py           # Related-paper recommendations
-│   │   └── email_digest.py     # Gmail digest (build + send)
-│   ├── routes/                  # Flask blueprints
-│   └── templates/               # Jinja2 HTML templates
-├── arxiv.py                     # CLI entry point
-├── digest_cli.py                # Email digest CLI (for cron)
-├── gmail_auth_setup.py          # One-time Gmail OAuth setup
-├── config.yaml                  # Your interests & scraper settings
-├── run.py                       # Web server entry point
+│   │   └── email_digest.py      # Gmail digest (build + send)
+│   ├── routes/                   # Flask blueprints
+│   └── templates/                # Jinja2 HTML templates
+├── arxiv.py                      # CLI entry point
+├── digest_cli.py                 # Email digest CLI (for cron)
+├── gmail_auth_setup.py           # One-time Gmail OAuth setup
+├── config.yaml                   # Your interests & scraper settings
+├── run.py                        # Web server entry point
 └── tests/
 ```
 

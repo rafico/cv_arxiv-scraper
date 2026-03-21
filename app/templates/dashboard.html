@@ -10,8 +10,10 @@
 } %}
 
 {% set FEEDBACK = {
-    'save':   {'label': 'Save',   'active': 'bg-emerald-50 text-emerald-700 border-emerald-200'},
-    'skip':   {'label': 'Not Interested', 'active': 'bg-rose-50 text-rose-700 border-rose-200'},
+    'save':     {'label': 'Save',           'active': 'bg-emerald-50 text-emerald-700 border-emerald-200'},
+    'priority': {'label': 'Priority',       'active': 'bg-amber-50 text-amber-700 border-amber-200'},
+    'skip':     {'label': 'Not Interested', 'active': 'bg-rose-50 text-rose-700 border-rose-200'},
+    'shared':   {'label': 'Shared',         'active': 'bg-blue-50 text-blue-700 border-blue-200'},
 } %}
 
 {% set TIMEFRAMES = [('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly'), ('all', 'All Time')] %}
@@ -113,6 +115,13 @@
                        class="w-full rounded-lg border border-gray-200 bg-gray-50 pl-10 pr-3 py-2 text-sm
                               focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none transition-colors">
             </div>
+            <select name="search_mode" id="search_mode"
+                    class="rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs text-gray-600"
+                    title="Search mode">
+                <option value="hybrid" {{ 'selected' if current_filters.search_mode == 'hybrid' }}>Hybrid</option>
+                <option value="keyword" {{ 'selected' if current_filters.search_mode == 'keyword' }}>Keyword</option>
+                <option value="semantic" {{ 'selected' if current_filters.search_mode == 'semantic' }}>Semantic</option>
+            </select>
             <select name="sort" id="sort"
                     onchange="document.getElementById('sort_input').value=this.value; document.getElementById('filter-form').submit();"
                     class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
@@ -386,6 +395,15 @@
                         <div class="rounded-lg bg-white px-2 py-1.5">Freshness x{{ '%.2f'|format(paper.score_breakdown.recency_multiplier) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Feedback: {{ '%.1f'|format(paper.score_breakdown.feedback_bonus) }}</div>
                     </div>
+                    {% if paper.ranking_explanations %}
+                    <div class="mt-2 space-y-0.5">
+                        {% for explanation in paper.ranking_explanations %}
+                        <div class="text-[11px] text-gray-500 flex items-center gap-1">
+                            <span class="text-amber-500 text-xs">*</span> {{ explanation }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 </details>
 
                 {# ── User notes ── #}

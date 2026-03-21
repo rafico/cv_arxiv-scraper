@@ -11,6 +11,36 @@ from app.models import db
 
 LOGGER = logging.getLogger(__name__)
 
+FEEDBACK_COLUMN_DEFS = {
+    "reason": "TEXT",
+    "note": "TEXT",
+}
+
+FTS5_CREATE = """
+CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
+    title, abstract_text, authors, topic_tags,
+    content='papers', content_rowid='id',
+    tokenize='porter unicode61'
+);
+"""
+
+FTS5_TRIGGERS = [
+    """CREATE TRIGGER IF NOT EXISTS papers_fts_insert AFTER INSERT ON papers BEGIN
+        INSERT INTO papers_fts(rowid, title, abstract_text, authors, topic_tags)
+        VALUES (new.id, new.title, new.abstract_text, new.authors, COALESCE(new.topic_tags, ''));
+    END;""",
+    """CREATE TRIGGER IF NOT EXISTS papers_fts_update AFTER UPDATE ON papers BEGIN
+        INSERT INTO papers_fts(papers_fts, rowid, title, abstract_text, authors, topic_tags)
+        VALUES ('delete', old.id, old.title, old.abstract_text, old.authors, COALESCE(old.topic_tags, ''));
+        INSERT INTO papers_fts(rowid, title, abstract_text, authors, topic_tags)
+        VALUES (new.id, new.title, new.abstract_text, new.authors, COALESCE(new.topic_tags, ''));
+    END;""",
+    """CREATE TRIGGER IF NOT EXISTS papers_fts_delete AFTER DELETE ON papers BEGIN
+        INSERT INTO papers_fts(papers_fts, rowid, title, abstract_text, authors, topic_tags)
+        VALUES ('delete', old.id, old.title, old.abstract_text, old.authors, COALESCE(old.topic_tags, ''));
+    END;""",
+]
+
 PAPER_COLUMN_DEFS = {
     "arxiv_id": "TEXT",
     "abstract_text": "TEXT NOT NULL DEFAULT ''",
@@ -34,6 +64,11 @@ PAPER_COLUMN_DEFS = {
     "influential_citation_count": "INTEGER",
     "semantic_scholar_id": "TEXT",
     "citation_updated_at": "DATETIME",
+    "openalex_id": "TEXT",
+    "openalex_topics": "TEXT NOT NULL DEFAULT '[]'",
+    "oa_status": "TEXT",
+    "referenced_works_count": "INTEGER",
+    "openalex_cited_by_count": "INTEGER",
 }
 
 INDEX_STATEMENTS = [
@@ -111,6 +146,34 @@ def ensure_schema() -> None:
     PaperCollection.__table__.create(bind=db.engine, checkfirst=True)
     PaperRelation.__table__.create(bind=db.engine, checkfirst=True)
     SavedSearch.__table__.create(bind=db.engine, checkfirst=True)
+
+    # Migrate paper_feedback columns for richer triage events.
+    if "paper_feedback" in tables:
+        feedback_columns = {col["name"] for col in inspector.get_columns("paper_feedback")}
+        for col_name, col_type in FEEDBACK_COLUMN_DEFS.items():
+            if col_name not in feedback_columns:
+                db.session.execute(
+                    text(f"ALTER TABLE paper_feedback ADD COLUMN {col_name} {col_type}")  # noqa: S608
+                )
+        db.session.commit()
+
+    # Set up FTS5 full-text search index.
+    try:
+        db.session.execute(text(FTS5_CREATE))
+        for trigger_sql in FTS5_TRIGGERS:
+            db.session.execute(text(trigger_sql))
+        db.session.commit()
+
+        # Rebuild FTS index if it's empty but papers exist.
+        fts_count = db.session.execute(text("SELECT COUNT(*) FROM papers_fts")).scalar()
+        paper_count = db.session.execute(text("SELECT COUNT(*) FROM papers")).scalar()
+        if fts_count == 0 and paper_count > 0:
+            LOGGER.info("Rebuilding FTS5 index for %d papers...", paper_count)
+            db.session.execute(text("INSERT INTO papers_fts(papers_fts) VALUES('rebuild');"))
+            db.session.commit()
+    except Exception as exc:
+        LOGGER.warning("FTS5 setup failed (search will use ILIKE fallback): %s", exc)
+        db.session.rollback()
 
     for statement in INDEX_STATEMENTS:
         db.session.execute(text(statement))

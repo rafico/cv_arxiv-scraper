@@ -8,6 +8,10 @@ class ScrapeStatus(str, Enum):
 class FeedbackAction(str, Enum):
     SAVE = "save"
     SKIP = "skip"
+    IGNORE = "ignore"
+    SKIMMED = "skimmed"
+    PRIORITY = "priority"
+    SHARED = "shared"
 
 class FeedType(str, Enum):
     ARXIV_RSS = "arxiv_rss"

@@ -140,6 +140,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         app.config.update(config_overrides)
 
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
+    app.config.setdefault("FAISS_INDEX_DIR", str(Path(app.instance_path) / "faiss_index"))
 
     config_path = Path(
         app.config.get("CONFIG_PATH", (Path(app.root_path).parent / "config.yaml").resolve())

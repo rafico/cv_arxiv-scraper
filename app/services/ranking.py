@@ -24,6 +24,10 @@ FEEDBACK_BOOST = 1.25
 FEEDBACK_WEIGHTS = {
     "save": 10,
     "skip": -9,
+    "ignore": -3,
+    "skimmed": 2,
+    "priority": 20,
+    "shared": 15,
 }
 
 
@@ -158,3 +162,82 @@ def compute_feedback_delta(action: str) -> int:
 
 def combined_rank_score(paper_score: float, feedback_score: int) -> float:
     return round(paper_score + (feedback_score * FEEDBACK_BOOST), 3)
+
+
+def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]:
+    """Generate human-readable explanation strings for why a paper was ranked."""
+    explanations = []
+
+    # Match type explanations
+    match_types = [part.strip() for part in (paper.match_type or "").split("+") if part.strip()]
+    matched_terms = paper.matched_terms_list[:3]
+    for mt in match_types:
+        if mt == "Author":
+            if matched_terms:
+                explanations.append(f"Matched author: {matched_terms[0]}")
+            else:
+                explanations.append("Matched author in your watchlist")
+        elif mt == "Affiliation":
+            if matched_terms:
+                explanations.append(f"From tracked institution: {matched_terms[0]}")
+            else:
+                explanations.append("From a tracked institution")
+        elif mt == "Title":
+            if matched_terms:
+                explanations.append(f"Title matches: {', '.join(matched_terms)}")
+            else:
+                explanations.append("Title matches your interests")
+
+    # Citation explanation
+    if paper.citation_count and paper.citation_count > 10:
+        explanations.append(f"Highly cited ({paper.citation_count} citations)")
+
+    # Recency explanation
+    breakdown = explain_score(
+        match_types=match_types,
+        matched_terms_count=len(paper.matched_terms_list),
+        publication_dt=paper.publication_dt,
+        resource_count=len(paper.resource_links_list),
+        llm_relevance_score=paper.llm_relevance_score,
+        citation_count=paper.citation_count,
+        config=config,
+    )
+    if breakdown["recency_multiplier"] > 0.9:
+        explanations.append("Published very recently")
+
+    # AI relevance explanation
+    if paper.llm_relevance_score and paper.llm_relevance_score >= 7:
+        explanations.append(f"AI rated highly relevant ({paper.llm_relevance_score:.0f}/10)")
+
+    # Resource availability
+    if paper.resource_links_list:
+        explanations.append("Code or dataset available")
+
+    # Similar to saved paper (embedding-based)
+    try:
+        from app.services.embeddings import get_embedding_service
+        from app.models import Paper, PaperFeedback, db
+
+        service = get_embedding_service()
+        if service.has_paper(paper.id) and service.index_count() > 0:
+            saved_ids = {
+                row[0]
+                for row in db.session.query(PaperFeedback.paper_id)
+                .filter(PaperFeedback.action.in_(["save", "priority"]))
+                .all()
+            }
+            if saved_ids:
+                similar = service.search_by_id(paper.id, top_k=5)
+                for pid, score in similar:
+                    if pid in saved_ids and score > 0.5:
+                        saved_paper = db.session.get(Paper, pid)
+                        if saved_paper:
+                            title = saved_paper.title[:50]
+                            if len(saved_paper.title) > 50:
+                                title += "..."
+                            explanations.append(f"Similar to saved: \"{title}\"")
+                            break
+    except Exception:
+        pass
+
+    return explanations

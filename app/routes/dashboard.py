@@ -11,7 +11,7 @@ from app.services.feedback import get_feedback_snapshot
 from app.services.preferences import first_author_name, get_preferences
 from app.services.related import build_vector, top_related_papers
 from app.constants import DASHBOARD_PER_PAGE
-from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score
+from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score, generate_ranking_explanation
 from app.services.text import now_utc
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -256,7 +256,9 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
         }
 
         related_ids = top_related_papers(paper.id, vectors_by_id, top_k=3)
-        paper.related_papers = [candidate_by_id[related_id] for related_id in related_ids]  # type: ignore[attr-defined]
+        paper.related_papers = [candidate_by_id[related_id] for related_id in related_ids if related_id in candidate_by_id]  # type: ignore[attr-defined]
+
+        paper.ranking_explanations = generate_ranking_explanation(paper, config=config)  # type: ignore[attr-defined]
 
 
 @dashboard_bp.route("/")
@@ -296,22 +298,41 @@ def index():
         query = query.filter(Paper.match_type.contains(match_type))
 
     q = request.args.get("q", "").strip()
+    search_mode = request.args.get("search_mode", "hybrid").strip()
+    hybrid_search_used = False
     if q:
-        escaped_q = _escape_like_term(q)
-        search = f"%{escaped_q}%"
-        query = query.filter(
-            db.or_(
-                Paper.title.ilike(search, escape="\\"),
-                Paper.authors.ilike(search, escape="\\"),
-                Paper.abstract_text.ilike(search, escape="\\"),
-                # cast() is a no-op on SQLite (underlying storage is TEXT);
-                # revisit if migrating to PostgreSQL.
-                db.cast(Paper.matched_terms, db.Text).ilike(search, escape="\\"),
-                Paper.summary_text.ilike(search, escape="\\"),
-                db.cast(Paper.topic_tags, db.Text).ilike(search, escape="\\"),
-                db.cast(Paper.user_tags, db.Text).ilike(search, escape="\\"),
+        # Try hybrid/semantic search when available
+        if search_mode in ("hybrid", "semantic"):
+            try:
+                from app.services.search import search_hybrid, search_semantic
+
+                if search_mode == "semantic":
+                    raw = search_semantic(q, top_k=100)
+                    hybrid_ids = [pid for pid, _ in raw]
+                else:
+                    hybrid_results = search_hybrid(q, top_k=100)
+                    hybrid_ids = [r["paper_id"] for r in hybrid_results]
+
+                if hybrid_ids:
+                    query = query.filter(Paper.id.in_(hybrid_ids))
+                    hybrid_search_used = True
+            except Exception:
+                pass
+
+        if not hybrid_search_used:
+            escaped_q = _escape_like_term(q)
+            search = f"%{escaped_q}%"
+            query = query.filter(
+                db.or_(
+                    Paper.title.ilike(search, escape="\\"),
+                    Paper.authors.ilike(search, escape="\\"),
+                    Paper.abstract_text.ilike(search, escape="\\"),
+                    db.cast(Paper.matched_terms, db.Text).ilike(search, escape="\\"),
+                    Paper.summary_text.ilike(search, escape="\\"),
+                    db.cast(Paper.topic_tags, db.Text).ilike(search, escape="\\"),
+                    db.cast(Paper.user_tags, db.Text).ilike(search, escape="\\"),
+                )
             )
-        )
 
     reading_status = request.args.get("reading_status", "").strip()
     if reading_status:
@@ -399,6 +420,7 @@ def index():
             "view": view,
             "match_type": match_type,
             "q": q,
+            "search_mode": search_mode,
             "timeframe": timeframe,
             "sort": sort,
             "include_hidden": include_hidden,

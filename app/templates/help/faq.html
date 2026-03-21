@@ -21,6 +21,22 @@
             <h3 class="text-base font-bold text-gray-900">What should I learn first if I am not technical?</h3>
             <p class="mt-2 text-sm text-gray-600">Learn just three things: add interests, run a scrape, and review papers with Save or Not Interested. Everything else can wait.</p>
         </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">What is SPECTER2?</h3>
+            <p class="mt-2 text-sm text-gray-600"><a href="https://huggingface.co/allenai/specter2" target="_blank" class="text-blue-600 hover:text-blue-800">SPECTER2</a> is a scientific document embedding model from the Allen Institute for AI. It converts paper titles and abstracts into numerical vectors that capture semantic meaning, enabling high-quality similarity comparisons and semantic search. The model is downloaded automatically on first use (~420MB).</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">How much disk space do embeddings use?</h3>
+            <p class="mt-2 text-sm text-gray-600">The FAISS vector index uses roughly 3KB per paper. For a typical library of 5,000 papers, the index is about 15MB. The SPECTER2 model itself is a one-time ~420MB download stored in <code>~/.cache/huggingface/</code>.</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">What is OpenAlex?</h3>
+            <p class="mt-2 text-sm text-gray-600"><a href="https://openalex.org" target="_blank" class="text-blue-600 hover:text-blue-800">OpenAlex</a> is an open catalog of scholarly works. This app uses it to enrich papers with topic classifications, open-access status, and additional citation counts. It&rsquo;s enabled by default and free to use (no API key needed).</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">What&rsquo;s the difference between keyword and semantic search?</h3>
+            <p class="mt-2 text-sm text-gray-600"><strong>Keyword</strong> search (BM25) finds papers containing exact words you type. <strong>Semantic</strong> search uses SPECTER2 embeddings to find papers by meaning &mdash; so &ldquo;image classification&rdquo; also finds papers about &ldquo;visual recognition&rdquo;. <strong>Hybrid</strong> mode combines both approaches using Reciprocal Rank Fusion for the best of both worlds.</p>
+        </div>
     </div>
 </section>
 {% endblock %}
