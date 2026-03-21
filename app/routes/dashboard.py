@@ -10,7 +10,7 @@ from app.models import Collection, DigestRun, Paper, PaperCollection, PaperFeedb
 from app.services.feedback import get_feedback_snapshot
 from app.services.preferences import first_author_name, get_preferences
 from app.services.related import build_vector, top_related_papers
-from app.constants import DASHBOARD_PER_PAGE
+from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score, generate_ranking_explanation
 from app.services.text import now_utc
 
@@ -122,7 +122,7 @@ def _build_filter_options(query: Query) -> dict:
             category_counts[category] = category_counts.get(category, 0) + 1
 
     categories = [
-        {"label": label, "count": count}
+        {"label": label, "name": ARXIV_CATEGORY_NAMES.get(label, label), "count": count}
         for label, count in sorted(category_counts.items(), key=lambda item: (-item[1], item[0].lower()))
     ]
     return {

@@ -162,6 +162,9 @@ def create_app(config_overrides: dict | None = None) -> Flask:
 
     _register_blueprints(app)
 
+    from app.constants import ARXIV_CATEGORY_NAMES
+    app.jinja_env.globals["ARXIV_CATEGORY_NAMES"] = ARXIV_CATEGORY_NAMES
+
     # Start built-in scheduler if configured.
     scheduler_config = app.config["SCRAPER_CONFIG"].get("scheduler", {})
     if scheduler_config.get("enabled"):

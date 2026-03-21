@@ -179,7 +179,7 @@
                         <option value="">All categories</option>
                         {% for category in filter_options.categories %}
                         <option value="{{ category.label }}" {{ 'selected' if current_filters.category == category.label }}>
-                            {{ category.label }} ({{ category.count }})
+                            {{ category.name }}{{ ' · ' ~ category.label if category.name != category.label else '' }} ({{ category.count }})
                         </option>
                         {% endfor %}
                     </select>
