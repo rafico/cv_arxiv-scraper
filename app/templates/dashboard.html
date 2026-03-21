@@ -10,7 +10,6 @@
 } %}
 
 {% set FEEDBACK = {
-    'upvote': {'label': 'Upvote', 'active': 'bg-blue-50 text-blue-700 border-blue-200'},
     'save':   {'label': 'Save',   'active': 'bg-emerald-50 text-emerald-700 border-emerald-200'},
     'skip':   {'label': 'Not Interested', 'active': 'bg-rose-50 text-rose-700 border-rose-200'},
 } %}
@@ -27,62 +26,13 @@
     <input type="hidden" name="include_hidden" value="1">
     {% endif %}
 
-    <div class="flex items-start justify-between mb-4">
-        <div>
-            <h1 class="text-xl font-bold text-gray-900">{{ 'Saved Papers' if current_filters.view == 'saved' else 'Matched Papers' }}</h1>
-            <p class="text-sm text-gray-500 mt-0.5">
-                {{ 'Your shortlist of papers to revisit and share.' if current_filters.view == 'saved' else 'Daily triage with ranking, metadata, and related papers.' }}
-            </p>
-        </div>
-        {% if pagination.total %}
-        <div class="text-sm text-gray-400 tabular-nums pt-1">
-            {{ pagination.total }} paper{{ 's' if pagination.total != 1 }}
-        </div>
-        {% endif %}
-    </div>
-
-    <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 mb-5">
-        <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Saved</div>
-            <div class="mt-2 text-2xl font-semibold text-gray-900">{{ dashboard_overview.saved_count }}</div>
-        </div>
-        <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Last Scrape</div>
-            {% if dashboard_overview.latest_scrape %}
-            <div class="mt-2 text-base font-semibold text-gray-900">{{ dashboard_overview.latest_scrape.status_label }}</div>
-            <p class="mt-1 text-xs text-gray-500">
-                {{ dashboard_overview.latest_scrape.timestamp }}
-                {% if dashboard_overview.latest_scrape.forced %} · forced{% endif %}
-            </p>
-            {% else %}
-            <div class="mt-2 text-base font-semibold text-gray-900">Not run yet</div>
-            {% endif %}
-        </div>
-        <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Tracking</div>
-            <div class="mt-2 text-base font-semibold text-gray-900">
-                {{ dashboard_overview.interest_counts.authors }} authors · {{ dashboard_overview.interest_counts.affiliations }} labs · {{ dashboard_overview.interest_counts.titles }} topics
-            </div>
-        </div>
-        <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Latest Digest</div>
-            {% if dashboard_overview.latest_digest %}
-            <div class="mt-2 text-base font-semibold text-gray-900">{{ dashboard_overview.latest_digest.status_label }}</div>
-            <p class="mt-1 text-xs text-gray-500">
-                {{ dashboard_overview.latest_digest.timestamp }} · {{ dashboard_overview.latest_digest.papers_count }} papers
-            </p>
-            {% else %}
-            <div class="mt-2 text-base font-semibold text-gray-900">Not sent yet</div>
-            {% endif %}
-        </div>
-    </div>
-
+    {# ── Onboarding (only for new users) ── #}
     {% set incomplete_steps = dashboard_overview.onboarding_steps | selectattr('complete', 'equalto', false) | list %}
     {% if incomplete_steps and current_filters.view == 'inbox' %}
     <div class="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 mb-5">
         <div class="flex items-center justify-between gap-3 mb-3">
             <div>
-                <h2 class="text-sm font-semibold text-amber-900">First-Run Checklist</h2>
+                <h2 class="text-sm font-semibold text-amber-900">Getting Started</h2>
                 <p class="text-sm text-amber-800/80">Complete the core setup once, then this becomes a daily triage loop.</p>
             </div>
             <div class="text-xs font-medium text-amber-700">{{ dashboard_overview.onboarding_steps | rejectattr('complete', 'equalto', false) | list | length }}/{{ dashboard_overview.onboarding_steps|length }} done</div>
@@ -103,7 +53,8 @@
     </div>
     {% endif %}
 
-    <div class="flex flex-wrap items-center gap-2 mb-3">
+    {# ── View tabs ── #}
+    <div class="flex flex-wrap items-center gap-2 mb-4">
         <a href="{{ url_for('dashboard.index', view='inbox', timeframe='daily', sort='trending', q=current_filters.q or None, category=current_filters.category or None, resource_filter=current_filters.resource_filter if current_filters.resource_filter != 'all' else None) }}"
            class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
                   {{ 'bg-gray-900 text-white' if current_filters.view == 'inbox' else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
@@ -121,53 +72,35 @@
             {{ col.name }}
         </a>
         {% endfor %}
-        <a href="/settings"
-           class="px-3 py-1.5 text-sm font-medium rounded-full bg-white border border-gray-200 text-gray-600 hover:bg-gray-50">
-            Edit Interests
-        </a>
-    </div>
 
-    {# ── Saved searches bar ── #}
-    {% if saved_searches %}
-    <div class="flex flex-wrap items-center gap-2 mb-3">
-        <span class="text-xs text-gray-400">Saved searches:</span>
+        {# ── Saved searches (inline) ── #}
+        {% if saved_searches %}
+        <span class="text-gray-300 mx-1">|</span>
         {% for ss in saved_searches %}
         {% set ss_filters = ss.filters if ss.filters is mapping else {} %}
         <a href="{{ url_for('dashboard.index', **ss_filters) }}"
-           class="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+           class="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors">
             {{ ss.name }}
         </a>
         {% endfor %}
+        {% endif %}
     </div>
-    {% endif %}
 
-    {% if current_filters.view == 'inbox' %}
-    <div class="flex flex-wrap items-center gap-2 mb-3">
-        {% for value, label in TIMEFRAMES %}
-        <button type="button" onclick="setFilter('timeframe_input','{{ value }}')"
-                class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-                       {{ 'bg-gray-900 text-white' if current_filters.timeframe == value else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
-            {{ label }}
-        </button>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    {# ── Match-type pills + search ── #}
+    {# ── Toolbar: time filter + search + sort ── #}
     <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 mb-4">
-        <div class="flex items-center gap-1 flex-wrap">
-            <button type="button" onclick="setFilter('match_type_input','')"
+        <div class="flex items-center gap-2 flex-wrap">
+            {% if current_filters.view == 'inbox' %}
+            {% for value, label in TIMEFRAMES %}
+            <button type="button" onclick="setFilter('timeframe_input','{{ value }}')"
                     class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-                           {{ 'bg-gray-900 text-white' if not current_filters.match_type else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
-                All
-            </button>
-            {% for mtype in ['Author', 'Affiliation', 'Title'] %}
-            <button type="button" onclick="setFilter('match_type_input','{{ mtype }}')"
-                    class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
-                           {{ BADGE[mtype].active_bg ~ ' text-white' if current_filters.match_type == mtype else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
-                {{ mtype }} {{ type_counts[mtype] }}
+                           {{ 'bg-gray-900 text-white' if current_filters.timeframe == value else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+                {{ label }}
             </button>
             {% endfor %}
+            {% endif %}
+            {% if pagination.total %}
+            <span class="text-xs text-gray-400 tabular-nums ml-1">{{ pagination.total }} paper{{ 's' if pagination.total != 1 }}</span>
+            {% endif %}
         </div>
 
         <div class="flex items-center gap-2 w-full lg:w-auto">
@@ -194,21 +127,11 @@
                 <option value="citations" {{ 'selected' if current_filters.sort == 'citations' }}>Most Cited</option>
                 {% endif %}
             </select>
-            <a href="/api/export/bibtex?timeframe={{ current_filters.timeframe }}&view={{ current_filters.view }}"
-               class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                BibTeX
-            </a>
-            {% if current_filters.view == 'inbox' %}
-            <a href="/api/export?timeframe={{ current_filters.timeframe }}&download=1"
-               class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                Export
-            </a>
-            {% endif %}
         </div>
     </div>
 
-    {# ── Advanced filters (collapsible) ── #}
-    {% set has_advanced_filters = current_filters.category or current_filters.resource_filter != 'all' or current_filters.include_hidden or current_filters.reading_status or current_filters.author %}
+    {# ── Advanced filters (collapsible) — includes match type, category, exports ── #}
+    {% set has_advanced_filters = current_filters.match_type or current_filters.category or current_filters.resource_filter != 'all' or current_filters.include_hidden or current_filters.reading_status or current_filters.author %}
     <div class="mb-4">
         <button type="button" onclick="toggleAdvancedFilters()"
                 class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors">
@@ -222,7 +145,24 @@
         </button>
 
         <div id="advanced-filters" class="{{ '' if has_advanced_filters else 'hidden' }} mt-3">
-            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+            <div class="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-3">
+                {# ── Match type filter ── #}
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-[11px] text-gray-400 uppercase tracking-wider font-medium">Match type</span>
+                    <button type="button" onclick="setFilter('match_type_input','')"
+                            class="px-2.5 py-1 text-xs font-medium rounded-full transition-colors
+                                   {{ 'bg-gray-900 text-white' if not current_filters.match_type else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
+                        All
+                    </button>
+                    {% for mtype in ['Author', 'Affiliation', 'Title'] %}
+                    <button type="button" onclick="setFilter('match_type_input','{{ mtype }}')"
+                            class="px-2.5 py-1 text-xs font-medium rounded-full transition-colors
+                                   {{ BADGE[mtype].active_bg ~ ' text-white' if current_filters.match_type == mtype else 'text-gray-500 hover:text-gray-900 hover:bg-gray-100' }}">
+                        {{ mtype }} {{ type_counts[mtype] }}
+                    </button>
+                    {% endfor %}
+                </div>
+                {# ── Dropdowns row ── #}
                 <div class="flex flex-wrap items-center gap-2">
                     <select name="category" id="category"
                             onchange="document.getElementById('filter-form').submit();"
@@ -259,12 +199,18 @@
                     </label>
                     {% endif %}
                 </div>
-                {% if has_advanced_filters %}
-                <div class="text-xs text-gray-500">
-                    {{ current_filters.category or 'All categories' }} ·
-                    {{ 'Has resources' if current_filters.resource_filter == 'available' else 'No resources' if current_filters.resource_filter == 'missing' else 'All resource states' }}
+                {# ── Export row ── #}
+                <div class="flex items-center gap-2 pt-1 border-t border-gray-200">
+                    <span class="text-[11px] text-gray-400 uppercase tracking-wider font-medium">Export</span>
+                    <a href="/api/export/bibtex?timeframe={{ current_filters.timeframe }}&view={{ current_filters.view }}"
+                       class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                        BibTeX
+                    </a>
+                    <a href="/api/export?timeframe={{ current_filters.timeframe }}&download=1"
+                       class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                        HTML Report
+                    </a>
                 </div>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -614,7 +560,7 @@
 {# ── Keyboard shortcut hint ── #}
 {% if papers %}
 <div class="mt-6 text-center">
-    <p class="text-[11px] text-gray-300">Keyboard: <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">j</kbd>/<kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">k</kbd> navigate · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">s</kbd> save · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">u</kbd> upvote · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">x</kbd> skip · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">o</kbd> open · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">p</kbd> PDF · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">d</kbd> details</p>
+    <p class="text-[11px] text-gray-300">Keyboard: <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">j</kbd>/<kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">k</kbd> navigate · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">s</kbd> save · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">x</kbd> skip · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">o</kbd> open · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">p</kbd> PDF · <kbd class="px-1 py-0.5 rounded bg-gray-100 text-gray-400 font-mono">d</kbd> details</p>
 </div>
 {% endif %}
 {% endblock %}
@@ -670,7 +616,6 @@
     }
 
     const FEEDBACK_STYLES = {
-        upvote: { active: ["bg-blue-50", "text-blue-700", "border-blue-200"] },
         save:   { active: ["bg-emerald-50", "text-emerald-700", "border-emerald-200"] },
         skip:   { active: ["bg-rose-50", "text-rose-700", "border-rose-200"] },
     };
@@ -925,7 +870,6 @@
         bar.innerHTML = `
             <span class="text-sm font-medium">${selectedPapers.size} selected</span>
             <button onclick="bulkAction('save')" class="px-3 py-1 text-xs rounded-lg bg-emerald-500 hover:bg-emerald-600">Save All</button>
-            <button onclick="bulkAction('upvote')" class="px-3 py-1 text-xs rounded-lg bg-blue-500 hover:bg-blue-600">Upvote All</button>
             <button onclick="bulkAction('skip')" class="px-3 py-1 text-xs rounded-lg bg-rose-500 hover:bg-rose-600">Skip All</button>
             <button onclick="bulkExportBibtex()" class="px-3 py-1 text-xs rounded-lg bg-gray-700 hover:bg-gray-600">BibTeX</button>
         `;
@@ -995,10 +939,6 @@
                 e.preventDefault();
                 clickCardFeedback("save");
                 break;
-            case "u":
-                e.preventDefault();
-                clickCardFeedback("upvote");
-                break;
             case "x":
                 e.preventDefault();
                 clickCardFeedback("skip");
@@ -1023,6 +963,10 @@
                     const toggle = cards[focusedCardIndex].querySelector(".card-toggle");
                     if (toggle) toggle.click();
                 }
+                break;
+            case "?":
+                e.preventDefault();
+                toggleShortcutHelp();
                 break;
         }
     });

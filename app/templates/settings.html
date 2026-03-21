@@ -76,12 +76,6 @@
                 {{ multiline_textarea('authors', 'Authors', 'One per line.', whitelists.authors) }}
                 {{ multiline_textarea('affiliations', 'Affiliations', 'Lab or institution names from PDF headers.', whitelists.affiliations) }}
                 <div class="rounded-2xl border border-gray-200 bg-white p-5">
-                    <h3 class="text-sm font-semibold text-gray-900">Feed Sources</h3>
-                    <div class="mt-3 space-y-2 text-sm text-gray-500">
-                        <p>Manage multiple RSS feeds or specific ArXiv categories (Coming soon via database configuration).</p>
-                    </div>
-                </div>
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
                     <h3 class="text-sm font-semibold text-gray-900">Tips</h3>
                     <div class="mt-3 space-y-2 text-sm text-gray-500">
                         <p>Keep authors specific, labs broad, topics focused on what you actively care about.</p>
@@ -112,38 +106,50 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
                 <div class="rounded-2xl border border-gray-200 bg-white p-5">
-                    <h3 class="text-sm font-semibold text-gray-900 mb-3">Ranking Weights</h3>
-                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <h3 class="text-sm font-semibold text-gray-900 mb-1">Ranking Priorities</h3>
+                    <p class="text-xs text-gray-500 mb-4">Drag sliders to set how much each signal matters. Higher = more influence on paper ranking.</p>
+                    {# Hidden numeric inputs carry the actual values to the backend #}
+                    <input type="hidden" name="pref_author_weight" id="pref_author_weight" value="{{ preferences.ranking.author_weight }}">
+                    <input type="hidden" name="pref_affiliation_weight" id="pref_affiliation_weight" value="{{ preferences.ranking.affiliation_weight }}">
+                    <input type="hidden" name="pref_title_weight" id="pref_title_weight" value="{{ preferences.ranking.title_weight }}">
+                    <input type="hidden" name="pref_ai_weight" id="pref_ai_weight" value="{{ preferences.ranking.ai_weight }}">
+                    <input type="hidden" name="pref_citation_weight" id="pref_citation_weight" value="{{ preferences.ranking.citation_weight|default(0.5) }}">
+
+                    {% set sliders = [
+                        ('author', 'Author match', 'Papers by researchers you follow', preferences.ranking.author_weight, 'blue'),
+                        ('affiliation', 'Lab / affiliation', 'Papers from institutions you track', preferences.ranking.affiliation_weight, 'emerald'),
+                        ('title', 'Topic keywords', 'Papers matching your title keywords', preferences.ranking.title_weight, 'violet'),
+                        ('ai', 'AI relevance', 'LLM-scored relevance (if enabled)', preferences.ranking.ai_weight, 'amber'),
+                        ('citation', 'Citation count', 'Highly-cited papers get a boost', preferences.ranking.citation_weight|default(0.5), 'sky'),
+                    ] %}
+
+                    <div class="space-y-4">
+                        {% for key, label, desc, value, color in sliders %}
                         <div>
-                            <label for="pref_author_weight" class="block text-sm font-medium text-gray-700 mb-1">Author Weight</label>
-                            <input type="number" step="0.1" min="0.1" name="pref_author_weight" id="pref_author_weight" value="{{ preferences.ranking.author_weight }}"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="text-sm font-medium text-gray-700">{{ label }}</label>
+                                <span id="slider_label_{{ key }}" class="text-xs text-gray-400 tabular-nums w-8 text-right"></span>
+                            </div>
+                            <input type="range" min="0" max="100" step="1" value="{{ value }}"
+                                   id="slider_{{ key }}"
+                                   oninput="syncSlider('{{ key }}')"
+                                   class="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900">
+                            <p class="text-xs text-gray-400 mt-0.5">{{ desc }}</p>
                         </div>
-                        <div>
-                            <label for="pref_affiliation_weight" class="block text-sm font-medium text-gray-700 mb-1">Affiliation Weight</label>
-                            <input type="number" step="0.1" min="0.1" name="pref_affiliation_weight" id="pref_affiliation_weight" value="{{ preferences.ranking.affiliation_weight }}"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
-                        </div>
-                        <div>
-                            <label for="pref_title_weight" class="block text-sm font-medium text-gray-700 mb-1">Title Weight</label>
-                            <input type="number" step="0.1" min="0.1" name="pref_title_weight" id="pref_title_weight" value="{{ preferences.ranking.title_weight }}"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
-                        </div>
-                        <div>
-                            <label for="pref_ai_weight" class="block text-sm font-medium text-gray-700 mb-1">AI Weight</label>
-                            <input type="number" step="0.1" min="0.1" name="pref_ai_weight" id="pref_ai_weight" value="{{ preferences.ranking.ai_weight }}"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
-                        </div>
-                        <div>
-                            <label for="pref_citation_weight" class="block text-sm font-medium text-gray-700 mb-1">Citation Weight</label>
-                            <input type="number" step="0.01" min="0" name="pref_citation_weight" id="pref_citation_weight" value="{{ preferences.ranking.citation_weight|default(0.05) }}"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
-                        </div>
-                        <div class="sm:col-span-2">
-                            <label for="pref_freshness_half_life_days" class="block text-sm font-medium text-gray-700 mb-1">Freshness Half-Life (days)</label>
-                            <input type="number" step="0.1" min="0.5" name="pref_freshness_half_life_days" id="pref_freshness_half_life_days" value="{{ preferences.ranking.freshness_half_life_days }}"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
-                            <p class="mt-2 text-xs text-gray-500">Lower values make the inbox more novelty-biased. Higher values keep older strong matches near the top.</p>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mt-5 pt-4 border-t border-gray-100">
+                        <label for="pref_freshness_half_life_days" class="block text-sm font-medium text-gray-700 mb-1">Freshness preference</label>
+                        <input type="range" min="1" max="60" step="1" id="freshness_slider"
+                               value="{{ preferences.ranking.freshness_half_life_days|int }}"
+                               oninput="document.getElementById('pref_freshness_half_life_days').value=this.value; document.getElementById('freshness_label').textContent=this.value+'d'"
+                               class="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900">
+                        <input type="hidden" name="pref_freshness_half_life_days" id="pref_freshness_half_life_days" value="{{ preferences.ranking.freshness_half_life_days }}">
+                        <div class="flex justify-between text-xs text-gray-400 mt-1">
+                            <span>Prefer new papers</span>
+                            <span id="freshness_label">{{ preferences.ranking.freshness_half_life_days|int }}d</span>
+                            <span>Keep older matches</span>
                         </div>
                     </div>
                 </div>
@@ -597,6 +603,26 @@
         });
         history.replaceState(null, "", "/settings?section=" + target);
     }
+
+    /* ── Ranking slider sync ── */
+    var SLIDER_MAP = {
+        author: 'pref_author_weight',
+        affiliation: 'pref_affiliation_weight',
+        title: 'pref_title_weight',
+        ai: 'pref_ai_weight',
+        citation: 'pref_citation_weight',
+    };
+
+    function syncSlider(key) {
+        var slider = document.getElementById('slider_' + key);
+        var hidden = document.getElementById(SLIDER_MAP[key]);
+        var label = document.getElementById('slider_label_' + key);
+        if (slider && hidden) hidden.value = slider.value;
+        if (label) label.textContent = slider.value;
+    }
+
+    // Initialize labels on page load
+    Object.keys(SLIDER_MAP).forEach(function(key) { syncSlider(key); });
 
     /* ── Unsaved-change indicators ── */
     function trackUnsavedChanges(formId, buttonId) {

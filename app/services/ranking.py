@@ -22,8 +22,7 @@ HALF_LIFE_DAYS = 14.0
 FEEDBACK_BOOST = 1.25
 
 FEEDBACK_WEIGHTS = {
-    "upvote": 5,
-    "save": 7,
+    "save": 10,
     "skip": -9,
 }
 

@@ -6,7 +6,6 @@ class ScrapeStatus(str, Enum):
     ERROR = "error"
 
 class FeedbackAction(str, Enum):
-    UPVOTE = "upvote"
     SAVE = "save"
     SKIP = "skip"
 

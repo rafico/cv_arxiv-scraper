@@ -53,7 +53,7 @@ class DashboardRouteTests(FlaskDBTestCase):
         text = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Matched Papers", text)
+        self.assertIn("Inbox", text)
         self.assertNotIn("Paper 29", text)
 
     def test_all_time_second_page_available(self):
@@ -85,7 +85,7 @@ class DashboardRouteTests(FlaskDBTestCase):
         text = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Saved Papers", text)
+        self.assertIn("Saved", text)
         self.assertIn("Paper 0", text)
         self.assertIn("Recently Saved", text)
 

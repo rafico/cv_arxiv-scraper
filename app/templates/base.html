@@ -26,6 +26,11 @@
                                   {% if request.endpoint == 'dashboard.index' %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900 hover:bg-gray-50{% endif %}">
                             Papers
                         </a>
+                        <a href="/discover"
+                           class="px-3 py-1.5 rounded-md font-medium
+                                  {% if request.endpoint and 'discover' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900 hover:bg-gray-50{% endif %}">
+                            Discover
+                        </a>
                         <a href="/settings"
                            class="px-3 py-1.5 rounded-md font-medium
                                   {% if request.endpoint and 'settings' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900 hover:bg-gray-50{% endif %}">
@@ -64,6 +69,10 @@
             <a href="/" class="block px-3 py-2 rounded-md text-sm font-medium
                 {% if request.endpoint == 'dashboard.index' %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900{% endif %}">
                 Papers
+            </a>
+            <a href="/discover" class="block px-3 py-2 rounded-md text-sm font-medium
+                {% if request.endpoint and 'discover' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900{% endif %}">
+                Discover
             </a>
             <a href="/settings" class="block px-3 py-2 rounded-md text-sm font-medium
                 {% if request.endpoint and 'settings' in request.endpoint %}text-gray-900 bg-gray-100{% else %}text-gray-500 hover:text-gray-900{% endif %}">
@@ -152,7 +161,37 @@
         {% block content %}{% endblock %}
     </main>
 
+    {# ── Keyboard shortcut help overlay ── #}
+    <button onclick="toggleShortcutHelp()" title="Keyboard shortcuts (?)"
+            class="fixed bottom-4 left-4 z-40 w-8 h-8 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300 hover:text-gray-700 text-sm font-bold shadow transition-colors flex items-center justify-center">
+        ?
+    </button>
+    <div id="shortcut-overlay" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/30" onclick="toggleShortcutHelp()"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl border border-gray-200 w-80 max-w-[90vw] p-5">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-gray-900">Keyboard Shortcuts</h3>
+                <button onclick="toggleShortcutHelp()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="space-y-2 text-sm">
+                <div class="flex justify-between"><span class="text-gray-600">Navigate papers</span><span><kbd class="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-xs font-mono text-gray-700">j</kbd> / <kbd class="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-xs font-mono text-gray-700">k</kbd></span></div>
+                <div class="flex justify-between"><span class="text-gray-600">Save paper</span><kbd class="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-xs font-mono text-gray-700">s</kbd></div>
+                <div class="flex justify-between"><span class="text-gray-600">Skip (Not Interested)</span><kbd class="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-xs font-mono text-gray-700">x</kbd></div>
+                <div class="flex justify-between"><span class="text-gray-600">Open on arXiv</span><kbd class="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-xs font-mono text-gray-700">o</kbd></div>
+                <div class="flex justify-between"><span class="text-gray-600">Open PDF</span><kbd class="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-xs font-mono text-gray-700">p</kbd></div>
+                <div class="flex justify-between"><span class="text-gray-600">Toggle details</span><kbd class="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-xs font-mono text-gray-700">d</kbd></div>
+                <div class="flex justify-between"><span class="text-gray-600">This help</span><kbd class="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-xs font-mono text-gray-700">?</kbd></div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        function toggleShortcutHelp() {
+            document.getElementById("shortcut-overlay").classList.toggle("hidden");
+        }
+
         function toggleMobileMenu() {
             document.getElementById("mobile-menu").classList.toggle("hidden");
         }

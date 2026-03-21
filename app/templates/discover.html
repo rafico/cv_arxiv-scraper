@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Discover - ArXiv CV Scraper{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-xl font-bold text-gray-900 mb-1">Discover</h1>
+    <p class="text-sm text-gray-500 mb-6">Search historical arXiv papers by date range and category. Matched papers are added to your inbox.</p>
+
+    <div class="rounded-xl border border-gray-200 bg-white p-6">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div>
+                <label for="start_date" class="block text-sm font-medium text-gray-700 mb-1">Start date</label>
+                <input type="date" id="start_date"
+                       class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm
+                              focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none">
+            </div>
+            <div>
+                <label for="end_date" class="block text-sm font-medium text-gray-700 mb-1">End date</label>
+                <input type="date" id="end_date"
+                       class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm
+                              focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none">
+            </div>
+        </div>
+
+        <div class="mb-5">
+            <label for="categories" class="block text-sm font-medium text-gray-700 mb-1">Categories</label>
+            <input type="text" id="categories" value="cs.CV" placeholder="e.g. cs.CV, cs.AI"
+                   class="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm
+                          focus:ring-2 focus:ring-gray-900 focus:border-transparent focus:bg-white outline-none">
+            <p class="text-xs text-gray-400 mt-1">Comma-separated arXiv category codes</p>
+        </div>
+
+        <button type="button" id="search-btn" onclick="runHistoricalSearch()"
+                class="w-full px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg
+                       hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900
+                       transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            Search ArXiv
+        </button>
+    </div>
+
+    {# ── Results area ── #}
+    <div id="search-status" class="hidden mt-6">
+        <div class="rounded-xl border border-gray-200 bg-white p-5">
+            <div class="flex items-center gap-3 mb-3">
+                <div id="status-spinner" class="hidden">
+                    <svg class="animate-spin w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                </div>
+                <h2 id="status-title" class="text-sm font-semibold text-gray-900">Searching...</h2>
+            </div>
+            <p id="status-message" class="text-sm text-gray-500"></p>
+
+            <div id="results-grid" class="hidden mt-4 grid grid-cols-3 gap-3 text-center">
+                <div class="rounded-lg bg-gray-50 p-3">
+                    <div class="text-lg font-bold text-gray-900" id="result-new">0</div>
+                    <div class="text-xs text-gray-500">New papers</div>
+                </div>
+                <div class="rounded-lg bg-gray-50 p-3">
+                    <div class="text-lg font-bold text-gray-900" id="result-matched">0</div>
+                    <div class="text-xs text-gray-500">Matched</div>
+                </div>
+                <div class="rounded-lg bg-gray-50 p-3">
+                    <div class="text-lg font-bold text-gray-400" id="result-total">0</div>
+                    <div class="text-xs text-gray-500">In range</div>
+                </div>
+            </div>
+
+            <div id="results-actions" class="hidden mt-4 text-right">
+                <a href="/?timeframe=all&sort=newest"
+                   class="inline-flex items-center px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
+                    View in Inbox
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Default date range: last 7 days
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    document.getElementById("end_date").value = today.toISOString().slice(0, 10);
+    document.getElementById("start_date").value = weekAgo.toISOString().slice(0, 10);
+
+    async function runHistoricalSearch() {
+        const startDate = document.getElementById("start_date").value;
+        const endDate = document.getElementById("end_date").value;
+        const categoriesRaw = document.getElementById("categories").value.trim();
+
+        if (!startDate || !endDate) {
+            alert("Please select both start and end dates.");
+            return;
+        }
+
+        const categories = categoriesRaw
+            .split(",")
+            .map(c => c.trim())
+            .filter(c => c);
+
+        if (!categories.length) {
+            alert("Please enter at least one category.");
+            return;
+        }
+
+        const btn = document.getElementById("search-btn");
+        btn.disabled = true;
+        btn.textContent = "Searching...";
+
+        const statusEl = document.getElementById("search-status");
+        statusEl.classList.remove("hidden");
+        document.getElementById("status-spinner").classList.remove("hidden");
+        document.getElementById("status-title").textContent = "Searching arXiv...";
+        document.getElementById("status-message").textContent = `Querying ${categories.join(", ")} from ${startDate} to ${endDate}. This may take a minute for large date ranges.`;
+        document.getElementById("results-grid").classList.add("hidden");
+        document.getElementById("results-actions").classList.add("hidden");
+
+        try {
+            const response = await fetch("/api/search/historical", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCsrfToken(),
+                },
+                body: JSON.stringify({
+                    categories: categories,
+                    start_date: startDate,
+                    end_date: endDate,
+                }),
+            });
+
+            const data = await response.json();
+            document.getElementById("status-spinner").classList.add("hidden");
+
+            if (!response.ok) {
+                document.getElementById("status-title").textContent = "Search failed";
+                document.getElementById("status-message").textContent = data.error || "An error occurred.";
+                return;
+            }
+
+            document.getElementById("status-title").textContent = "Search complete";
+            document.getElementById("status-message").textContent =
+                data.new_papers > 0
+                    ? `Found ${data.new_papers} new matched paper${data.new_papers !== 1 ? "s" : ""} and added them to your inbox.`
+                    : "No new matched papers found for this date range. Try broader dates or different categories.";
+
+            document.getElementById("result-new").textContent = data.new_papers || 0;
+            document.getElementById("result-matched").textContent = data.total_matched || 0;
+            document.getElementById("result-total").textContent = data.total_in_feed || 0;
+            document.getElementById("results-grid").classList.remove("hidden");
+
+            if (data.new_papers > 0) {
+                document.getElementById("results-actions").classList.remove("hidden");
+            }
+        } catch (error) {
+            document.getElementById("status-spinner").classList.add("hidden");
+            document.getElementById("status-title").textContent = "Connection error";
+            document.getElementById("status-message").textContent = "Could not reach the server. Please try again.";
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Search ArXiv";
+        }
+    }
+</script>
+{% endblock %}

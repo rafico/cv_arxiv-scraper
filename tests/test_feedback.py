@@ -32,16 +32,16 @@ class FeedbackTests(FlaskDBTestCase):
         db.session.commit()
         return paper
 
-    def test_upvote_toggle(self):
+    def test_save_toggle(self):
         paper = self._create_paper()
 
-        on_result = apply_feedback_action(paper.id, "upvote")
+        on_result = apply_feedback_action(paper.id, "save")
         self.assertTrue(on_result["active"])
-        self.assertEqual(on_result["counts"]["upvote"], 1)
+        self.assertEqual(on_result["counts"]["save"], 1)
 
-        off_result = apply_feedback_action(paper.id, "upvote")
+        off_result = apply_feedback_action(paper.id, "save")
         self.assertFalse(off_result["active"])
-        self.assertEqual(off_result["counts"]["upvote"], 0)
+        self.assertEqual(off_result["counts"]["save"], 0)
 
     def test_skip_hides_paper(self):
         paper = self._create_paper()
@@ -65,16 +65,14 @@ class FeedbackTests(FlaskDBTestCase):
         self.assertEqual(result["counts"]["skip"], 0)
         self.assertFalse(updated.is_hidden)
 
-    def test_skip_clears_positive_feedback(self):
+    def test_skip_clears_save(self):
         paper = self._create_paper()
 
-        apply_feedback_action(paper.id, "upvote")
         apply_feedback_action(paper.id, "save")
         result = apply_feedback_action(paper.id, "skip")
 
         updated = db.session.get(Paper, paper.id)
         self.assertTrue(result["active"])
-        self.assertEqual(result["counts"]["upvote"], 0)
         self.assertEqual(result["counts"]["save"], 0)
         self.assertEqual(result["counts"]["skip"], 1)
         self.assertTrue(updated.is_hidden)

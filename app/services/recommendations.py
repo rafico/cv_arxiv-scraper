@@ -10,10 +10,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 def build_preference_profile(limit: int = 50) -> str:
-    """Build a text profile from the user's saved/upvoted papers."""
+    """Build a text profile from the user's saved papers."""
     positive_paper_ids = (
         db.session.query(PaperFeedback.paper_id)
-        .filter(PaperFeedback.action.in_(["save", "upvote"]))
+        .filter(PaperFeedback.action == "save")
         .order_by(PaperFeedback.created_at.desc())
         .limit(limit)
         .subquery()
@@ -27,7 +27,7 @@ def build_preference_profile(limit: int = 50) -> str:
         parts.append(f"- {paper.title}")
         if paper.topic_tags:
             parts.append(f"  Topics: {', '.join(paper.topic_tags[:5])}")
-    return "Papers the user has saved or upvoted:\n" + "\n".join(parts)
+    return "Papers the user has saved:\n" + "\n".join(parts)
 
 
 def score_papers_with_llm(

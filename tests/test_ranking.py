@@ -28,8 +28,7 @@ class RankingTests(unittest.TestCase):
         self.assertGreater(recent, older)
 
     def test_feedback_delta_weights(self):
-        self.assertEqual(compute_feedback_delta("upvote"), 5)
-        self.assertEqual(compute_feedback_delta("save"), 7)
+        self.assertEqual(compute_feedback_delta("save"), 10)
         self.assertEqual(compute_feedback_delta("skip"), -9)
         self.assertEqual(compute_feedback_delta("unknown"), 0)
 

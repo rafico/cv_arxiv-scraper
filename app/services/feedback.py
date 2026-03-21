@@ -37,15 +37,13 @@ def apply_feedback_action(paper_id: int, action: str) -> dict:
         delta += compute_feedback_delta(action)
         active = True
 
-        # "Not interested" should be exclusive with positive signals so papers
-        # don't end up simultaneously hidden and saved/upvoted.
+        # "Not interested" and "Save" are mutually exclusive.
         if action == FeedbackAction.SKIP.value:
-            for conflicting_action in (FeedbackAction.UPVOTE.value, FeedbackAction.SAVE.value):
-                row = rows_by_action.get(conflicting_action)
-                if row:
-                    db.session.delete(row)
-                    delta -= compute_feedback_delta(conflicting_action)
-        elif action in {FeedbackAction.UPVOTE.value, FeedbackAction.SAVE.value}:
+            save_row = rows_by_action.get(FeedbackAction.SAVE.value)
+            if save_row:
+                db.session.delete(save_row)
+                delta -= compute_feedback_delta(FeedbackAction.SAVE.value)
+        elif action == FeedbackAction.SAVE.value:
             skip_row = rows_by_action.get(FeedbackAction.SKIP.value)
             if skip_row:
                 db.session.delete(skip_row)
@@ -56,7 +54,7 @@ def apply_feedback_action(paper_id: int, action: str) -> dict:
     db.session.flush()
 
     rows = _load_feedback_rows(paper_id)
-    counts = {FeedbackAction.UPVOTE.value: 0, FeedbackAction.SAVE.value: 0, FeedbackAction.SKIP.value: 0}
+    counts = {FeedbackAction.SAVE.value: 0, FeedbackAction.SKIP.value: 0}
     active_actions = []
     for row in rows:
         counts[row.action] = counts.get(row.action, 0) + 1
@@ -90,7 +88,7 @@ def get_feedback_snapshot(paper_ids: list[int]) -> dict[int, dict]:
 
     snapshot: dict[int, dict] = defaultdict(
         lambda: {
-            "counts": {FeedbackAction.UPVOTE.value: 0, FeedbackAction.SAVE.value: 0, FeedbackAction.SKIP.value: 0},
+            "counts": {FeedbackAction.SAVE.value: 0, FeedbackAction.SKIP.value: 0},
             "active_actions": set(),
         }
     )

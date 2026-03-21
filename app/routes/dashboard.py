@@ -150,8 +150,8 @@ def _build_onboarding_steps(config: dict, *, saved_count: int, has_successful_sc
             "href": "#run-scrape",
         },
         {
-            "label": "Save or rate papers",
-            "description": "Teach the ranking loop what is genuinely useful.",
+            "label": "Save or skip papers",
+            "description": "Save what matters, skip the rest. This trains your ranking.",
             "complete": saved_count > 0 or PaperFeedback.query.count() > 0,
             "href": "/",
         },
@@ -230,7 +230,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
     for paper in papers:
         feedback = feedback_snapshot.get(
             paper.id,
-            {"counts": {"upvote": 0, "save": 0, "skip": 0}, "active_actions": set()},
+            {"counts": {"save": 0, "skip": 0}, "active_actions": set()},
         )
         paper.feedback_counts = feedback["counts"]  # type: ignore[attr-defined]
         paper.active_actions = feedback["active_actions"]  # type: ignore[attr-defined]
