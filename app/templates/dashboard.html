@@ -244,10 +244,10 @@
              data-paper-id="{{ paper.id }}" tabindex="0">
         <a href="{{ paper.link }}" target="_blank" class="block paper-link">
             <div class="w-full h-36 bg-gray-100 overflow-hidden">
-                <img src="https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{{ paper_id }}.png"
+                <img src="{{ url_for('static', filename='thumbnails/' ~ paper_id ~ '.png') }}"
                      alt="" loading="lazy"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                     onerror="handleImgError(this)">
+                     onerror="this.onerror=function(){handleImgError(this);}; this.src='https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{{ paper_id }}.png';">
             </div>
         </a>
         <div class="p-4 flex flex-col flex-1">

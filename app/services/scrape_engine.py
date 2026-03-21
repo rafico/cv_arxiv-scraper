@@ -316,6 +316,23 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
     return new_count, skipped
 
 
+def _generate_thumbnails(app, results: list[dict], session: requests.Session) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services.thumbnail_generator import generate_thumbnail
+
+    static_folder = app.static_folder if app.static_folder else Path(__file__).parent.parent / "static"
+
+    def worker(res):
+        arxiv_id = res.get("arxiv_id") or (res.get("link") or "").split("/")[-1]
+        pdf_link = res.get("pdf_link")
+        if arxiv_id and pdf_link:
+            generate_thumbnail(arxiv_id, pdf_link, static_folder, session=session)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        for _ in executor.map(worker, results):
+            pass
+
+
 def _build_summary(new_count: int, skipped: int, total_matched: int, total_in_feed: int) -> dict:
     return {
         "new_papers": new_count,
@@ -629,6 +646,10 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
 
         _sort_results(results)
         new_count, skipped = _save_results(app, results)
+
+        _emit(event_callback, "status", {"phase": "thumbnails", "message": "Generating PDF thumbnails..."})
+        _generate_thumbnails(app, results, session)
+
         summary = _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
         _emit(event_callback, "done", summary)
         _finish_scrape_run(app, scrape_run_id, status="success")
@@ -691,5 +712,8 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
 
     _sort_results(results)
     new_count, skipped = _save_results(app, results)
+    
+    _generate_thumbnails(app, results, session)
+
     return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
 
