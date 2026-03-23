@@ -28,3 +28,5 @@ codex-claude-bridge/
 .continue/checks/
 HANDOFF.md
 tailwindcss
+
+app/static/thumbnails/
