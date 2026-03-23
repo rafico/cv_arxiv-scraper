@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import arxiv
 import feedparser
 import pdfplumber
+import requests
 
 from app.services.http_client import request_with_backoff
 from app.services.text import clean_whitespace, utc_today

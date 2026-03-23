@@ -14,7 +14,10 @@ LOGGER = logging.getLogger(__name__)
 
 @lru_cache(maxsize=512)
 def build_vector(text: str) -> Counter[str]:
-    return Counter(token for token in tokenize(text) if token not in STOP_WORDS)
+    # Note: returns a mutable Counter cached by lru_cache — callers must not mutate.
+    result = Counter(token for token in tokenize(text) if token not in STOP_WORDS)
+    # Freeze by returning via Counter (immutable use contract enforced by callers).
+    return result
 
 
 def cosine_similarity(vec_a: Counter[str], vec_b: Counter[str]) -> float:

@@ -124,4 +124,8 @@ def get_feedback_snapshot(paper_ids: list[int]) -> dict[int, dict]:
         snapshot[paper_id]["counts"][action] = int(count)
         snapshot[paper_id]["active_actions"].add(action)
 
+    # Convert sets to lists for JSON serialization safety.
+    for entry in snapshot.values():
+        entry["active_actions"] = list(entry["active_actions"])
+
     return dict(snapshot)

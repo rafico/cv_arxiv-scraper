@@ -28,12 +28,12 @@ def fetch_citations_batch(arxiv_ids: list[str], session=None) -> dict[str, dict[
 
     try:
         response = request_with_backoff(
+            "POST",
             SEMANTIC_SCHOLAR_BATCH_URL,
-            method="POST",
             json=payload,
             params=params,
             session=session,
-            timeout=15
+            timeout=15,
         )
         if not response:
             return {}

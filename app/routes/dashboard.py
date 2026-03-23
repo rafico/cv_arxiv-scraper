@@ -230,7 +230,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
     for paper in papers:
         feedback = feedback_snapshot.get(
             paper.id,
-            {"counts": {"save": 0, "skip": 0}, "active_actions": set()},
+            {"counts": {a.value: 0 for a in FeedbackAction}, "active_actions": []},
         )
         paper.feedback_counts = feedback["counts"]  # type: ignore[attr-defined]
         paper.active_actions = feedback["active_actions"]  # type: ignore[attr-defined]

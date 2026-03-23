@@ -100,31 +100,36 @@ class EmbeddingService:
             return []
 
         query_vec = self.encode([query_text])
-        k = min(top_k, self._index.ntotal)
-        scores, indices = self._index.search(query_vec, k)
+
+        with self._lock:
+            k = min(top_k, self._index.ntotal)
+            scores, indices = self._index.search(query_vec, k)
+            id_map_snapshot = list(self._id_map)
 
         results = []
         for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(self._id_map):
+            if idx < 0 or idx >= len(id_map_snapshot):
                 continue
-            results.append((self._id_map[idx], float(score)))
+            results.append((id_map_snapshot[idx], float(score)))
         return results
 
     def search_by_id(self, paper_id: int, top_k: int = 10) -> list[tuple[int, float]]:
         """Find papers similar to an existing indexed paper."""
-        row = self._pk_to_row.get(paper_id)
-        if row is None or self._index.ntotal == 0:
-            return []
+        with self._lock:
+            row = self._pk_to_row.get(paper_id)
+            if row is None or self._index.ntotal == 0:
+                return []
 
-        vec = self._index.reconstruct(row).reshape(1, -1)
-        k = min(top_k + 1, self._index.ntotal)
-        scores, indices = self._index.search(vec, k)
+            vec = self._index.reconstruct(row).reshape(1, -1)
+            k = min(top_k + 1, self._index.ntotal)
+            scores, indices = self._index.search(vec, k)
+            id_map_snapshot = list(self._id_map)
 
         results = []
         for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(self._id_map):
+            if idx < 0 or idx >= len(id_map_snapshot):
                 continue
-            pid = self._id_map[idx]
+            pid = id_map_snapshot[idx]
             if pid == paper_id:
                 continue
             results.append((pid, float(score)))

@@ -65,8 +65,8 @@ def fetch_openalex_batch(
 
         try:
             response = request_with_backoff(
+                "GET",
                 OPENALEX_WORKS_URL,
-                method="GET",
                 params=params,
                 session=session,
                 timeout=15,
