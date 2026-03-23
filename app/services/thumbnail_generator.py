@@ -18,6 +18,7 @@ def generate_thumbnail(
     pdf_link: str,
     static_dir: str | Path,
     session: requests.Session | None = None,
+    pdf_content: bytes | None = None,
 ) -> bool:
     """Download the PDF, generate a thumbnail of its first page, and save it."""
     thumbnails_dir = Path(static_dir) / "thumbnails"
@@ -28,17 +29,20 @@ def generate_thumbnail(
         return True
 
     try:
-        response = request_with_backoff(
-            "GET",
-            pdf_link,
-            timeout=30,
-            attempts=2,
-            base_delay=1.0,
-            session=session,
-        )
+        content_to_use = pdf_content
+        if content_to_use is None:
+            response = request_with_backoff(
+                "GET",
+                pdf_link,
+                timeout=30,
+                attempts=2,
+                base_delay=1.0,
+                session=session,
+            )
+            content_to_use = response.content
 
         with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-            tmp.write(response.content)
+            tmp.write(content_to_use)
             tmp.flush()
 
             with pdfplumber.open(tmp.name) as pdf:
@@ -48,6 +52,10 @@ def generate_thumbnail(
                 # Render to image using resolution 72 (default is fine for small thumbnails)
                 im = first_page.to_image(resolution=72)
                 im.save(str(out_path), format="PNG")
+                
+                # Cleanup resources
+                if hasattr(im.original, 'close'):
+                    im.original.close()
 
         LOGGER.info("Successfully generated thumbnail for %s", arxiv_id)
         return True

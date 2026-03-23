@@ -74,7 +74,7 @@ def _build_result(
         "title": title,
         "authors": entry_data["author"],
         "link": entry_data["link"],
-        "pdf_link": entry_data["link"].replace("/abs/", "/pdf/"),
+        "pdf_link": entry_data["link"].replace("/abs/", "/pdf/") + (".pdf" if not entry_data["link"].endswith(".pdf") else ""),
         "abstract_text": abstract,
         "summary_text": summary_text,
         "topic_tags": topic_tags,
@@ -124,11 +124,15 @@ def _process_paper_entry(
     # Phase 2: download PDF and check affiliations.
     link = entry_data["link"]
     pdf_url = link.replace("/abs/", "/pdf/")
+    if not pdf_url.endswith(".pdf"):
+        pdf_url += ".pdf"
     affiliation_matches: list[str] = []
     
     api_affiliations = entry_data.get("api_affiliations", "")
     if api_affiliations:
         affiliation_matches = check_whitelist_match([api_affiliations], whitelists["affiliations"])
+
+    pdf_content = None
 
     if not affiliation_matches:
         try:
@@ -140,8 +144,9 @@ def _process_paper_entry(
                 base_delay=1.0,
                 session=session,
             )
+            pdf_content = pdf_response.content
             affiliation_text = extract_affiliation_text(
-                pdf_response.content,
+                pdf_content,
                 lines_start=scraper_config.get("pdf_lines_start", 2),
                 max_header_lines=scraper_config.get(
                     "pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)
@@ -169,13 +174,15 @@ def _process_paper_entry(
     if check_whitelist_match(topic_tags, muted["topics"]):
         return None
 
-    return _build_result(
+    result = _build_result(
         entry_data,
         category_matches,
         llm_client=llm_client,
         interests_text=interests_text,
         config=product_config,
     )
+    result["pdf_content"] = pdf_content
+    return result
 
 
 def _process_entries_parallel(
@@ -264,6 +271,7 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
             existing_titles[pid] = ptitle
 
         seen_keys: set[str] = set()
+        papers_to_insert = []
         for result in results:
             identity_keys = _identity_keys(result)
             if any(key in existing_keys or key in seen_keys for key in identity_keys):
@@ -307,16 +315,24 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 referenced_works_count=result.get("referenced_works_count"),
                 openalex_cited_by_count=result.get("openalex_cited_by_count"),
             )
-            db.session.add(paper)
+            papers_to_insert.append(paper)
+            
+        if papers_to_insert:
             try:
+                db.session.add_all(papers_to_insert)
                 db.session.commit()
+                new_count += len(papers_to_insert)
             except IntegrityError:
                 db.session.rollback()
-                skipped += 1
-                continue
-
-            existing_keys.update(identity_keys)
-            new_count += 1
+                # Fallback to row-by-row insertion in case of a collision
+                for paper in papers_to_insert:
+                    db.session.add(paper)
+                    try:
+                        db.session.commit()
+                        new_count += 1
+                    except IntegrityError:
+                        db.session.rollback()
+                        skipped += 1
 
     return new_count, skipped
 
@@ -330,10 +346,11 @@ def _generate_thumbnails(app, results: list[dict], session: requests.Session) ->
     def worker(res):
         arxiv_id = res.get("arxiv_id") or (res.get("link") or "").split("/")[-1]
         pdf_link = res.get("pdf_link")
+        pdf_content = res.pop("pdf_content", None)
         if arxiv_id and pdf_link:
-            generate_thumbnail(arxiv_id, pdf_link, static_folder, session=session)
+            generate_thumbnail(arxiv_id, pdf_link, static_folder, session=session, pdf_content=pdf_content)
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         for _ in executor.map(worker, results):
             pass
 
