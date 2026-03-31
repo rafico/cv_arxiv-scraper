@@ -74,7 +74,7 @@ def _build_result(
         "title": title,
         "authors": entry_data["author"],
         "link": entry_data["link"],
-        "pdf_link": entry_data["link"].replace("/abs/", "/pdf/") + (".pdf" if not entry_data["link"].endswith(".pdf") else ""),
+        "pdf_link": entry_data["link"].replace("/abs/", "/pdf/"),
         "abstract_text": abstract,
         "summary_text": summary_text,
         "topic_tags": topic_tags,
@@ -124,8 +124,6 @@ def _process_paper_entry(
     # Phase 2: download PDF and check affiliations.
     link = entry_data["link"]
     pdf_url = link.replace("/abs/", "/pdf/")
-    if not pdf_url.endswith(".pdf"):
-        pdf_url += ".pdf"
     affiliation_matches: list[str] = []
     
     api_affiliations = entry_data.get("api_affiliations", "")
@@ -338,7 +336,7 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
 
 
 def _generate_thumbnails(app, results: list[dict], session: requests.Session) -> None:
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
     from app.services.thumbnail_generator import generate_thumbnail
 
     static_folder = app.static_folder if app.static_folder else Path(__file__).parent.parent / "static"
@@ -350,9 +348,13 @@ def _generate_thumbnails(app, results: list[dict], session: requests.Session) ->
         if arxiv_id and pdf_link:
             generate_thumbnail(arxiv_id, pdf_link, static_folder, session=session, pdf_content=pdf_content)
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        for _ in executor.map(worker, results):
-            pass
+    try:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # Timeout after 120s to avoid blocking the gunicorn worker
+            for _ in executor.map(worker, results, timeout=120):
+                pass
+    except FuturesTimeout:
+        LOGGER.warning("Thumbnail generation timed out after 120s, skipping remaining")
 
 
 def _generate_embeddings(app, results: list[dict]) -> None:

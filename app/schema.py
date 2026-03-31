@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import inspect, text
@@ -253,3 +254,45 @@ def ensure_schema() -> None:
                 updates,
             )
             db.session.commit()
+
+    _backfill_arxiv_ids()
+    _fix_pdf_links()
+
+
+_ARXIV_ID_RE = re.compile(r"arxiv\.org/abs/(.+?)(?:v\d+)?$")
+
+
+def _backfill_arxiv_ids() -> None:
+    """Fill in NULL arxiv_id values by extracting from the paper link."""
+    rows = db.session.execute(
+        text("SELECT id, link FROM papers WHERE arxiv_id IS NULL AND link IS NOT NULL")
+    ).all()
+    if not rows:
+        return
+
+    updates = []
+    for paper_id, link in rows:
+        match = _ARXIV_ID_RE.search(link or "")
+        if match:
+            updates.append({"id": paper_id, "arxiv_id": match.group(1)})
+
+    if updates:
+        LOGGER.info("Backfilling arxiv_id for %d papers...", len(updates))
+        db.session.execute(
+            text("UPDATE papers SET arxiv_id = :arxiv_id WHERE id = :id"),
+            updates,
+        )
+        db.session.commit()
+
+
+def _fix_pdf_links() -> None:
+    """Remove erroneous .pdf extension from arxiv PDF links."""
+    result = db.session.execute(
+        text(
+            "UPDATE papers SET pdf_link = SUBSTR(pdf_link, 1, LENGTH(pdf_link) - 4) "
+            "WHERE pdf_link LIKE '%/pdf/%.pdf'"
+        )
+    )
+    if result.rowcount:
+        LOGGER.info("Fixed .pdf extension on %d pdf_link values", result.rowcount)
+        db.session.commit()
