@@ -9,6 +9,9 @@ on:
     types:
       - completed
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: read
   packages: write
@@ -51,7 +54,18 @@ jobs:
             ${{ steps.image.outputs.repo }}:latest
             ${{ steps.image.outputs.repo }}:${{ github.event.workflow_run.head_sha }}
 
+      - name: Note skipped deploy
+        if: ${{ secrets.DEPLOY_HOST == '' || secrets.DEPLOY_USER == '' || secrets.DEPLOY_SSH_KEY == '' || secrets.DEPLOY_PATH == '' }}
+        run: |
+          {
+            echo "## Deploy skipped"
+            echo ""
+            echo "Required secrets are missing."
+            echo "Set: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PATH"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy over SSH
+        if: ${{ secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != '' && secrets.DEPLOY_PATH != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
