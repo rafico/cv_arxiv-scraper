@@ -25,6 +25,11 @@ jobs:
     name: Build and Deploy
     runs-on: ubuntu-latest
     if: github.event.workflow_run.conclusion == 'success'
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,7 +60,7 @@ jobs:
             ${{ steps.image.outputs.repo }}:${{ github.event.workflow_run.head_sha }}
 
       - name: Note skipped deploy
-        if: ${{ secrets.DEPLOY_HOST == '' || secrets.DEPLOY_USER == '' || secrets.DEPLOY_SSH_KEY == '' || secrets.DEPLOY_PATH == '' }}
+        if: ${{ env.DEPLOY_HOST == '' || env.DEPLOY_USER == '' || env.DEPLOY_SSH_KEY == '' || env.DEPLOY_PATH == '' }}
         run: |
           {
             echo "## Deploy skipped"
@@ -65,12 +70,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy over SSH
-        if: ${{ secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != '' && secrets.DEPLOY_PATH != '' }}
+        if: ${{ env.DEPLOY_HOST != '' && env.DEPLOY_USER != '' && env.DEPLOY_SSH_KEY != '' && env.DEPLOY_PATH != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          host: ${{ env.DEPLOY_HOST }}
+          username: ${{ env.DEPLOY_USER }}
+          key: ${{ env.DEPLOY_SSH_KEY }}
           envs: DEPLOY_PATH,IMAGE_REPO,IMAGE_TAG
           script: |
             set -e
@@ -78,6 +83,6 @@ jobs:
             docker compose pull arxiv-scraper
             docker compose up -d --remove-orphans arxiv-scraper
         env:
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
           IMAGE_REPO: ${{ steps.image.outputs.repo }}
           IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
