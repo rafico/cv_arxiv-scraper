@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from app.services.arxiv_adapter import result_to_entry
 from app.services.enrichment import parse_feed_entries, query_arxiv_api
-from app.services.ingest import ArxivApiBackend, PaperCandidate, RssFeedBackend
+from app.services.ingest import ArxivApiBackend, OaiPmhBackend, PaperCandidate, RssFeedBackend
 
 RSS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -22,6 +22,14 @@ RSS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
     </item>
   </channel>
 </rss>
+"""
+
+OAI_PMH_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+  <ListRecords>
+    <resumptionToken cursor="0" completeListSize="42">next-page-token</resumptionToken>
+  </ListRecords>
+</OAI-PMH>
 """
 
 
@@ -182,6 +190,55 @@ class ArxivApiBackendTests(TestCase):
         self.assertEqual([candidate.arxiv_id for candidate in candidates], ["2604.00005"])
         self.assertEqual(progress, [(3, "2604.00005")])
         self.assertEqual(mock_client_cls.return_value.results.call_args.kwargs["offset"], 2)
+
+
+class OaiPmhBackendTests(TestCase):
+    def test_build_list_records_params_uses_oai_defaults(self):
+        backend = OaiPmhBackend()
+
+        params = backend.build_list_records_params(
+            start_dt=date(2026, 1, 1),
+            end_dt=date(2026, 1, 7),
+            set_spec="cs",
+        )
+
+        self.assertEqual(
+            params,
+            {
+                "verb": "ListRecords",
+                "metadataPrefix": "arXiv",
+                "from": "2026-01-01",
+                "until": "2026-01-07",
+                "set": "cs",
+            },
+        )
+
+    def test_build_list_records_params_prefers_resumption_token(self):
+        backend = OaiPmhBackend()
+
+        params = backend.build_list_records_params(
+            start_dt=date(2026, 1, 1),
+            end_dt=date(2026, 1, 7),
+            set_spec="cs",
+            resumption_token="next-page-token",
+        )
+
+        self.assertEqual(
+            params,
+            {
+                "verb": "ListRecords",
+                "resumptionToken": "next-page-token",
+            },
+        )
+
+    def test_extract_resumption_token_reads_oai_payload(self):
+        self.assertEqual(OaiPmhBackend.extract_resumption_token(OAI_PMH_XML), "next-page-token")
+
+    def test_fetch_is_explicitly_unimplemented(self):
+        backend = OaiPmhBackend()
+
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            backend.fetch()
 
 
 class ArxivAdapterTests(TestCase):
