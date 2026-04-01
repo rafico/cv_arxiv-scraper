@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import email.utils
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 import feedparser
 import requests
@@ -61,7 +62,7 @@ class IngestBackend(Protocol):
     @property
     def name(self) -> str: ...
 
-    def fetch(self, *, session: requests.Session | None = None, **kwargs: Any) -> list["PaperCandidate"]: ...
+    def fetch(self, *, session: requests.Session | None = None, **kwargs: Any) -> list[PaperCandidate]: ...
 
 
 @dataclass(slots=True)
@@ -103,7 +104,7 @@ class PaperCandidate:
         return self.to_entry_dict()
 
     @classmethod
-    def from_entry_dict(cls, entry: Mapping[str, Any]) -> "PaperCandidate":
+    def from_entry_dict(cls, entry: Mapping[str, Any]) -> PaperCandidate:
         publication_dt = entry.get("publication_dt")
         publication_date = entry.get("publication_date")
         if not publication_date:
@@ -127,5 +128,5 @@ class PaperCandidate:
         )
 
     @classmethod
-    def from_entry(cls, entry: Mapping[str, Any]) -> "PaperCandidate":
+    def from_entry(cls, entry: Mapping[str, Any]) -> PaperCandidate:
         return cls.from_entry_dict(entry)
