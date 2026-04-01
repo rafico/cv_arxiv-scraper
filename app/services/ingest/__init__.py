@@ -1,0 +1,13 @@
+"""Ingestion backends and shared paper candidate types."""
+
+from app.services.ingest.arxiv_api_backend import ArxivApiBackend
+from app.services.ingest.base import IngestBackend, IngestMode, PaperCandidate
+from app.services.ingest.rss_backend import RssFeedBackend
+
+__all__ = [
+    "ArxivApiBackend",
+    "IngestBackend",
+    "IngestMode",
+    "PaperCandidate",
+    "RssFeedBackend",
+]

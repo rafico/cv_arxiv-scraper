@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import email.utils
 import io
 import logging
 import re
@@ -10,15 +9,15 @@ import time
 from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
 
-import arxiv
 import defusedxml.ElementTree as ET
-import feedparser
 import pdfplumber
 import requests
 
 from app.constants import ARXIV_API_BATCH_SIZE as _ARXIV_API_BATCH_SIZE
 from app.constants import ARXIV_API_DELAY as _ARXIV_API_DELAY
 from app.services.http_client import request_with_backoff
+from app.services.ingest import ArxivApiBackend, RssFeedBackend
+from app.services.ingest.base import clean_abstract, extract_arxiv_id, parse_publication_dt
 from app.services.text import clean_whitespace, utc_today
 
 LOGGER = logging.getLogger(__name__)
@@ -27,7 +26,6 @@ _HEADER_END_RE = re.compile(
     r"^\s*(?:Abstract|ABSTRACT|1[\.\s]+Introduction|I\.\s+Introduction)\b",
     re.MULTILINE,
 )
-_ARXIV_ID_RE = re.compile(r"arxiv\.org/abs/(.+?)(?:v\d+)?$")
 _URL_RE = re.compile(r"https?://[^\s<>)\]\"']+")
 
 _ARXIV_API_URL = "https://export.arxiv.org/api/query"
@@ -36,67 +34,9 @@ _ATOM_NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "arxiv": "http://arxiv.org/schemas/atom",
 }
-
-
-def extract_arxiv_id(link: str) -> str | None:
-    match = _ARXIV_ID_RE.search(link)
-    return match.group(1) if match else None
-
-
-def parse_publication_dt(published: str | None) -> tuple[date | None, str]:
-    if not published:
-        return None, "Date Unknown"
-
-    try:
-        parsed = email.utils.parsedate_to_datetime(published)
-        parsed_date = parsed.date()
-        return parsed_date, parsed_date.isoformat()
-    except Exception:
-        return None, "Date Unknown"
-
-
-def clean_abstract(summary: str | None) -> str:
-    if not summary:
-        return ""
-    no_html = re.sub(r"<[^>]+>", " ", summary)
-    return clean_whitespace(no_html)
-
-
-def extract_author_names(entry: feedparser.FeedParserDict) -> list[str]:
-    if hasattr(entry, "authors") and entry.authors:
-        names = [author.get("name", "") for author in entry.authors if author.get("name")]
-        if names:
-            return names
-
-    raw_authors = getattr(entry, "author", "")
-    return [name for name in re.split(r",\s*|\s+and\s+", raw_authors) if name]
-
-
 def parse_feed_entries(feed_url: str, session: requests.Session | None = None) -> list[dict]:
-    response = request_with_backoff("GET", feed_url, timeout=30, session=session)
-    feed = feedparser.parse(response.content)
-
-    entries = []
-    for entry in feed.entries:
-        link = entry.link
-        publication_dt, publication_date = parse_publication_dt(getattr(entry, "published", None))
-
-        entries.append(
-            {
-                "arxiv_id": extract_arxiv_id(link),
-                "link": link,
-                "title": clean_whitespace(entry.title),
-                "author": getattr(entry, "author", ""),
-                "authors_list": extract_author_names(entry),
-                "abstract": clean_abstract(getattr(entry, "summary", "")),
-                "published": getattr(entry, "published", None),
-                "publication_dt": publication_dt,
-                "publication_date": publication_date,
-            }
-        )
-
-    LOGGER.info("Total entries in RSS feed: %s", len(entries))
-    return entries
+    backend = RssFeedBackend([feed_url])
+    return [candidate.to_entry_dict() for candidate in backend.fetch(session=session)]
 
 
 def _extract_category_from_feed_url(feed_url: str) -> str | None:
@@ -145,30 +85,11 @@ def _parse_atom_entry(entry) -> dict:
 
 
 def query_arxiv_api(categories: list[str], start_dt: date, end_dt: date, max_results: int = 1000) -> list[dict]:
-    from app.services.arxiv_adapter import result_to_entry
-
-    client = arxiv.Client(page_size=_ARXIV_API_BATCH_SIZE, delay_seconds=_ARXIV_API_DELAY, num_retries=3)
-
-    cat_query = " OR ".join(f"cat:{c}" for c in categories)
-    from_ts = start_dt.strftime("%Y%m%d0000")
-    to_ts = end_dt.strftime("%Y%m%d2359")
-    query_str = f"({cat_query}) AND submittedDate:[{from_ts} TO {to_ts}]"
-
-    search = arxiv.Search(
-        query=query_str,
-        max_results=max_results,
-        sort_by=arxiv.SortCriterion.SubmittedDate,
-        sort_order=arxiv.SortOrder.Descending,
-    )
-
-    results = []
-    try:
-        for result in client.results(search):
-            results.append(result_to_entry(result))
-    except Exception as e:
-        LOGGER.error(f"arxiv.py client failed: {e}")
-
-    return results
+    backend = ArxivApiBackend(page_size=_ARXIV_API_BATCH_SIZE, delay_seconds=_ARXIV_API_DELAY)
+    return [
+        candidate.to_entry_dict()
+        for candidate in backend.fetch(categories=categories, start_dt=start_dt, end_dt=end_dt, max_results=max_results)
+    ]
 
 
 def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | None = None) -> list[dict]:
