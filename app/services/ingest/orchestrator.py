@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 
 import requests
@@ -17,6 +17,12 @@ LOGGER = logging.getLogger(__name__)
 
 RssCandidateFetcher = Callable[..., list[PaperCandidate]]
 RollingWindowFetcher = Callable[..., list[PaperCandidate]]
+BackendRegistry = Mapping[str, type]
+
+BACKEND_REGISTRY: dict[str, type] = {
+    "rss": RssFeedBackend,
+    "arxiv_api": ArxivApiBackend,
+}
 
 
 class IngestOrchestrator:
@@ -26,10 +32,12 @@ class IngestOrchestrator:
         rss_candidate_fetcher: RssCandidateFetcher | None = None,
         rolling_window_fetcher: RollingWindowFetcher | None = None,
         arxiv_api_backend: ArxivApiBackend | None = None,
+        backend_registry: BackendRegistry | None = None,
     ):
         self._rss_candidate_fetcher = rss_candidate_fetcher or self._default_rss_candidate_fetcher
         self._rolling_window_fetcher = rolling_window_fetcher or self._default_rolling_window_fetcher
         self._arxiv_api_backend = arxiv_api_backend or ArxivApiBackend()
+        self._backend_registry = dict(backend_registry or BACKEND_REGISTRY)
 
     def fetch(
         self,
@@ -42,16 +50,21 @@ class IngestOrchestrator:
         start_dt: date | None = None,
         end_dt: date | None = None,
         max_results: int = 2000,
+        backend_names: Sequence[str] | None = None,
     ) -> list[PaperCandidate]:
+        selected_backend_names = self._resolve_backend_names(backend_names)
         if mode == IngestMode.DAILY_WATCH:
             return self._fetch_daily_watch(
                 feed_urls=feed_urls or [],
                 rolling_window_days=rolling_window_days,
                 session=session,
+                backend_names=selected_backend_names,
+                explicit_selection=backend_names is not None,
             )
         if mode == IngestMode.BACKFILL:
             if start_dt is None or end_dt is None:
                 raise ValueError("BACKFILL mode requires start_dt and end_dt")
+            self._require_backend(selected_backend_names, backend_name="arxiv_api", mode=mode)
             return self._fetch_arxiv_api(
                 categories=categories or [],
                 start_dt=start_dt,
@@ -62,6 +75,7 @@ class IngestOrchestrator:
         if mode == IngestMode.CATCH_UP:
             if start_dt is None:
                 raise ValueError("CATCH_UP mode requires start_dt")
+            self._require_backend(selected_backend_names, backend_name="arxiv_api", mode=mode)
             return self._fetch_arxiv_api(
                 categories=categories or [],
                 start_dt=start_dt,
@@ -77,34 +91,70 @@ class IngestOrchestrator:
         feed_urls: Sequence[str],
         rolling_window_days: int,
         session: requests.Session | None = None,
+        backend_names: Sequence[str],
+        explicit_selection: bool,
     ) -> list[PaperCandidate]:
         normalized_feed_urls = [feed_url for feed_url in feed_urls if feed_url]
-        rss_candidates = self._fetch_rss_candidates(normalized_feed_urls, session=session)
+        api_days = self._recent_fetch_days(
+            rolling_window_days=rolling_window_days,
+            explicit_selection=explicit_selection,
+            backend_names=backend_names,
+        )
+        arxiv_api_active = "arxiv_api" in backend_names and api_days > 0
 
-        if rolling_window_days <= 0:
+        rss_candidates: list[PaperCandidate] = []
+        if "rss" in backend_names:
+            rss_candidates = self._fetch_rss_candidates(
+                normalized_feed_urls,
+                session=session,
+                raise_on_total_failure=not arxiv_api_active,
+            )
+
+        if api_days <= 0:
             return rss_candidates
 
+        if "arxiv_api" not in backend_names:
+            return rss_candidates
+
+        rolling_candidates = self._fetch_recent_candidates(
+            days=api_days,
+            feed_urls=normalized_feed_urls,
+            session=session,
+            strict=not rss_candidates,
+        )
+        return self._merge_candidates(rss_candidates, rolling_candidates)
+
+    def _fetch_recent_candidates(
+        self,
+        *,
+        days: int,
+        feed_urls: Sequence[str],
+        session: requests.Session | None = None,
+        strict: bool = False,
+    ) -> list[PaperCandidate]:
         try:
-            rolling_candidates: list[PaperCandidate] = []
-            for feed_url in normalized_feed_urls:
-                rolling_candidates.extend(
+            candidates: list[PaperCandidate] = []
+            for feed_url in feed_urls:
+                candidates.extend(
                     self._rolling_window_fetcher(
-                        rolling_window_days,
+                        days,
                         feed_url,
                         session=session,
                     )
                 )
+            return candidates
         except Exception as exc:
             LOGGER.warning("Rolling-window fetch failed: %s", exc)
-            rolling_candidates = []
-
-        return self._merge_candidates(rss_candidates, rolling_candidates)
+            if strict:
+                raise
+            return []
 
     def _fetch_rss_candidates(
         self,
         feed_urls: Sequence[str],
         *,
         session: requests.Session | None = None,
+        raise_on_total_failure: bool = True,
     ) -> list[PaperCandidate]:
         candidates: list[PaperCandidate] = []
         feed_errors: list[Exception] = []
@@ -116,7 +166,7 @@ class IngestOrchestrator:
                 LOGGER.warning("Failed to parse feed %s: %s", feed_url, exc)
                 feed_errors.append(exc)
 
-        if feed_errors and not candidates and len(feed_errors) == len(feed_urls):
+        if raise_on_total_failure and feed_errors and not candidates and len(feed_errors) == len(feed_urls):
             raise feed_errors[0]
 
         return candidates
@@ -146,6 +196,38 @@ class IngestOrchestrator:
         for candidate in secondary:
             merged_candidates.setdefault(candidate.arxiv_id or candidate.link, candidate)
         return list(merged_candidates.values())
+
+    def _resolve_backend_names(self, backend_names: Sequence[str] | None) -> list[str]:
+        selected = list(backend_names) if backend_names is not None else list(self._backend_registry)
+        unknown = [name for name in selected if name not in self._backend_registry]
+        if unknown:
+            raise ValueError(f"Unknown ingest backends: {', '.join(unknown)}")
+        return selected
+
+    @staticmethod
+    def _require_backend(
+        backend_names: Sequence[str],
+        *,
+        backend_name: str,
+        mode: IngestMode,
+    ) -> None:
+        if backend_name not in backend_names:
+            raise ValueError(f"{mode.value.upper()} mode requires ingest backend '{backend_name}'")
+
+    @staticmethod
+    def _recent_fetch_days(
+        *,
+        rolling_window_days: int,
+        explicit_selection: bool,
+        backend_names: Sequence[str],
+    ) -> int:
+        if "arxiv_api" not in backend_names:
+            return 0
+        if rolling_window_days > 0:
+            return rolling_window_days
+        if explicit_selection:
+            return 1
+        return 0
 
     @staticmethod
     def _default_rss_candidate_fetcher(

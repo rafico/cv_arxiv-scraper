@@ -634,6 +634,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         _emit(event_callback, "status", {"phase": "feed", "message": "Fetching RSS feed..."})
         feed_urls = _collect_feed_urls(app, scraper_config)
         rolling_window_days = max(0, int(scraper_config.get("rolling_window_days", 0)))
+        ingest_config = config.get("ingest") or {}
         if rolling_window_days > 0:
             _emit(
                 event_callback,
@@ -650,6 +651,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
                 session=session,
                 feed_urls=feed_urls,
                 rolling_window_days=rolling_window_days,
+                backend_names=ingest_config.get("backends"),
             )
         )
 
@@ -763,6 +765,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
     config = app.config["SCRAPER_CONFIG"]
     whitelists = config["whitelists"]
     scraper_config = config["scraper"]
+    ingest_config = config.get("ingest") or {}
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     session = create_session(pool_size=max_workers)
     orchestrator = _build_ingest_orchestrator()
@@ -775,6 +778,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
             start_dt=start_dt,
             end_dt=end_dt,
             max_results=2000,
+            backend_names=ingest_config.get("backends"),
         )
     )
     total_entries = len(entries)
