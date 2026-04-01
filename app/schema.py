@@ -136,6 +136,7 @@ def ensure_schema() -> None:
         PaperRelation,
         SavedSearch,
         ScrapeRun,
+        SyncState,
     )
 
     PaperFeedback.__table__.create(bind=db.engine, checkfirst=True)
@@ -146,6 +147,7 @@ def ensure_schema() -> None:
     PaperCollection.__table__.create(bind=db.engine, checkfirst=True)
     PaperRelation.__table__.create(bind=db.engine, checkfirst=True)
     SavedSearch.__table__.create(bind=db.engine, checkfirst=True)
+    SyncState.__table__.create(bind=db.engine, checkfirst=True)
 
     # Migrate paper_feedback columns for richer triage events.
     if "paper_feedback" in tables:
