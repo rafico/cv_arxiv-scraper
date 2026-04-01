@@ -20,6 +20,7 @@ from app.services.enrichment import (
     parse_feed_entries,
 )
 from app.services.http_client import create_session, request_with_backoff
+from app.services.ingest import IngestMode, IngestOrchestrator, PaperCandidate
 from app.services.llm_client import LLMClient, resolve_api_key
 from app.services.matching import (
     MATCH_PRIORITY,
@@ -35,6 +36,42 @@ LOGGER = logging.getLogger(__name__)
 
 
 EventCallback = Callable[[str, dict], None] | None
+
+
+def _build_ingest_orchestrator() -> IngestOrchestrator:
+    return IngestOrchestrator(
+        rss_candidate_fetcher=lambda feed_url, *, session=None: [
+            PaperCandidate.from_entry_dict(entry)
+            for entry in parse_feed_entries(feed_url, session=session)
+        ],
+        rolling_window_fetcher=lambda days, feed_url, *, session=None: [
+            PaperCandidate.from_entry_dict(entry)
+            for entry in fetch_recent_papers(days, feed_url, session=session)
+        ],
+    )
+
+
+def _candidate_entries(candidates: list[PaperCandidate]) -> list[dict]:
+    return [candidate.to_entry_dict() for candidate in candidates]
+
+
+def _collect_feed_urls(app, scraper_config: dict) -> list[str]:
+    feed_urls = list(scraper_config.get("feed_urls") or [])
+    if scraper_config.get("feed_url") and scraper_config["feed_url"] not in feed_urls:
+        feed_urls.append(scraper_config["feed_url"])
+
+    try:
+        from app.models import FeedSource
+
+        with app.app_context():
+            extra_sources = FeedSource.query.filter_by(enabled=True).all()
+            for src in extra_sources:
+                if src.url not in feed_urls:
+                    feed_urls.append(src.url)
+    except Exception:
+        pass  # FeedSource table may not exist yet.
+
+    return feed_urls
 
 
 def _emit(callback: EventCallback, event: str, data: dict) -> None:
@@ -592,36 +629,10 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
     try:
         max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
         session = create_session(pool_size=max_workers)
+        orchestrator = _build_ingest_orchestrator()
 
         _emit(event_callback, "status", {"phase": "feed", "message": "Fetching RSS feed..."})
-
-        # Collect feed URLs: primary config feed + any enabled FeedSource entries.
-        feed_urls = scraper_config.get("feed_urls") or []
-        if scraper_config.get("feed_url") and scraper_config["feed_url"] not in feed_urls:
-            feed_urls.append(scraper_config["feed_url"])
-        try:
-            from app.models import FeedSource
-
-            with app.app_context():
-                extra_sources = FeedSource.query.filter_by(enabled=True).all()
-                for src in extra_sources:
-                    if src.url not in feed_urls:
-                        feed_urls.append(src.url)
-        except Exception:
-            pass  # FeedSource table may not exist yet.
-
-        entries: list[dict] = []
-        feed_errors: list[Exception] = []
-        for feed_url in feed_urls:
-            try:
-                entries.extend(parse_feed_entries(feed_url, session=session))
-            except Exception as exc:
-                LOGGER.warning("Failed to parse feed %s: %s", feed_url, exc)
-                feed_errors.append(exc)
-
-        # If every feed failed, propagate the first error.
-        if feed_errors and not entries and len(feed_errors) == len(feed_urls):
-            raise feed_errors[0]
+        feed_urls = _collect_feed_urls(app, scraper_config)
         rolling_window_days = max(0, int(scraper_config.get("rolling_window_days", 0)))
         if rolling_window_days > 0:
             _emit(
@@ -632,21 +643,15 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
                     "message": f"Loading papers from the past {rolling_window_days} days...",
                 },
             )
-            try:
-                recent_entries = []
-                for f_url in feed_urls:
-                    recent = fetch_recent_papers(rolling_window_days, f_url, session=session)
-                    recent_entries.extend(recent)
-            except Exception as exc:
-                LOGGER.warning("Rolling-window fetch failed: %s", exc)
-                recent_entries = []
 
-            merged_entries: dict[str, dict] = {}
-            for entry in entries:
-                merged_entries[entry.get("arxiv_id") or entry["link"]] = entry
-            for entry in recent_entries:
-                merged_entries.setdefault(entry.get("arxiv_id") or entry["link"], entry)
-            entries = list(merged_entries.values())
+        entries = _candidate_entries(
+            orchestrator.fetch(
+                mode=IngestMode.DAILY_WATCH,
+                session=session,
+                feed_urls=feed_urls,
+                rolling_window_days=rolling_window_days,
+            )
+        )
 
         total_entries = len(entries)
         _emit(event_callback, "feed", {"total": total_entries})
@@ -752,7 +757,7 @@ def stream_or_start_scrape(app, force: bool = False):
 
 
 def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt: date) -> dict:
-    from app.services.enrichment import enrich_entries_with_api_metadata, query_arxiv_api
+    from app.services.enrichment import enrich_entries_with_api_metadata
     from app.services.http_client import create_session
 
     config = app.config["SCRAPER_CONFIG"]
@@ -760,8 +765,18 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
     scraper_config = config["scraper"]
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     session = create_session(pool_size=max_workers)
+    orchestrator = _build_ingest_orchestrator()
 
-    entries = query_arxiv_api(categories, start_dt, end_dt, max_results=2000)
+    entries = _candidate_entries(
+        orchestrator.fetch(
+            mode=IngestMode.BACKFILL,
+            session=session,
+            categories=categories,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            max_results=2000,
+        )
+    )
     total_entries = len(entries)
     if not entries:
         return _build_summary(0, 0, 0, 0)
