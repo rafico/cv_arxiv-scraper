@@ -1,8 +1,8 @@
 import argparse
 import os
 import socket
-from threading import Timer
 import webbrowser
+from threading import Timer
 
 from app import create_app
 

@@ -11,6 +11,7 @@ LOGGER = logging.getLogger(__name__)
 
 SEMANTIC_SCHOLAR_BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"
 
+
 def fetch_citations_batch(arxiv_ids: list[str], session=None) -> dict[str, dict[str, Any]]:
     """
     Fetch citation data from Semantic Scholar for a batch of arXiv IDs.
@@ -18,13 +19,9 @@ def fetch_citations_batch(arxiv_ids: list[str], session=None) -> dict[str, dict[
     """
     if not arxiv_ids:
         return {}
-        
-    payload = {
-        "ids": [f"ARXIV:{arxiv_id}" for arxiv_id in arxiv_ids]
-    }
-    params = {
-        "fields": "citationCount,influentialCitationCount,paperId"
-    }
+
+    payload = {"ids": [f"ARXIV:{arxiv_id}" for arxiv_id in arxiv_ids]}
+    params = {"fields": "citationCount,influentialCitationCount,paperId"}
 
     try:
         response = request_with_backoff(
@@ -37,7 +34,7 @@ def fetch_citations_batch(arxiv_ids: list[str], session=None) -> dict[str, dict[
         )
         if not response:
             return {}
-            
+
         data = response.json()
         results = {}
         for idx, item in enumerate(data):

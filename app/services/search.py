@@ -33,12 +33,7 @@ def search_bm25(query: str, limit: int = 50) -> list[tuple[int, float]]:
 
     try:
         rows = db.session.execute(
-            text(
-                "SELECT rowid, rank FROM papers_fts "
-                "WHERE papers_fts MATCH :query "
-                "ORDER BY rank "
-                "LIMIT :limit"
-            ),
+            text("SELECT rowid, rank FROM papers_fts WHERE papers_fts MATCH :query ORDER BY rank LIMIT :limit"),
             {"query": query, "limit": limit},
         ).fetchall()
         # FTS5 rank is negative (more negative = better match), convert to positive score
@@ -112,12 +107,14 @@ def search_hybrid(
         if semantic_rank is not None:
             rrf_score += semantic_weight / (RRF_K + semantic_rank)
 
-        scored.append({
-            "paper_id": pid,
-            "rrf_score": round(rrf_score, 6),
-            "bm25_rank": bm25_rank,
-            "semantic_rank": semantic_rank,
-        })
+        scored.append(
+            {
+                "paper_id": pid,
+                "rrf_score": round(rrf_score, 6),
+                "bm25_rank": bm25_rank,
+                "semantic_rank": semantic_rank,
+            }
+        )
 
     scored.sort(key=lambda x: x["rrf_score"], reverse=True)
     return scored[:top_k]

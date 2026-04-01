@@ -57,7 +57,6 @@ def score_papers_with_llm(
 
 def update_recommendation_scores(app) -> int:
     """Recompute recommendation scores for recent unscored papers."""
-    from pathlib import Path
 
     from app.services.scrape_engine import _create_llm_client
 
@@ -71,11 +70,7 @@ def update_recommendation_scores(app) -> int:
             return 0
 
         unscored = (
-            Paper.query
-            .filter(Paper.recommendation_score.is_(None))
-            .order_by(Paper.scraped_at.desc())
-            .limit(50)
-            .all()
+            Paper.query.filter(Paper.recommendation_score.is_(None)).order_by(Paper.scraped_at.desc()).limit(50).all()
         )
         if not unscored:
             return 0

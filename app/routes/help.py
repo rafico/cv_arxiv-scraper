@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, abort, redirect, url_for
+from flask import Blueprint, abort, redirect, render_template, url_for
 from jinja2 import TemplateNotFound
 
 help_bp = Blueprint("help", __name__)
@@ -7,6 +7,7 @@ help_bp = Blueprint("help", __name__)
 @help_bp.route("/help")
 def view_help():
     return redirect(url_for("help.view_page", page="start"))
+
 
 @help_bp.route("/help/<page>")
 def view_page(page: str):

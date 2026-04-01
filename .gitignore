@@ -14,6 +14,13 @@ instance/
 *.sqlite3
 .DS_Store
 *.log
+.coverage
+.coverage.*
+.pytest_cache/
+.ruff_cache/
+coverage.xml
+htmlcov/
+docker-compose.override.yml
 
 # OAuth2 secrets and API keys — NEVER commit these
 credentials.json

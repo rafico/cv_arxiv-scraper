@@ -51,7 +51,7 @@ def main() -> None:
         sys.exit(1)
 
     print("Starting OAuth2 authorization flow...")
-    print(f"  Scope: gmail.send (send-only — cannot read your inbox)")
+    print("  Scope: gmail.send (send-only — cannot read your inbox)")
     print(f"  Credentials: {CREDENTIALS_PATH}")
     print()
 
@@ -62,8 +62,8 @@ def main() -> None:
     os.chmod(TOKEN_PATH, 0o600)
 
     print(f"\nToken saved to: {TOKEN_PATH}")
-    print(f"  Permissions: 600 (owner-only read/write)")
-    print(f"\nSetup complete! You can now run: python email_digest.py")
+    print("  Permissions: 600 (owner-only read/write)")
+    print("\nSetup complete! You can now run: python email_digest.py")
 
 
 if __name__ == "__main__":

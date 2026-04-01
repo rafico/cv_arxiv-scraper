@@ -6,7 +6,7 @@ import base64
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from email import message_from_bytes
-from email.header import make_header, decode_header
+from email.header import decode_header, make_header
 from unittest.mock import MagicMock, patch
 
 from app.models import Paper, db
@@ -148,8 +148,9 @@ class SendDigestTests(FlaskDBTestCase):
         mock_service.assert_not_called()
 
     def test_missing_token_raises(self):
-        from app.services.email_digest import _load_gmail_credentials
         from pathlib import Path
+
+        from app.services.email_digest import _load_gmail_credentials
 
         with self.assertRaises(FileNotFoundError):
             _load_gmail_credentials(token_path=Path("/nonexistent/token.json"))

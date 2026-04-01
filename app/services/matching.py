@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from functools import lru_cache
-from typing import Iterable, Union
-
-WhitelistItem = Union[str, list[str]]
 
 from app.services.text import normalize
+
+WhitelistItem = str | list[str]
 
 MATCH_PRIORITY = {
     "Author": 1,
@@ -66,7 +66,7 @@ def check_whitelist_match(texts: Iterable[str], whitelist: list[WhitelistItem]) 
     """
     normalized_texts = [normalize(text) for text in texts if text]
     matches: list[str] = []
-    
+
     # Pre-compile patterns for all unique string terms
     all_str_terms = set()
     for item in whitelist:
@@ -78,7 +78,7 @@ def check_whitelist_match(texts: Iterable[str], whitelist: list[WhitelistItem]) 
                     all_str_terms.add(sub_item[1:])
                 else:
                     all_str_terms.add(sub_item)
-                    
+
     patterns = dict(_compile_patterns(tuple(all_str_terms), mode="general"))
 
     for item in whitelist:
@@ -92,7 +92,7 @@ def check_whitelist_match(texts: Iterable[str], whitelist: list[WhitelistItem]) 
                 is_negation = sub_item.startswith("!")
                 term = sub_item[1:] if is_negation else sub_item
                 pattern = patterns[term]
-                
+
                 term_matches = any(pattern.search(text) for text in normalized_texts)
                 if is_negation:
                     if term_matches:

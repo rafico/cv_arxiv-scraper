@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from app.services.openalex import _parse_openalex_work, fetch_openalex_batch
 
 

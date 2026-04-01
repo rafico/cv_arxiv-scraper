@@ -147,6 +147,7 @@ class MendeleyClient:
             }
 
         from secrets import token_urlsafe
+
         state = token_urlsafe(32)
 
         params = {
@@ -156,9 +157,7 @@ class MendeleyClient:
             "scope": "all",
             "state": state,
         }
-        auth_url = f"{MENDELEY_AUTH_URL}?" + "&".join(
-            f"{k}={requests.utils.quote(str(v))}" for k, v in params.items()
-        )
+        auth_url = f"{MENDELEY_AUTH_URL}?" + "&".join(f"{k}={requests.utils.quote(str(v))}" for k, v in params.items())
 
         return {
             "success": True,

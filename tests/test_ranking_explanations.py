@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from app.services.ranking import generate_ranking_explanation
 

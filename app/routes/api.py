@@ -2,19 +2,19 @@ from pathlib import Path
 
 from flask import Blueprint, Response, abort, current_app, jsonify, request
 
-from app.csrf import validate_csrf_token
-from app.models import Collection, Paper, PaperCollection, PaperRelation, SavedSearch, db
 from app import _validate_config
+from app.csrf import validate_csrf_token
+from app.enums import FeedbackAction, ReadingStatus
+from app.models import Collection, Paper, PaperCollection, SavedSearch, db
+from app.services import SCRAPE_JOB_MANAGER, apply_feedback_action, stream_or_start_scrape
+from app.services.bibtex import paper_to_bibtex, papers_to_bibtex
+from app.services.export import generate_html_report
 from app.services.preferences import (
     append_muted_term,
     append_whitelist_term,
     first_author_name,
     save_config,
 )
-from app.services import SCRAPE_JOB_MANAGER, apply_feedback_action, stream_or_start_scrape
-from app.services.bibtex import paper_to_bibtex, papers_to_bibtex
-from app.services.export import generate_html_report
-from app.enums import FeedbackAction, ReadingStatus
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -58,18 +58,19 @@ def scrape_stream():
 @api_bp.route("/search/historical", methods=["POST"])
 def search_historical():
     from datetime import datetime
+
     from app.services.scrape_engine import execute_historical_scrape
 
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
-    
+
     categories = payload.get("categories", ["cs.CV"])
     start_date_str = payload.get("start_date")
     end_date_str = payload.get("end_date")
-    
+
     if not start_date_str or not end_date_str:
         return jsonify({"error": "start_date and end_date are required"}), 400
-        
+
     try:
         start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").date()
         end_dt = datetime.strptime(end_date_str, "%Y-%m-%d").date()
@@ -110,13 +111,15 @@ def search_papers():
     for r in results:
         paper = papers_by_id.get(r["paper_id"])
         if paper:
-            enriched.append({
-                **r,
-                "title": paper.title,
-                "authors": paper.authors,
-                "arxiv_id": paper.arxiv_id,
-                "abstract": paper.abstract_text[:300] if paper.abstract_text else "",
-            })
+            enriched.append(
+                {
+                    **r,
+                    "title": paper.title,
+                    "authors": paper.authors,
+                    "arxiv_id": paper.arxiv_id,
+                    "abstract": paper.abstract_text[:300] if paper.abstract_text else "",
+                }
+            )
 
     return jsonify({"query": q, "mode": mode, "results": enriched})
 
@@ -128,15 +131,14 @@ def export_html():
     html = generate_html_report(app, timeframe=timeframe)
     response = current_app.response_class(html, mimetype="text/html")
     if request.args.get("download") == "1":
-        response.headers["Content-Disposition"] = (
-            f'attachment; filename="arxiv_report_{timeframe}.html"'
-        )
+        response.headers["Content-Disposition"] = f'attachment; filename="arxiv_report_{timeframe}.html"'
     return response
 
 
 @api_bp.route("/export/bibtex", methods=["GET"])
 def export_bibtex():
     from datetime import timedelta
+
     from app.routes.dashboard import TIMEFRAME_DAYS
     from app.services.ranking import FEEDBACK_BOOST
     from app.services.text import now_utc
@@ -151,6 +153,7 @@ def export_bibtex():
 
     if view == "saved":
         from app.models import PaperFeedback
+
         query = query.join(
             PaperFeedback,
             db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == FeedbackAction.SAVE.value),
@@ -168,17 +171,12 @@ def export_bibtex():
         )
 
     papers = query.order_by(
-        (
-            db.func.coalesce(Paper.paper_score, 0.0)
-            + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
-        ).desc(),
+        (db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST).desc(),
     ).all()
 
     bib = papers_to_bibtex(papers)
     response = Response(bib, mimetype="application/x-bibtex")
-    response.headers["Content-Disposition"] = (
-        f'attachment; filename="arxiv_papers_{timeframe}.bib"'
-    )
+    response.headers["Content-Disposition"] = f'attachment; filename="arxiv_papers_{timeframe}.bib"'
     return response
 
 
@@ -322,16 +320,18 @@ def mute_recommendation(paper_id: int):
 @api_bp.route("/collections", methods=["GET"])
 def list_collections():
     collections = Collection.query.order_by(Collection.name).all()
-    return jsonify([
-        {
-            "id": c.id,
-            "name": c.name,
-            "description": c.description or "",
-            "color": c.color,
-            "paper_count": PaperCollection.query.filter_by(collection_id=c.id).count(),
-        }
-        for c in collections
-    ])
+    return jsonify(
+        [
+            {
+                "id": c.id,
+                "name": c.name,
+                "description": c.description or "",
+                "color": c.color,
+                "paper_count": PaperCollection.query.filter_by(collection_id=c.id).count(),
+            }
+            for c in collections
+        ]
+    )
 
 
 @api_bp.route("/collections", methods=["POST"])
@@ -415,10 +415,17 @@ def remove_paper_from_collection(collection_id: int, paper_id: int):
 @api_bp.route("/saved-searches", methods=["GET"])
 def list_saved_searches():
     searches = SavedSearch.query.order_by(SavedSearch.created_at.desc()).all()
-    return jsonify([
-        {"id": s.id, "name": s.name, "filters": s.filters, "created_at": s.created_at.isoformat() if s.created_at else None}
-        for s in searches
-    ])
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "name": s.name,
+                "filters": s.filters,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in searches
+        ]
+    )
 
 
 @api_bp.route("/saved-searches", methods=["POST"])
@@ -495,12 +502,7 @@ def search_authors():
 
     # Extract unique author names matching the query.
     escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    rows = (
-        db.session.query(Paper.authors)
-        .filter(Paper.authors.ilike(f"%{escaped_q}%", escape="\\"))
-        .limit(200)
-        .all()
-    )
+    rows = db.session.query(Paper.authors).filter(Paper.authors.ilike(f"%{escaped_q}%", escape="\\")).limit(200).all()
     seen: dict[str, int] = {}
     for (authors_str,) in rows:
         for author in (a.strip() for a in authors_str.split(",") if a.strip()):
@@ -522,13 +524,7 @@ def paper_graph(paper_id: int):
     paper = db.session.get(Paper, paper_id) or abort(404)
 
     # Build graph from top-N similar papers.
-    pool = (
-        Paper.query
-        .filter(Paper.id != paper_id)
-        .order_by(Paper.paper_score.desc())
-        .limit(100)
-        .all()
-    )
+    pool = Paper.query.filter(Paper.id != paper_id).order_by(Paper.paper_score.desc()).limit(100).all()
     center_text = " ".join([paper.title or "", paper.summary_text or "", paper.abstract_text or ""])
     center_vec = build_vector(center_text)
 
@@ -540,7 +536,9 @@ def paper_graph(paper_id: int):
         other_vec = build_vector(other_text)
         sim = cosine_similarity(center_vec, other_vec)
         if sim >= 0.15:
-            nodes.append({"id": other.id, "title": other.title, "score": float(other.paper_score or 0), "center": False})
+            nodes.append(
+                {"id": other.id, "title": other.title, "score": float(other.paper_score or 0), "center": False}
+            )
             edges.append({"source": paper.id, "target": other.id, "similarity": round(sim, 3)})
 
     # Sort edges by similarity and keep top 20.
@@ -560,23 +558,27 @@ def paper_graph(paper_id: int):
 @api_bp.route("/feed-sources", methods=["GET"])
 def list_feed_sources():
     from app.models import FeedSource
+
     sources = FeedSource.query.order_by(FeedSource.created_at).all()
-    return jsonify([
-        {
-            "id": s.id,
-            "name": s.name,
-            "url": s.url,
-            "feed_type": s.feed_type,
-            "enabled": s.enabled,
-            "last_fetched_at": s.last_fetched_at.isoformat() if s.last_fetched_at else None,
-        }
-        for s in sources
-    ])
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "name": s.name,
+                "url": s.url,
+                "feed_type": s.feed_type,
+                "enabled": s.enabled,
+                "last_fetched_at": s.last_fetched_at.isoformat() if s.last_fetched_at else None,
+            }
+            for s in sources
+        ]
+    )
 
 
 @api_bp.route("/feed-sources", methods=["POST"])
 def create_feed_source():
     from app.models import FeedSource
+
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
@@ -593,6 +595,7 @@ def create_feed_source():
 @api_bp.route("/feed-sources/<int:source_id>", methods=["DELETE"])
 def delete_feed_source(source_id: int):
     from app.models import FeedSource
+
     validate_csrf_token()
     s = db.session.get(FeedSource, source_id) or abort(404)
     db.session.delete(s)
@@ -603,6 +606,7 @@ def delete_feed_source(source_id: int):
 @api_bp.route("/feed-sources/<int:source_id>/toggle", methods=["POST"])
 def toggle_feed_source(source_id: int):
     from app.models import FeedSource
+
     validate_csrf_token()
     s = db.session.get(FeedSource, source_id) or abort(404)
     s.enabled = not s.enabled

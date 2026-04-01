@@ -9,7 +9,7 @@ LOGGER = logging.getLogger(__name__)
 
 def backfill_embeddings(app, batch_size: int = 64) -> int:
     """Generate embeddings for all papers not yet in the FAISS index. Returns count added."""
-    from app.models import Paper, db
+    from app.models import Paper
     from app.services.embeddings import get_embedding_service
 
     service = get_embedding_service(app)
@@ -18,13 +18,7 @@ def backfill_embeddings(app, batch_size: int = 64) -> int:
     with app.app_context():
         offset = 0
         while True:
-            papers = (
-                Paper.query
-                .order_by(Paper.id)
-                .offset(offset)
-                .limit(batch_size)
-                .all()
-            )
+            papers = Paper.query.order_by(Paper.id).offset(offset).limit(batch_size).all()
             if not papers:
                 break
 

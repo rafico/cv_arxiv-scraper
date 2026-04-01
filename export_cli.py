@@ -12,7 +12,12 @@ from app.services.text import now_utc
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export ArXiv CV papers to HTML")
-    parser.add_argument("--timeframe", choices=("daily", "weekly", "monthly", "all"), default="daily", help="Dashboard timeframe to export")
+    parser.add_argument(
+        "--timeframe",
+        choices=("daily", "weekly", "monthly", "all"),
+        default="daily",
+        help="Dashboard timeframe to export",
+    )
     parser.add_argument("--output", help="Optional output file path")
     args = parser.parse_args()
 

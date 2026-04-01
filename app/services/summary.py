@@ -67,11 +67,7 @@ def extract_topic_tags(title: str, abstract: str, limit: int = 5) -> list[str]:
     if len(tags) >= limit:
         return tags[:limit]
 
-    token_counts = Counter(
-        token
-        for token in tokenize(full_text)
-        if token not in STOP_WORDS and len(token) >= 4
-    )
+    token_counts = Counter(token for token in tokenize(full_text) if token not in STOP_WORDS and len(token) >= 4)
     for token, _ in token_counts.most_common(limit * 2):
         cleaned = token.replace("-", " ").title()
         if cleaned not in tags:

@@ -23,11 +23,7 @@ class DashboardRouteTests(FlaskDBTestCase):
                 summary_text="Summary text",
                 topic_tags=["Segmentation", "Vision"],
                 categories=["cs.CV"] if idx % 2 == 0 else ["cs.RO"],
-                resource_links=(
-                    [{"type": "code", "url": f"https://example.com/code/{idx}"}]
-                    if idx % 3 == 0
-                    else []
-                ),
+                resource_links=([{"type": "code", "url": f"https://example.com/code/{idx}"}] if idx % 3 == 0 else []),
                 match_type="Title",
                 matched_terms=["vision"],
                 paper_score=10.0 + idx,

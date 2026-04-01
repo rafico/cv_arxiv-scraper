@@ -1,0 +1,17 @@
+services:
+  arxiv-scraper:
+    container_name: arxiv-scraper
+    image: ${IMAGE_REPO:-cv_arxiv-scraper}:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORT: 5000
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    volumes:
+      - ./instance:/app/instance
+      - ./config.yaml:/app/config.yaml:ro

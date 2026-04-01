@@ -1,5 +1,5 @@
-from datetime import date, timedelta
 import unittest
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from app.services.ranking import (

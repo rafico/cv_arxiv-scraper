@@ -44,7 +44,7 @@ class EmbeddingService:
 
         if self._index_path.exists() and self._id_map_path.exists():
             self._index = faiss.read_index(str(self._index_path))
-            with open(self._id_map_path, "r") as f:
+            with open(self._id_map_path) as f:
                 self._id_map = json.load(f)
             self._pk_to_row = {pk: row for row, pk in enumerate(self._id_map)}
             LOGGER.info("Loaded FAISS index with %d vectors", self._index.ntotal)

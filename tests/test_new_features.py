@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, datetime, timezone
 
-from app.models import Collection, Paper, PaperCollection, PaperFeedback, SavedSearch, FeedSource, db
+from app.models import Collection, FeedSource, Paper, PaperCollection, SavedSearch, db
 from tests.helpers import FlaskDBTestCase
 
 

@@ -1,5 +1,6 @@
 from tests.helpers import FlaskDBTestCase
 
+
 class HelpRouteTests(FlaskDBTestCase):
     def setUp(self):
         super().setUp()

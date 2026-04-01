@@ -32,17 +32,13 @@ def generate_html_report(app, timeframe: str = "daily", output_path: str | Path 
                 )
             )
 
-        papers = (
-            query.order_by(
-                (
-                    db.func.coalesce(Paper.paper_score, 0.0)
-                    + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
-                ).desc(),
-                Paper.publication_dt.desc(),
-                Paper.scraped_at.desc(),
-            )
-            .all()
-        )
+        papers = query.order_by(
+            (
+                db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
+            ).desc(),
+            Paper.publication_dt.desc(),
+            Paper.scraped_at.desc(),
+        ).all()
 
         html = render_template(
             "export.html",

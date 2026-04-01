@@ -7,8 +7,8 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from app.models import Paper, ScrapeRun, db
-from app.services.text import now_utc
 from app.services.summary import generate_summary
+from app.services.text import now_utc
 from tests.helpers import FlaskDBTestCase
 
 
@@ -192,7 +192,9 @@ class PreFilterCountTests(FlaskDBTestCase):
         def fake_enrich(entries, session=None):
             pass
 
-        def fake_process(entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None):
+        def fake_process(
+            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None
+        ):
             for i, entry in enumerate(entries, 1):
                 result = _make_result(entry["link"], entry["title"])
                 result["arxiv_id"] = entry.get("arxiv_id")
@@ -323,7 +325,9 @@ class RollingWindowTests(FlaskDBTestCase):
         ]
         seen_titles: list[str] = []
 
-        def fake_process(entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None):
+        def fake_process(
+            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None
+        ):
             seen_titles.extend(entry["title"] for entry in entries)
             for i, entry in enumerate(entries, 1):
                 result = _make_result(entry["link"], entry["title"])

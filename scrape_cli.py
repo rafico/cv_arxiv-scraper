@@ -6,11 +6,7 @@ from app.scraper import run_scrape
 
 
 def _load_latest_matched(limit):
-    return (
-        Paper.query.order_by(Paper.scraped_at.desc(), Paper.paper_score.desc(), Paper.id.desc())
-        .limit(limit)
-        .all()
-    )
+    return Paper.query.order_by(Paper.scraped_at.desc(), Paper.paper_score.desc(), Paper.id.desc()).limit(limit).all()
 
 
 def _print_summary(result):

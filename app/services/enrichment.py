@@ -7,15 +7,17 @@ import io
 import logging
 import re
 import time
-import defusedxml.ElementTree as ET
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
 
 import arxiv
+import defusedxml.ElementTree as ET
 import feedparser
 import pdfplumber
 import requests
 
+from app.constants import ARXIV_API_BATCH_SIZE as _ARXIV_API_BATCH_SIZE
+from app.constants import ARXIV_API_DELAY as _ARXIV_API_DELAY
 from app.services.http_client import request_with_backoff
 from app.services.text import clean_whitespace, utc_today
 
@@ -29,8 +31,6 @@ _ARXIV_ID_RE = re.compile(r"arxiv\.org/abs/(.+?)(?:v\d+)?$")
 _URL_RE = re.compile(r"https?://[^\s<>)\]\"']+")
 
 _ARXIV_API_URL = "https://export.arxiv.org/api/query"
-from app.constants import ARXIV_API_BATCH_SIZE as _ARXIV_API_BATCH_SIZE
-from app.constants import ARXIV_API_DELAY as _ARXIV_API_DELAY
 
 _ATOM_NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -125,15 +125,10 @@ def _parse_atom_entry(entry) -> dict:
     ]
     categories = [
         term
-        for term in (
-            category_el.get("term", "").strip()
-            for category_el in entry.findall("atom:category", _ATOM_NS)
-        )
+        for term in (category_el.get("term", "").strip() for category_el in entry.findall("atom:category", _ATOM_NS))
         if term
     ]
-    publication_dt, publication_date = parse_publication_dt(
-        published_el.text if published_el is not None else None
-    )
+    publication_dt, publication_date = parse_publication_dt(published_el.text if published_el is not None else None)
 
     return {
         "arxiv_id": extract_arxiv_id(link),
@@ -152,11 +147,7 @@ def _parse_atom_entry(entry) -> dict:
 def query_arxiv_api(categories: list[str], start_dt: date, end_dt: date, max_results: int = 1000) -> list[dict]:
     from app.services.arxiv_adapter import result_to_entry
 
-    client = arxiv.Client(
-        page_size=_ARXIV_API_BATCH_SIZE,
-        delay_seconds=_ARXIV_API_DELAY,
-        num_retries=3
-    )
+    client = arxiv.Client(page_size=_ARXIV_API_BATCH_SIZE, delay_seconds=_ARXIV_API_DELAY, num_retries=3)
 
     cat_query = " OR ".join(f"cat:{c}" for c in categories)
     from_ts = start_dt.strftime("%Y%m%d0000")
@@ -167,7 +158,7 @@ def query_arxiv_api(categories: list[str], start_dt: date, end_dt: date, max_res
         query=query_str,
         max_results=max_results,
         sort_by=arxiv.SortCriterion.SubmittedDate,
-        sort_order=arxiv.SortOrder.Descending
+        sort_order=arxiv.SortOrder.Descending,
     )
 
     results = []
@@ -248,9 +239,17 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
     missing_in_legacy = shadow_ids - fetched_ids
 
     if missing_in_shadow:
-        LOGGER.warning("Shadow mode mismatch: arxiv.py missed %d papers. Sample: %s", len(missing_in_shadow), list(missing_in_shadow)[:5])
+        LOGGER.warning(
+            "Shadow mode mismatch: arxiv.py missed %d papers. Sample: %s",
+            len(missing_in_shadow),
+            list(missing_in_shadow)[:5],
+        )
     if missing_in_legacy:
-        LOGGER.warning("Shadow mode mismatch: legacy xml parser missed %d papers. Sample: %s", len(missing_in_legacy), list(missing_in_legacy)[:5])
+        LOGGER.warning(
+            "Shadow mode mismatch: legacy xml parser missed %d papers. Sample: %s",
+            len(missing_in_legacy),
+            list(missing_in_legacy)[:5],
+        )
     if not missing_in_shadow and not missing_in_legacy and fetched_ids:
         LOGGER.info("Shadow mode success: arxiv.py results match legacy results perfectly.")
 

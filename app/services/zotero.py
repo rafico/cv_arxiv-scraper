@@ -73,14 +73,11 @@ class ZoteroClient:
         if not self.credentials_path.exists():
             return {
                 "status": "no_credentials",
-                "message": (
-                    "Zotero not configured. Enter your API key and user ID "
-                    "from zotero.org/settings/keys."
-                ),
+                "message": ("Zotero not configured. Enter your API key and user ID from zotero.org/settings/keys."),
             }
 
         try:
-            creds = self._load_credentials()
+            self._load_credentials()
         except Exception:
             return {
                 "status": "invalid",
@@ -127,10 +124,7 @@ class ZoteroClient:
                 timeout=10,
             )
             resp.raise_for_status()
-            return [
-                {"key": c["key"], "name": c["data"]["name"]}
-                for c in resp.json()
-            ]
+            return [{"key": c["key"], "name": c["data"]["name"]} for c in resp.json()]
         except requests.RequestException:
             return []
 
@@ -143,16 +137,20 @@ class ZoteroClient:
                 continue
             parts = name.rsplit(None, 1)
             if len(parts) == 2:
-                creators.append({
-                    "creatorType": "author",
-                    "firstName": parts[0],
-                    "lastName": parts[1],
-                })
+                creators.append(
+                    {
+                        "creatorType": "author",
+                        "firstName": parts[0],
+                        "lastName": parts[1],
+                    }
+                )
             else:
-                creators.append({
-                    "creatorType": "author",
-                    "name": name,
-                })
+                creators.append(
+                    {
+                        "creatorType": "author",
+                        "name": name,
+                    }
+                )
 
         item: dict = {
             "itemType": "journalArticle",

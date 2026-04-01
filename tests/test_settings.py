@@ -102,18 +102,19 @@ class UploadCredentialsTests(FlaskDBTestCase):
     @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
     def test_upload_saves_valid_json(self, mock_creds_path):
         import io
+
         token = self._csrf_token()
         valid_json = b'{"web":{"client_id":"123","client_secret":"456"}}'
-        
+
         response = self.client.post(
             "/settings/upload-credentials",
             data={
                 "csrf_token": token,
                 "credentials_file": (io.BytesIO(valid_json), "credentials.json"),
             },
-            content_type="multipart/form-data"
+            content_type="multipart/form-data",
         )
-        
+
         self.assertEqual(response.status_code, 302)
         self.assertIn("/settings", response.headers["Location"])
         mock_creds_path.write_bytes.assert_called_once_with(valid_json)
@@ -121,36 +122,38 @@ class UploadCredentialsTests(FlaskDBTestCase):
     @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
     def test_upload_rejects_invalid_json(self, mock_creds_path):
         import io
+
         token = self._csrf_token()
-        invalid_json = b'Not a JSON'
-        
+        invalid_json = b"Not a JSON"
+
         response = self.client.post(
             "/settings/upload-credentials",
             data={
                 "csrf_token": token,
                 "credentials_file": (io.BytesIO(invalid_json), "credentials.json"),
             },
-            content_type="multipart/form-data"
+            content_type="multipart/form-data",
         )
-        
+
         self.assertEqual(response.status_code, 302)
         mock_creds_path.write_bytes.assert_not_called()
 
     @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
     def test_upload_rejects_missing_oauth_fields(self, mock_creds_path):
         import io
+
         token = self._csrf_token()
         wrong_json = b'{"installed":{"client_id":"123"}}'
-        
+
         response = self.client.post(
             "/settings/upload-credentials",
             data={
                 "csrf_token": token,
                 "credentials_file": (io.BytesIO(wrong_json), "credentials.json"),
             },
-            content_type="multipart/form-data"
+            content_type="multipart/form-data",
         )
-        
+
         self.assertEqual(response.status_code, 302)
         mock_creds_path.write_bytes.assert_not_called()
 
@@ -224,9 +227,7 @@ class GmailOAuthFlowTests(FlaskDBTestCase):
         with self.client.session_transaction() as sess:
             sess["oauth_state"] = "some_state"
 
-        response = self.client.get(
-            "/settings/gmail-callback?state=some_state&error=access_denied"
-        )
+        response = self.client.get("/settings/gmail-callback?state=some_state&error=access_denied")
         self.assertEqual(response.status_code, 302)
 
 
@@ -244,11 +245,14 @@ class EmailSettingsTests(FlaskDBTestCase):
 
     def test_email_settings_save(self):
         token = self._csrf_token()
-        response = self.client.post("/settings/email", data={
-            "csrf_token": token,
-            "email_recipient": "test@example.com",
-            "email_subject_prefix": "My Digest",
-        })
+        response = self.client.post(
+            "/settings/email",
+            data={
+                "csrf_token": token,
+                "email_recipient": "test@example.com",
+                "email_subject_prefix": "My Digest",
+            },
+        )
 
         self.assertEqual(response.status_code, 302)
 
@@ -261,9 +265,12 @@ class EmailSettingsTests(FlaskDBTestCase):
         self.assertEqual(saved["email"]["recipient"], "test@example.com")
 
     def test_email_settings_requires_csrf(self):
-        response = self.client.post("/settings/email", data={
-            "email_recipient": "test@example.com",
-        })
+        response = self.client.post(
+            "/settings/email",
+            data={
+                "email_recipient": "test@example.com",
+            },
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_settings_page_shows_email_config(self):

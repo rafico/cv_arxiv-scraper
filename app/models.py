@@ -6,12 +6,14 @@ import json
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text as sql_text
-from sqlalchemy.types import TypeDecorator, TEXT
+from sqlalchemy.types import TEXT, TypeDecorator
 
 db = SQLAlchemy()
 
+
 class JSONList(TypeDecorator):
     """Custom JSON list type since SQLite driver chokes on python lists via db.JSON directly."""
+
     impl = TEXT
     cache_ok = True
 
@@ -37,8 +39,10 @@ class JSONList(TypeDecorator):
             # Legacy: raw comma-separated text that isn't valid JSON at all.
             return [item.strip() for item in str(value).split(",") if item.strip()]
 
+
 class JSONDict(TypeDecorator):
     """Custom JSON dict type for SQLite."""
+
     impl = TEXT
     cache_ok = True
 
@@ -143,6 +147,7 @@ class Paper(db.Model):
     @property
     def rank_score(self) -> float:
         from app.services.ranking import combined_rank_score
+
         return combined_rank_score(float(self.paper_score or 0.0), int(self.feedback_score or 0))
 
 
@@ -161,13 +166,13 @@ class Collection(db.Model):
 
 class PaperCollection(db.Model):
     __tablename__ = "paper_collections"
-    __table_args__ = (
-        db.UniqueConstraint("paper_id", "collection_id", name="uq_paper_collection"),
-    )
+    __table_args__ = (db.UniqueConstraint("paper_id", "collection_id", name="uq_paper_collection"),)
 
     id = db.Column(db.Integer, primary_key=True)
     paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
-    collection_id = db.Column(db.Integer, db.ForeignKey("collections.id", ondelete="CASCADE"), nullable=False, index=True)
+    collection_id = db.Column(
+        db.Integer, db.ForeignKey("collections.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     added_at = db.Column(db.DateTime, server_default=db.func.now())
 
     paper = db.relationship("Paper")
@@ -176,9 +181,7 @@ class PaperCollection(db.Model):
 
 class PaperRelation(db.Model):
     __tablename__ = "paper_relations"
-    __table_args__ = (
-        db.UniqueConstraint("paper_id", "related_paper_id", "relation_type", name="uq_paper_relation"),
-    )
+    __table_args__ = (db.UniqueConstraint("paper_id", "related_paper_id", "relation_type", name="uq_paper_relation"),)
 
     id = db.Column(db.Integer, primary_key=True)
     paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)

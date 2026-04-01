@@ -73,26 +73,18 @@ def check_gmail_auth_status(
     if not token_path.exists():
         return {
             "status": "no_token",
-            "message": (
-                "Credentials uploaded. Click 'Authorize Gmail' to connect "
-                "your account (send-only access)."
-            ),
+            "message": ("Credentials uploaded. Click 'Authorize Gmail' to connect your account (send-only access)."),
             "action": "authorize",
         }
 
     try:
         from google.oauth2.credentials import Credentials
 
-        creds = Credentials.from_authorized_user_file(
-            str(token_path), scopes=[GMAIL_SEND_SCOPE]
-        )
+        creds = Credentials.from_authorized_user_file(str(token_path), scopes=[GMAIL_SEND_SCOPE])
     except Exception:
         return {
             "status": "invalid",
-            "message": (
-                "token.json is corrupted or unreadable. Click 'Re-authorize' "
-                "to generate a fresh token."
-            ),
+            "message": ("token.json is corrupted or unreadable. Click 'Re-authorize' to generate a fresh token."),
             "action": "reauthorize",
         }
 
@@ -141,9 +133,7 @@ def start_oauth_flow(
             "success": False,
             "auth_url": None,
             "state": None,
-            "message": (
-                "credentials.json not found. Download it from Google Cloud Console first."
-            ),
+            "message": ("credentials.json not found. Download it from Google Cloud Console first."),
         }
 
     try:
@@ -261,9 +251,8 @@ def get_setup_instructions(
     if has_token:
         try:
             from google.oauth2.credentials import Credentials
-            creds = Credentials.from_authorized_user_file(
-                str(token_path), scopes=[GMAIL_SEND_SCOPE]
-            )
+
+            creds = Credentials.from_authorized_user_file(str(token_path), scopes=[GMAIL_SEND_SCOPE])
             token_valid = creds.valid or (creds.expired and creds.refresh_token)
         except Exception:
             pass
@@ -274,8 +263,7 @@ def get_setup_instructions(
             "label": "Create Google Cloud credentials",
             "complete": has_creds,
             "description": (
-                "Create an OAuth 2.0 Client ID (Web application) in "
-                "Google Cloud Console and upload credentials.json."
+                "Create an OAuth 2.0 Client ID (Web application) in Google Cloud Console and upload credentials.json."
             ),
         },
         {
@@ -283,8 +271,8 @@ def get_setup_instructions(
             "label": "Set redirect URI",
             "complete": has_creds,
             "description": (
-                f"Add this as an authorized redirect URI in Google Cloud "
-                f"Console: {callback_uri}" if callback_uri
+                f"Add this as an authorized redirect URI in Google Cloud Console: {callback_uri}"
+                if callback_uri
                 else "Add the app's callback URL as an authorized redirect URI."
             ),
         },
@@ -292,9 +280,7 @@ def get_setup_instructions(
             "step": 3,
             "label": "Authorize Gmail",
             "complete": token_valid,
-            "description": (
-                "Click 'Authorize Gmail' to grant send-only access."
-            ),
+            "description": ("Click 'Authorize Gmail' to grant send-only access."),
         },
         {
             "step": 4,
@@ -392,9 +378,7 @@ def _load_gmail_credentials(
         os.chmod(token_path, 0o600)
 
     if not creds.valid:
-        raise RuntimeError(
-            "Gmail credentials are invalid. Re-run 'python gmail_auth_setup.py'."
-        )
+        raise RuntimeError("Gmail credentials are invalid. Re-run 'python gmail_auth_setup.py'.")
 
     return creds
 
@@ -453,12 +437,7 @@ def _finish_digest_run(app: Flask, digest_run_id: int | None, *, status: str, er
 
 
 def get_digest_history(limit: int = 6) -> list[DigestRun]:
-    return (
-        DigestRun.query
-        .order_by(DigestRun.started_at.desc())
-        .limit(limit)
-        .all()
-    )
+    return DigestRun.query.order_by(DigestRun.started_at.desc()).limit(limit).all()
 
 
 def build_digest_preview(app: Flask) -> dict:
@@ -494,8 +473,7 @@ def _query_todays_papers(app: Flask, lookback_hours: int = 26) -> list[Paper]:
     cutoff = now_utc() - timedelta(hours=lookback_hours)
     with app.app_context():
         return (
-            Paper.query
-            .filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
+            Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
             .order_by(
                 (
                     db.func.coalesce(Paper.paper_score, 0.0)
@@ -513,7 +491,7 @@ def _render_paper_html(paper: Paper) -> str:
     match_badges = "".join(
         f'<span style="display:inline-block;background:#e0e7ff;color:#3730a3;'
         f'padding:2px 8px;border-radius:12px;font-size:12px;margin-right:4px;">'
-        f'{escape(t.strip())}</span>'
+        f"{escape(t.strip())}</span>"
         for t in (paper.match_type or "").split("+")
         if t.strip()
     )
@@ -524,7 +502,7 @@ def _render_paper_html(paper: Paper) -> str:
         topic_tags = " ".join(
             f'<span style="display:inline-block;background:#f0fdf4;color:#166534;'
             f'padding:2px 6px;border-radius:8px;font-size:11px;margin-right:3px;">'
-            f'{escape(t)}</span>'
+            f"{escape(t)}</span>"
             for t in tags[:6]
         )
 
@@ -532,10 +510,7 @@ def _render_paper_html(paper: Paper) -> str:
     for res in paper.resource_links_list:
         url = escape(res.get("url", ""), quote=True)
         label = escape(res.get("type", "link"))
-        resource_links_html += (
-            f' <a href="{url}" style="color:#2563eb;font-size:12px;'
-            f'margin-right:6px;">[{label}]</a>'
-        )
+        resource_links_html += f' <a href="{url}" style="color:#2563eb;font-size:12px;margin-right:6px;">[{label}]</a>'
 
     return f"""
     <div style="border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:12px;">
@@ -565,8 +540,7 @@ def _build_email_body(papers: list[Paper], today: date) -> str:
     """Compose the full HTML email body."""
     if not papers:
         paper_cards = (
-            '<p style="color:#6b7280;text-align:center;padding:40px 0;">'
-            "No new matching papers found today.</p>"
+            '<p style="color:#6b7280;text-align:center;padding:40px 0;">No new matching papers found today.</p>'
         )
     else:
         paper_cards = "\n".join(_render_paper_html(p) for p in papers)
@@ -583,7 +557,7 @@ def _build_email_body(papers: list[Paper], today: date) -> str:
         ArXiv CV Digest
       </h1>
       <p style="color:#6b7280;font-size:14px;margin:0 0 20px;">
-        {escape(today.strftime('%A, %B %d, %Y'))} &mdash;
+        {escape(today.strftime("%A, %B %d, %Y"))} &mdash;
         {len(papers)} paper{"s" if len(papers) != 1 else ""} matched
       </p>
       {paper_cards}
@@ -610,9 +584,7 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
 
     recipient = email_cfg["recipient"]
     if not recipient:
-        raise ValueError(
-            "No recipient configured. Set 'email.recipient' in config.yaml."
-        )
+        raise ValueError("No recipient configured. Set 'email.recipient' in config.yaml.")
 
     preview = build_digest_preview(app)
     subject = preview["subject"]

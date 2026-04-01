@@ -75,10 +75,7 @@ class LLMClient:
         )
 
     def generate_tldr(self, title: str, abstract: str) -> str | None:
-        system_prompt = (
-            "Produce a specific 1-2 sentence TLDR for a research paper. "
-            "Keep it under 280 characters."
-        )
+        system_prompt = "Produce a specific 1-2 sentence TLDR for a research paper. Keep it under 280 characters."
         user_prompt = f"Title: {title}\n\nAbstract: {abstract}"
         try:
             with self._semaphore:
@@ -99,12 +96,10 @@ class LLMClient:
 
     def rate_relevance(self, title: str, abstract: str, interests: str) -> float | None:
         system_prompt = (
-            "Rate this paper's relevance to the provided research interests from 1 to 10. "
-            "Respond with ONLY a number."
+            "Rate this paper's relevance to the provided research interests from 1 to 10. Respond with ONLY a number."
         )
         user_prompt = (
-            f"Research interests: {interests or 'General computer vision'}\n\n"
-            f"Title: {title}\n\nAbstract: {abstract}"
+            f"Research interests: {interests or 'General computer vision'}\n\nTitle: {title}\n\nAbstract: {abstract}"
         )
         try:
             with self._semaphore:

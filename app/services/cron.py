@@ -32,18 +32,16 @@ def _build_cron_line(hour: int, minute: int, mode: str) -> str:
     else:
         script = "digest_cli.py"
 
-    return (
-        f"{minute} {hour} * * * "
-        f"cd {project} && {python} {script} >> {project}/cron.log 2>&1 "
-        f"{CRON_TAG}"
-    )
+    return f"{minute} {hour} * * * cd {project} && {python} {script} >> {project}/cron.log 2>&1 {CRON_TAG}"
 
 
 def _get_current_crontab() -> str:
     try:
         result = subprocess.run(
             ["crontab", "-l"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode != 0:
             return ""
@@ -55,7 +53,10 @@ def _get_current_crontab() -> str:
 def _set_crontab(content: str) -> None:
     subprocess.run(
         ["crontab", "-"],
-        input=content, text=True, check=True, timeout=5,
+        input=content,
+        text=True,
+        check=True,
+        timeout=5,
     )
 
 

@@ -74,7 +74,9 @@ class ScrapeJobErrorTests(FlaskDBTestCase):
 
         def fake_scrape(app, event_callback=None, force=False):
             if force:
-                event_callback("done", {"new_papers": 1, "duplicates_skipped": 0, "total_matched": 1, "total_in_feed": 1})
+                event_callback(
+                    "done", {"new_papers": 1, "duplicates_skipped": 0, "total_matched": 1, "total_in_feed": 1}
+                )
                 return {}
 
             event_callback("skipped", {"skipped": True, "reason": "Already scraped today"})

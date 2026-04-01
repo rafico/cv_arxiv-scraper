@@ -5,13 +5,14 @@ from datetime import timedelta
 from flask import Blueprint, current_app, render_template, request
 from flask_sqlalchemy.query import Query
 
+from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
 from app.csrf import get_or_create_csrf_token
+from app.enums import FeedbackAction, SortOption
 from app.models import Collection, DigestRun, Paper, PaperCollection, PaperFeedback, SavedSearch, ScrapeRun, db
 from app.services.feedback import get_feedback_snapshot
 from app.services.preferences import first_author_name, get_preferences
-from app.services.related import build_vector, top_related_papers
-from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score, generate_ranking_explanation
+from app.services.related import build_vector, top_related_papers
 from app.services.text import now_utc
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -22,8 +23,6 @@ TIMEFRAME_DAYS = {
     "monthly": 30,
     "all": None,
 }
-
-from app.enums import FeedbackAction, SortOption
 
 VIEW_OPTIONS = {"inbox", "saved"}
 SORT_OPTIONS = {option.value for option in SortOption}
@@ -100,9 +99,7 @@ def _apply_resource_filter(query: Query, resource_filter: str) -> Query:
     if resource_filter == "available":
         return query.filter(resources_expr != "[]")
     if resource_filter == "missing":
-        return query.filter(
-            db.or_(resources_expr == "[]", resources_expr.is_(None))
-        )
+        return query.filter(db.or_(resources_expr == "[]", resources_expr.is_(None)))
     return query
 
 
@@ -161,9 +158,7 @@ def _build_onboarding_steps(config: dict, *, saved_count: int, has_successful_sc
 def _build_dashboard_overview(config: dict) -> dict:
     latest_scrape = ScrapeRun.query.order_by(ScrapeRun.started_at.desc()).first()
     latest_digest = DigestRun.query.order_by(DigestRun.started_at.desc()).first()
-    has_successful_scrape = (
-        db.session.query(ScrapeRun.id).filter(ScrapeRun.status == "success").first() is not None
-    )
+    has_successful_scrape = db.session.query(ScrapeRun.id).filter(ScrapeRun.status == "success").first() is not None
 
     latest_scrape_view = None
     if latest_scrape is not None:
@@ -256,7 +251,9 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
         }
 
         related_ids = top_related_papers(paper.id, vectors_by_id, top_k=3)
-        paper.related_papers = [candidate_by_id[related_id] for related_id in related_ids if related_id in candidate_by_id]  # type: ignore[attr-defined]
+        paper.related_papers = [
+            candidate_by_id[related_id] for related_id in related_ids if related_id in candidate_by_id
+        ]  # type: ignore[attr-defined]
 
         paper.ranking_explanations = generate_ranking_explanation(paper, config=config)  # type: ignore[attr-defined]
 
@@ -357,7 +354,9 @@ def index():
 
     default_sort = "saved" if view == "saved" else "trending"
     sort = request.args.get("sort", default_sort)
-    valid_sorts = {"saved", "newest", "citations"} if view == "saved" else {"trending", "newest", "recommended", "citations"}
+    valid_sorts = (
+        {"saved", "newest", "citations"} if view == "saved" else {"trending", "newest", "recommended", "citations"}
+    )
     if sort not in valid_sorts or sort not in SORT_OPTIONS:
         sort = default_sort
 
@@ -383,7 +382,9 @@ def index():
         )
     else:
         query = query.order_by(
-            (db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST).desc(),
+            (
+                db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
+            ).desc(),
             Paper.publication_dt.desc(),
             Paper.scraped_at.desc(),
         )
@@ -392,11 +393,15 @@ def index():
     pagination = query.paginate(page=page, per_page=DASHBOARD_PER_PAGE, error_out=False)
     papers = pagination.items
 
-    type_counts_row = query.order_by(None).with_entities(
-        db.func.sum(db.case((Paper.match_type.contains("Author"), 1), else_=0)).label("author_count"),
-        db.func.sum(db.case((Paper.match_type.contains("Affiliation"), 1), else_=0)).label("affiliation_count"),
-        db.func.sum(db.case((Paper.match_type.contains("Title"), 1), else_=0)).label("title_count"),
-    ).first()
+    type_counts_row = (
+        query.order_by(None)
+        .with_entities(
+            db.func.sum(db.case((Paper.match_type.contains("Author"), 1), else_=0)).label("author_count"),
+            db.func.sum(db.case((Paper.match_type.contains("Affiliation"), 1), else_=0)).label("affiliation_count"),
+            db.func.sum(db.case((Paper.match_type.contains("Title"), 1), else_=0)).label("title_count"),
+        )
+        .first()
+    )
     type_counts = {
         "Author": int(type_counts_row.author_count or 0),  # type: ignore[union-attr]
         "Affiliation": int(type_counts_row.affiliation_count or 0),  # type: ignore[union-attr]

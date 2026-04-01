@@ -109,9 +109,7 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
         raise ValueError(f"'llm.provider' must be 'openrouter' or 'ollama', got '{provider}'")
 
     if llm.get("enabled") and provider != "ollama" and not _llm_api_key_available(config_path):
-        raise ValueError(
-            "LLM is enabled but no API key was found via OPENROUTER_API_KEY or .llm_api_key"
-        )
+        raise ValueError("LLM is enabled but no API key was found via OPENROUTER_API_KEY or .llm_api_key")
 
 
 def _register_blueprints(app: Flask) -> None:
@@ -142,13 +140,9 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     app.config.setdefault("FAISS_INDEX_DIR", str(Path(app.instance_path) / "faiss_index"))
 
-    config_path = Path(
-        app.config.get("CONFIG_PATH", (Path(app.root_path).parent / "config.yaml").resolve())
-    )
+    config_path = Path(app.config.get("CONFIG_PATH", (Path(app.root_path).parent / "config.yaml").resolve()))
     app.config["CONFIG_PATH"] = str(config_path)
-    app.config["LLM_KEY_PATH"] = str(
-        Path(app.config.get("LLM_KEY_PATH", _resolve_llm_key_path(config_path))).resolve()
-    )
+    app.config["LLM_KEY_PATH"] = str(Path(app.config.get("LLM_KEY_PATH", _resolve_llm_key_path(config_path))).resolve())
 
     if "SCRAPER_CONFIG" not in app.config:
         app.config["SCRAPER_CONFIG"] = _load_config(config_path)
@@ -163,6 +157,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     _register_blueprints(app)
 
     from app.constants import ARXIV_CATEGORY_NAMES
+
     app.jinja_env.globals["ARXIV_CATEGORY_NAMES"] = ARXIV_CATEGORY_NAMES
 
     # Start built-in scheduler if configured.

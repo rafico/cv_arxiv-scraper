@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Callable
 
 import requests
 from sqlalchemy.exc import IntegrityError
 
+from app.constants import DEFAULT_MAX_WORKERS
 from app.services.enrichment import (
-    fetch_recent_papers,
     enrich_entries_with_api_metadata,
     extract_affiliation_text,
+    fetch_recent_papers,
     now_utc,
     parse_feed_entries,
 )
@@ -26,7 +27,6 @@ from app.services.matching import (
     check_whitelist_match,
     dedupe_preserve_order,
 )
-from app.constants import DEFAULT_MAX_WORKERS
 from app.services.preferences import get_preferences
 from app.services.ranking import compute_paper_score
 from app.services.summary import extract_topic_tags, generate_llm_summary, generate_summary
@@ -51,9 +51,7 @@ def _build_result(
 ) -> dict:
     """Assemble a result dict from an entry and its matches."""
     match_types = [name for name, terms in category_matches.items() if terms]
-    matched_terms = dedupe_preserve_order(
-        term for terms in category_matches.values() for term in terms
-    )
+    matched_terms = dedupe_preserve_order(term for terms in category_matches.values() for term in terms)
     title = entry_data["title"]
     abstract = entry_data.get("abstract", "")
     summary_text = (
@@ -61,11 +59,7 @@ def _build_result(
         if llm_client is not None
         else generate_summary(title, abstract)
     )
-    llm_relevance_score = (
-        llm_client.rate_relevance(title, abstract, interests_text)
-        if llm_client is not None
-        else None
-    )
+    llm_relevance_score = llm_client.rate_relevance(title, abstract, interests_text) if llm_client is not None else None
 
     topic_tags = extract_topic_tags(title, abstract)
 
@@ -125,7 +119,7 @@ def _process_paper_entry(
     link = entry_data["link"]
     pdf_url = link.replace("/abs/", "/pdf/")
     affiliation_matches: list[str] = []
-    
+
     api_affiliations = entry_data.get("api_affiliations", "")
     if api_affiliations:
         affiliation_matches = check_whitelist_match([api_affiliations], whitelists["affiliations"])
@@ -146,9 +140,7 @@ def _process_paper_entry(
             affiliation_text = extract_affiliation_text(
                 pdf_content,
                 lines_start=scraper_config.get("pdf_lines_start", 2),
-                max_header_lines=scraper_config.get(
-                    "pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)
-                ),
+                max_header_lines=scraper_config.get("pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)),
                 smart_header=scraper_config.get("pdf_smart_header", True),
             )
             if affiliation_text:
@@ -314,7 +306,7 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 openalex_cited_by_count=result.get("openalex_cited_by_count"),
             )
             papers_to_insert.append(paper)
-            
+
         if papers_to_insert:
             try:
                 db.session.add_all(papers_to_insert)
@@ -336,7 +328,9 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
 
 
 def _generate_thumbnails(app, results: list[dict], session: requests.Session) -> None:
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeout
+
     from app.services.thumbnail_generator import generate_thumbnail
 
     static_folder = app.static_folder if app.static_folder else Path(__file__).parent.parent / "static"
@@ -360,7 +354,7 @@ def _generate_thumbnails(app, results: list[dict], session: requests.Session) ->
 def _generate_embeddings(app, results: list[dict]) -> None:
     """Generate SPECTER2 embeddings for newly scraped papers and add to the FAISS index."""
     try:
-        from app.models import Paper, db
+        from app.models import Paper
         from app.services.embeddings import get_embedding_service
 
         service = get_embedding_service(app)
@@ -606,7 +600,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         if scraper_config.get("feed_url") and scraper_config["feed_url"] not in feed_urls:
             feed_urls.append(scraper_config["feed_url"])
         try:
-            from app.models import FeedSource, db as _db
+            from app.models import FeedSource
 
             with app.app_context():
                 extra_sources = FeedSource.query.filter_by(enabled=True).all()
@@ -661,11 +655,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         existing_ids = _get_existing_ids(app, entries)
         pre_filtered = 0
         if existing_ids:
-            filtered_entries = [
-                entry
-                for entry in entries
-                if not _identity_keys(entry).intersection(existing_ids)
-            ]
+            filtered_entries = [entry for entry in entries if not _identity_keys(entry).intersection(existing_ids)]
             pre_filtered = len(entries) - len(filtered_entries)
             entries = filtered_entries
             LOGGER.info(
@@ -762,7 +752,7 @@ def stream_or_start_scrape(app, force: bool = False):
 
 
 def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt: date) -> dict:
-    from app.services.enrichment import query_arxiv_api, enrich_entries_with_api_metadata
+    from app.services.enrichment import enrich_entries_with_api_metadata, query_arxiv_api
     from app.services.http_client import create_session
 
     config = app.config["SCRAPER_CONFIG"]
@@ -775,7 +765,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
     total_entries = len(entries)
     if not entries:
         return _build_summary(0, 0, 0, 0)
-        
+
     existing_ids = _get_existing_ids(app, entries)
     pre_filtered = 0
     if existing_ids:
@@ -787,7 +777,9 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
     enrich_entries_with_api_metadata(entries, session=session)
 
     results = []
-    for processed, matched, result in _process_entries_parallel(entries, whitelists, scraper_config, session, llm_client, interests_text, config):
+    for processed, matched, result in _process_entries_parallel(
+        entries, whitelists, scraper_config, session, llm_client, interests_text, config
+    ):
         if result:
             results.append(result)
 
@@ -801,4 +793,3 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
     _generate_embeddings(app, results)
 
     return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
-

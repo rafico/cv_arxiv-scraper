@@ -70,17 +70,16 @@ def compute_paper_score(
     config: dict | None = None,
 ) -> float:
     preferences = resolve_ranking_preferences(config)
-    match_score = sum(preferences.get(match_type, MATCH_TYPE_WEIGHTS.get(match_type, 0.0)) for match_type in match_types)
+    match_score = sum(
+        preferences.get(match_type, MATCH_TYPE_WEIGHTS.get(match_type, 0.0)) for match_type in match_types
+    )
     term_score = matched_terms_count * TERM_MATCH_WEIGHT
     resource_score = min(resource_count, 4) * RESOURCE_SIGNAL_WEIGHT
-    llm_bonus = (
-        (llm_relevance_score / 10.0) * preferences["ai_weight"]
-        if llm_relevance_score is not None
-        else 0.0
-    )
+    llm_bonus = (llm_relevance_score / 10.0) * preferences["ai_weight"] if llm_relevance_score is not None else 0.0
     citation_bonus = 0.0
     if citation_count and citation_count > 0:
         import math
+
         citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
@@ -103,14 +102,11 @@ def explain_score(
     match_score = sum(preferences.get(match_type, 0.0) for match_type in match_types)
     term_score = matched_terms_count * TERM_MATCH_WEIGHT
     resource_score = min(resource_count, 4) * RESOURCE_SIGNAL_WEIGHT
-    ai_bonus = (
-        (llm_relevance_score / 10.0) * preferences["ai_weight"]
-        if llm_relevance_score is not None
-        else 0.0
-    )
+    ai_bonus = (llm_relevance_score / 10.0) * preferences["ai_weight"] if llm_relevance_score is not None else 0.0
     citation_bonus = 0.0
     if citation_count and citation_count > 0:
         import math
+
         citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
@@ -215,8 +211,8 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
 
     # Similar to saved paper (embedding-based)
     try:
-        from app.services.embeddings import get_embedding_service
         from app.models import Paper, PaperFeedback, db
+        from app.services.embeddings import get_embedding_service
 
         service = get_embedding_service()
         if service.has_paper(paper.id) and service.index_count() > 0:
@@ -235,7 +231,7 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
                             title = saved_paper.title[:50]
                             if len(saved_paper.title) > 50:
                                 title += "..."
-                            explanations.append(f"Similar to saved: \"{title}\"")
+                            explanations.append(f'Similar to saved: "{title}"')
                             break
     except Exception:
         pass

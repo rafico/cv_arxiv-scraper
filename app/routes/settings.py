@@ -101,9 +101,7 @@ def view_settings():
     preferences = get_preferences(config)
     digest_status = get_digest_status_snapshot(current_app._get_current_object())
     digest_preview = build_digest_preview(current_app._get_current_object())
-    scrape_history = (
-        ScrapeRun.query.order_by(ScrapeRun.started_at.desc()).limit(8).all()
-    )
+    scrape_history = ScrapeRun.query.order_by(ScrapeRun.started_at.desc()).limit(8).all()
     digest_history = get_digest_history(limit=8)
     callback_uri = url_for("settings.gmail_callback", _external=True)
     gmail_setup_steps = get_setup_instructions(
@@ -119,11 +117,7 @@ def view_settings():
     mendeley_status = MendeleyClient().check_connection()
     zotero_client = ZoteroClient()
     zotero_status = zotero_client.check_connection()
-    zotero_collections = (
-        zotero_client.list_collections()
-        if zotero_status["status"] == "connected"
-        else []
-    )
+    zotero_collections = zotero_client.list_collections() if zotero_status["status"] == "connected" else []
     cron_config = get_cron_status()
 
     return render_template(
@@ -447,8 +441,7 @@ def upload_mendeley_credentials():
 
     if not data.get("client_id") or not data.get("client_secret"):
         flash(
-            "Missing client_id or client_secret. Upload the credentials "
-            "JSON from Mendeley developer portal.",
+            "Missing client_id or client_secret. Upload the credentials JSON from Mendeley developer portal.",
             "error",
         )
         return redirect(url_for("settings.view_settings", section="automation"))
@@ -517,14 +510,13 @@ def mendeley_sync():
         flash(f"Mendeley not connected: {status['message']}", "error")
         return redirect(url_for("settings.view_settings", section="automation"))
 
-    saved_papers = (
-        Paper.query
-        .join(PaperFeedback, db.and_(
+    saved_papers = Paper.query.join(
+        PaperFeedback,
+        db.and_(
             PaperFeedback.paper_id == Paper.id,
             PaperFeedback.action == "save",
-        ))
-        .all()
-    )
+        ),
+    ).all()
 
     success_count = 0
     for paper in saved_papers:
@@ -600,14 +592,13 @@ def zotero_sync():
 
     collection_key = request.form.get("zotero_collection", "").strip() or None
 
-    saved_papers = (
-        Paper.query
-        .join(PaperFeedback, db.and_(
+    saved_papers = Paper.query.join(
+        PaperFeedback,
+        db.and_(
             PaperFeedback.paper_id == Paper.id,
             PaperFeedback.action == "save",
-        ))
-        .all()
-    )
+        ),
+    ).all()
 
     result = client.sync_saved_papers(saved_papers, collection_key=collection_key)
     flash(result["message"], "success" if result["success"] else "error")

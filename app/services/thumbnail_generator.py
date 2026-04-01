@@ -6,12 +6,13 @@ import logging
 import tempfile
 from pathlib import Path
 
-import requests
 import pdfplumber
+import requests
 
 from app.services.http_client import request_with_backoff
 
 LOGGER = logging.getLogger(__name__)
+
 
 def generate_thumbnail(
     arxiv_id: str,
@@ -52,9 +53,9 @@ def generate_thumbnail(
                 # Render to image using resolution 72 (default is fine for small thumbnails)
                 im = first_page.to_image(resolution=72)
                 im.save(str(out_path), format="PNG")
-                
+
                 # Cleanup resources
-                if hasattr(im.original, 'close'):
+                if hasattr(im.original, "close"):
                     im.original.close()
 
         LOGGER.info("Successfully generated thumbnail for %s", arxiv_id)

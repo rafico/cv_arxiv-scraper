@@ -80,8 +80,7 @@ INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_feedback_paper_action ON paper_feedback (paper_id, action)",
 ]
 UNIQUE_ARXIV_INDEX_STATEMENT = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_arxiv_id "
-    "ON papers (arxiv_id) WHERE arxiv_id IS NOT NULL"
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_arxiv_id ON papers (arxiv_id) WHERE arxiv_id IS NOT NULL"
 )
 
 
@@ -236,9 +235,7 @@ def ensure_schema() -> None:
             # Rebuild FTS and retry.
             db.session.rollback()
             try:
-                db.session.execute(
-                    text("INSERT INTO papers_fts(papers_fts) VALUES('rebuild')")
-                )
+                db.session.execute(text("INSERT INTO papers_fts(papers_fts) VALUES('rebuild')"))
                 db.session.commit()
             except Exception:
                 db.session.rollback()
@@ -264,9 +261,7 @@ _ARXIV_ID_RE = re.compile(r"arxiv\.org/abs/(.+?)(?:v\d+)?$")
 
 def _backfill_arxiv_ids() -> None:
     """Fill in NULL arxiv_id values by extracting from the paper link."""
-    rows = db.session.execute(
-        text("SELECT id, link FROM papers WHERE arxiv_id IS NULL AND link IS NOT NULL")
-    ).all()
+    rows = db.session.execute(text("SELECT id, link FROM papers WHERE arxiv_id IS NULL AND link IS NOT NULL")).all()
     if not rows:
         return
 
@@ -288,10 +283,7 @@ def _backfill_arxiv_ids() -> None:
 def _fix_pdf_links() -> None:
     """Remove erroneous .pdf extension from arxiv PDF links."""
     result = db.session.execute(
-        text(
-            "UPDATE papers SET pdf_link = SUBSTR(pdf_link, 1, LENGTH(pdf_link) - 4) "
-            "WHERE pdf_link LIKE '%/pdf/%.pdf'"
-        )
+        text("UPDATE papers SET pdf_link = SUBSTR(pdf_link, 1, LENGTH(pdf_link) - 4) WHERE pdf_link LIKE '%/pdf/%.pdf'")
     )
     if result.rowcount:
         LOGGER.info("Fixed .pdf extension on %d pdf_link values", result.rowcount)

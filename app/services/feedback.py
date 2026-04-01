@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from app.enums import FeedbackAction
 from app.models import Paper, PaperFeedback, db
 from app.services.ranking import combined_rank_score, compute_feedback_delta
-from app.enums import FeedbackAction
 
 ALLOWED_ACTIONS = {action.value for action in FeedbackAction}
 
