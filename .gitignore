@@ -22,6 +22,7 @@ token.json
 mendeley_credentials.json
 .mendeley_token
 .zotero_credentials
+.mcp.json
 
 codex-claude-bridge/
 
