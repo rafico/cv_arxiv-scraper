@@ -4,20 +4,23 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date
+from datetime import date, datetime, time
 
 import requests
 
 from app.services.ingest.arxiv_api_backend import ArxivApiBackend
 from app.services.ingest.base import IngestMode, PaperCandidate
 from app.services.ingest.rss_backend import RssFeedBackend
-from app.services.text import utc_today
+from app.services.text import now_utc, utc_today
 
 LOGGER = logging.getLogger(__name__)
 
 RssCandidateFetcher = Callable[..., list[PaperCandidate]]
 RollingWindowFetcher = Callable[..., list[PaperCandidate]]
 BackendRegistry = Mapping[str, type]
+SyncStateReader = Callable[[Sequence[str]], Mapping[str, datetime | None]]
+SyncStateWriter = Callable[..., None]
+Clock = Callable[[], datetime]
 
 BACKEND_REGISTRY: dict[str, type] = {
     "rss": RssFeedBackend,
@@ -33,11 +36,17 @@ class IngestOrchestrator:
         rolling_window_fetcher: RollingWindowFetcher | None = None,
         arxiv_api_backend: ArxivApiBackend | None = None,
         backend_registry: BackendRegistry | None = None,
+        sync_state_reader: SyncStateReader | None = None,
+        sync_state_writer: SyncStateWriter | None = None,
+        clock: Clock | None = None,
     ):
         self._rss_candidate_fetcher = rss_candidate_fetcher or self._default_rss_candidate_fetcher
         self._rolling_window_fetcher = rolling_window_fetcher or self._default_rolling_window_fetcher
         self._arxiv_api_backend = arxiv_api_backend or ArxivApiBackend()
         self._backend_registry = dict(backend_registry or BACKEND_REGISTRY)
+        self._sync_state_reader = sync_state_reader or self._default_sync_state_reader
+        self._sync_state_writer = sync_state_writer or self._default_sync_state_writer
+        self._clock = clock or now_utc
 
     def fetch(
         self,
@@ -73,12 +82,9 @@ class IngestOrchestrator:
                 session=session,
             )
         if mode == IngestMode.CATCH_UP:
-            if start_dt is None:
-                raise ValueError("CATCH_UP mode requires start_dt")
             self._require_backend(selected_backend_names, backend_name="arxiv_api", mode=mode)
-            return self._fetch_arxiv_api(
+            return self._fetch_catch_up(
                 categories=categories or [],
-                start_dt=start_dt,
                 end_dt=end_dt or utc_today(),
                 max_results=max_results,
                 session=session,
@@ -188,6 +194,48 @@ class IngestOrchestrator:
             session=session,
         )
 
+    def _fetch_catch_up(
+        self,
+        *,
+        categories: Sequence[str],
+        end_dt: date,
+        max_results: int,
+        session: requests.Session | None = None,
+    ) -> list[PaperCandidate]:
+        if not categories:
+            return []
+
+        sync_state_by_category = self._sync_state_reader(categories)
+        missing_categories = [category for category in categories if sync_state_by_category.get(category) is None]
+        if missing_categories:
+            raise ValueError(
+                "CATCH_UP mode requires SyncState.last_synced_submitted_at for categories: "
+                f"{', '.join(missing_categories)}"
+            )
+
+        synced_at = self._clock()
+        synced_through = datetime.combine(end_dt, time.max) if end_dt != utc_today() else synced_at
+
+        candidates: list[PaperCandidate] = []
+        for category in categories:
+            last_synced_at = sync_state_by_category.get(category)
+            category_candidates = self._fetch_arxiv_api(
+                categories=[category],
+                start_dt=last_synced_at.date(),
+                end_dt=end_dt,
+                max_results=max_results,
+                session=session,
+            )
+            candidates.extend(category_candidates)
+            self._sync_state_writer(
+                category,
+                synced_through=synced_through,
+                updated_at=synced_at,
+                paper_count=len(category_candidates),
+            )
+
+        return candidates
+
     @staticmethod
     def _merge_candidates(primary: Sequence[PaperCandidate], secondary: Sequence[PaperCandidate]) -> list[PaperCandidate]:
         merged_candidates: dict[str, PaperCandidate] = {}
@@ -203,6 +251,33 @@ class IngestOrchestrator:
         if unknown:
             raise ValueError(f"Unknown ingest backends: {', '.join(unknown)}")
         return selected
+
+    @staticmethod
+    def _default_sync_state_reader(categories: Sequence[str]) -> dict[str, datetime | None]:
+        from app.models import SyncState
+
+        states = SyncState.query.filter(SyncState.category.in_(list(categories))).all()
+        return {state.category: state.last_synced_submitted_at for state in states}
+
+    @staticmethod
+    def _default_sync_state_writer(
+        category: str,
+        *,
+        synced_through: datetime,
+        updated_at: datetime,
+        paper_count: int,
+    ) -> None:
+        from app.models import SyncState, db
+
+        state = SyncState.query.filter_by(category=category).one_or_none()
+        if state is None:
+            state = SyncState(category=category)
+            db.session.add(state)
+
+        state.last_synced_submitted_at = synced_through
+        state.last_synced_updated_at = updated_at
+        state.last_synced_paper_count = paper_count
+        db.session.commit()
 
     @staticmethod
     def _require_backend(
