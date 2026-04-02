@@ -211,7 +211,7 @@ class PreFilterCountTests(FlaskDBTestCase):
         with (
             patch.object(scrape_engine, "parse_feed_entries", side_effect=fake_parse_feed),
             patch.object(scrape_engine, "enrich_entries_with_api_metadata", side_effect=fake_enrich),
-            patch.object(scrape_engine, "_process_entries_parallel", side_effect=fake_process),
+            patch.object(scrape_engine, "_process_entries_with_pipeline", side_effect=fake_process),
         ):
             scrape_engine.execute_scrape(self.app, event_callback=capture_callback)
 
@@ -269,7 +269,7 @@ class GuardTests(FlaskDBTestCase):
         with (
             patch("app.services.scrape_engine.parse_feed_entries", return_value=[]),
             patch("app.services.scrape_engine.enrich_entries_with_api_metadata"),
-            patch("app.services.scrape_engine._process_entries_parallel", return_value=iter([])),
+            patch("app.services.scrape_engine._process_entries_with_pipeline", return_value=iter([])),
         ):
             result = execute_scrape(self.app)
 
@@ -293,7 +293,7 @@ class GuardTests(FlaskDBTestCase):
         with (
             patch("app.services.scrape_engine.parse_feed_entries", return_value=[]),
             patch("app.services.scrape_engine.enrich_entries_with_api_metadata"),
-            patch("app.services.scrape_engine._process_entries_parallel", return_value=iter([])),
+            patch("app.services.scrape_engine._process_entries_with_pipeline", return_value=iter([])),
         ):
             result = execute_scrape(self.app, force=True)
 
@@ -338,7 +338,7 @@ class RollingWindowTests(FlaskDBTestCase):
             patch.object(scrape_engine, "parse_feed_entries", return_value=rss_entries),
             patch.object(scrape_engine, "fetch_recent_papers", return_value=api_entries),
             patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
-            patch.object(scrape_engine, "_process_entries_parallel", side_effect=fake_process),
+            patch.object(scrape_engine, "_process_entries_with_pipeline", side_effect=fake_process),
         ):
             scrape_engine.execute_scrape(self.app)
 
@@ -353,7 +353,7 @@ class RollingWindowTests(FlaskDBTestCase):
             patch.object(scrape_engine, "parse_feed_entries", return_value=[]),
             patch.object(scrape_engine, "fetch_recent_papers") as mock_recent,
             patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
-            patch.object(scrape_engine, "_process_entries_parallel", return_value=iter([])),
+            patch.object(scrape_engine, "_process_entries_with_pipeline", return_value=iter([])),
         ):
             scrape_engine.execute_scrape(self.app, force=True)
 
@@ -369,7 +369,7 @@ class RollingWindowTests(FlaskDBTestCase):
             patch.object(scrape_engine, "parse_feed_entries", return_value=[]),
             patch.object(scrape_engine, "fetch_recent_papers") as mock_recent,
             patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
-            patch.object(scrape_engine, "_process_entries_parallel", return_value=iter([])),
+            patch.object(scrape_engine, "_process_entries_with_pipeline", return_value=iter([])),
         ):
             scrape_engine.execute_scrape(self.app, force=True)
 
@@ -410,7 +410,7 @@ class HistoricalScrapeTests(FlaskDBTestCase):
         with (
             patch.object(scrape_engine, "_build_ingest_orchestrator", return_value=orchestrator),
             patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
-            patch.object(scrape_engine, "_process_entries_parallel", side_effect=fake_process),
+            patch.object(scrape_engine, "_process_entries_with_pipeline", side_effect=fake_process),
         ):
             summary = scrape_engine.execute_historical_scrape(
                 self.app,

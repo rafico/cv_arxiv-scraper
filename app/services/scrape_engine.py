@@ -28,6 +28,7 @@ from app.services.matching import (
     check_whitelist_match,
     dedupe_preserve_order,
 )
+from app.services.pipeline import WeightedSumRanker, WhitelistCandidateGenerator
 from app.services.preferences import get_preferences
 from app.services.ranking import compute_paper_score
 from app.services.summary import extract_topic_tags, generate_llm_summary, generate_summary
@@ -257,6 +258,91 @@ def _process_entries_parallel(
                 matched += 1
 
             yield processed, matched, result
+
+
+def _enrich_candidate_with_llm(
+    candidate,
+    llm_client: LLMClient | None,
+    interests_text: str,
+) -> None:
+    """Add LLM summary, relevance score, and topic tags to candidate entry_data (in-place)."""
+    entry = candidate.entry_data
+    title = entry.get("title", "")
+    abstract = entry.get("abstract", "")
+
+    entry["summary_text"] = (
+        generate_llm_summary(llm_client, title, abstract)
+        if llm_client is not None
+        else generate_summary(title, abstract)
+    )
+    entry["llm_relevance_score"] = (
+        llm_client.rate_relevance(title, abstract, interests_text)
+        if llm_client is not None
+        else None
+    )
+    entry["topic_tags"] = extract_topic_tags(title, abstract)
+
+
+def _process_entries_with_pipeline(
+    entries: list[dict],
+    whitelists: dict,
+    scraper_config: dict,
+    session: requests.Session,
+    llm_client: LLMClient | None = None,
+    interests_text: str = "",
+    product_config: dict | None = None,
+):
+    """Process entries using the ranking pipeline (candidates -> features -> rank).
+
+    Yields (processed, matched, result_dict) tuples for streaming progress,
+    maintaining the same interface as _process_entries_parallel.
+    """
+    max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
+    preferences = get_preferences(product_config)
+    muted = preferences["muted"]
+
+    generator = WhitelistCandidateGenerator(
+        whitelists=whitelists,
+        scraper_config=scraper_config,
+        muted=muted,
+        session=session,
+    )
+    ranker = WeightedSumRanker(config=product_config)
+
+    processed = 0
+    matched = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(generator._process_single, entry): entry
+            for entry in entries
+        }
+
+        candidates = []
+        for future in as_completed(futures):
+            entry = futures[future]
+            processed += 1
+            candidate = None
+            try:
+                candidate = future.result()
+            except Exception:
+                LOGGER.exception(
+                    "Unhandled worker exception while processing paper: %s (%s)",
+                    entry.get("title"),
+                    entry.get("link"),
+                )
+
+            if candidate is not None:
+                _enrich_candidate_with_llm(candidate, llm_client, interests_text)
+                ranked_list = ranker.rank([candidate])
+                if ranked_list:
+                    ranked = ranked_list[0]
+                    result = ranked.to_result_dict()
+                    matched += 1
+                    yield processed, matched, result
+                    continue
+
+            yield processed, matched, None
 
 
 def _sort_results(results: list[dict]) -> None:
@@ -688,7 +774,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
 
         results: list[dict] = []
 
-        for processed, matched, result in _process_entries_parallel(
+        for processed, matched, result in _process_entries_with_pipeline(
             entries,
             whitelists,
             scraper_config,
@@ -796,7 +882,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
     enrich_entries_with_api_metadata(entries, session=session)
 
     results = []
-    for processed, matched, result in _process_entries_parallel(
+    for processed, matched, result in _process_entries_with_pipeline(
         entries, whitelists, scraper_config, session, llm_client, interests_text, config
     ):
         if result:
