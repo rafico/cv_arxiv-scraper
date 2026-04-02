@@ -359,11 +359,29 @@ class RollingWindowTests(FlaskDBTestCase):
 
         mock_recent.assert_not_called()
 
+    def test_ingest_backends_config_can_disable_recent_fetch(self):
+        from app.services import scrape_engine
+
+        self.app.config["SCRAPER_CONFIG"]["scraper"]["rolling_window_days"] = 2
+        self.app.config["SCRAPER_CONFIG"]["ingest"] = {"backends": ["rss"]}
+
+        with (
+            patch.object(scrape_engine, "parse_feed_entries", return_value=[]),
+            patch.object(scrape_engine, "fetch_recent_papers") as mock_recent,
+            patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
+            patch.object(scrape_engine, "_process_entries_parallel", return_value=iter([])),
+        ):
+            scrape_engine.execute_scrape(self.app, force=True)
+
+        mock_recent.assert_not_called()
+
 
 class HistoricalScrapeTests(FlaskDBTestCase):
     def test_execute_historical_scrape_uses_orchestrator_bridge(self):
         from app.services import scrape_engine
         from app.services.ingest import PaperCandidate
+
+        self.app.config["SCRAPER_CONFIG"]["ingest"] = {"backends": ["arxiv_api"]}
 
         class FakeOrchestrator:
             def fetch(self, **kwargs):
@@ -403,6 +421,7 @@ class HistoricalScrapeTests(FlaskDBTestCase):
 
         self.assertEqual(orchestrator.kwargs["mode"].value, "backfill")
         self.assertEqual(orchestrator.kwargs["categories"], ["cs.CV"])
+        self.assertEqual(orchestrator.kwargs["backend_names"], ["arxiv_api"])
         self.assertIn("new_papers", summary)
 
 

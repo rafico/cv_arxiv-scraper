@@ -50,6 +50,23 @@ class ConfigValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _validate_config(cfg)
 
+    def test_ingest_backends_accept_known_backend_names(self):
+        cfg = self._valid_config()
+        cfg["ingest"] = {"backends": ["rss", "arxiv_api"]}
+        _validate_config(cfg)
+
+    def test_ingest_backends_must_be_non_empty_list(self):
+        cfg = self._valid_config()
+        cfg["ingest"] = {"backends": []}
+        with self.assertRaises(ValueError, msg="non-empty list"):
+            _validate_config(cfg)
+
+    def test_ingest_backends_reject_unknown_backend_names(self):
+        cfg = self._valid_config()
+        cfg["ingest"] = {"backends": ["rss", "oai_pmh"]}
+        with self.assertRaises(ValueError, msg="unknown backends"):
+            _validate_config(cfg)
+
     def test_scraper_not_dict(self):
         cfg = self._valid_config()
         cfg["scraper"] = "bad"
