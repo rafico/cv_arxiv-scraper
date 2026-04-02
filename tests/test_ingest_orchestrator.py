@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from unittest import TestCase
 
 from app.services.ingest import IngestMode, IngestOrchestrator, PaperCandidate
@@ -147,6 +147,75 @@ class IngestOrchestratorTests(TestCase):
             orchestrator.fetch(
                 mode=IngestMode.CATCH_UP,
                 categories=["cs.CV"],
-                start_dt=date(2026, 4, 1),
                 backend_names=["rss"],
+            )
+
+    def test_catch_up_uses_sync_state_per_category_and_updates_progress(self):
+        class FakeArxivBackend:
+            def __init__(self):
+                self.calls: list[dict] = []
+
+            def fetch(self, **kwargs):
+                self.calls.append(kwargs)
+                category = kwargs["categories"][0]
+                return [_candidate(f"{category}-001", f"catch-up:{category}")]
+
+        updates: list[tuple[str, datetime, datetime, int]] = []
+        backend = FakeArxivBackend()
+        orchestrator = IngestOrchestrator(
+            arxiv_api_backend=backend,
+            sync_state_reader=lambda categories: {
+                "cs.CV": datetime(2026, 1, 7, 12, 0, 0),
+                "cs.LG": datetime(2026, 1, 9, 9, 30, 0),
+            },
+            sync_state_writer=lambda category, *, synced_through, updated_at, paper_count: updates.append(
+                (category, synced_through, updated_at, paper_count)
+            ),
+            clock=lambda: datetime(2026, 1, 15, 8, 0, 0),
+        )
+
+        candidates = orchestrator.fetch(
+            mode=IngestMode.CATCH_UP,
+            categories=["cs.CV", "cs.LG"],
+            end_dt=date(2026, 1, 15),
+            max_results=25,
+        )
+
+        self.assertEqual([candidate.title for candidate in candidates], ["catch-up:cs.CV", "catch-up:cs.LG"])
+        self.assertEqual(
+            backend.calls,
+            [
+                {
+                    "categories": ["cs.CV"],
+                    "start_dt": date(2026, 1, 7),
+                    "end_dt": date(2026, 1, 15),
+                    "max_results": 25,
+                    "session": None,
+                },
+                {
+                    "categories": ["cs.LG"],
+                    "start_dt": date(2026, 1, 9),
+                    "end_dt": date(2026, 1, 15),
+                    "max_results": 25,
+                    "session": None,
+                },
+            ],
+        )
+        self.assertEqual(
+            updates,
+            [
+                ("cs.CV", datetime(2026, 1, 15, 23, 59, 59, 999999), datetime(2026, 1, 15, 8, 0, 0), 1),
+                ("cs.LG", datetime(2026, 1, 15, 23, 59, 59, 999999), datetime(2026, 1, 15, 8, 0, 0), 1),
+            ],
+        )
+
+    def test_catch_up_requires_sync_state_cursor_for_each_category(self):
+        orchestrator = IngestOrchestrator(
+            sync_state_reader=lambda categories: {"cs.CV": datetime(2026, 1, 7, 12, 0, 0)},
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires SyncState.last_synced_submitted_at"):
+            orchestrator.fetch(
+                mode=IngestMode.CATCH_UP,
+                categories=["cs.CV", "cs.LG"],
             )
