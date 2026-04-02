@@ -60,6 +60,24 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
     if feed_url and (not isinstance(feed_url, str) or not feed_url.strip()):
         raise ValueError("'scraper.feed_url' must be a non-empty string")
 
+    ingest = config.get("ingest")
+    if ingest is not None:
+        if not isinstance(ingest, dict):
+            raise ValueError("'ingest' must be a dict")
+
+        backends = ingest.get("backends")
+        if backends is not None:
+            if not isinstance(backends, list) or not backends or not all(isinstance(name, str) and name.strip() for name in backends):
+                raise ValueError("'ingest.backends' must be a non-empty list of backend names")
+
+            from app.services.ingest.orchestrator import BACKEND_REGISTRY
+
+            unknown_backends = [name for name in backends if name not in BACKEND_REGISTRY]
+            if unknown_backends:
+                raise ValueError(
+                    f"'ingest.backends' contains unknown backends: {', '.join(unknown_backends)}"
+                )
+
     # --- whitelists section ---
     if "whitelists" not in config:
         raise ValueError("Missing required config section: 'whitelists'")

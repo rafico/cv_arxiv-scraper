@@ -11,6 +11,11 @@ scraper:
   pdf_max_header_lines: 50
   pdf_smart_header: true
 
+ingest:
+  backends:
+    - "rss"
+    - "arxiv_api"
+
 llm:
   enabled: false
   provider: "openrouter"

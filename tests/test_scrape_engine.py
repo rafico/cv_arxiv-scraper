@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from app.models import Paper, ScrapeRun, db
@@ -358,6 +358,71 @@ class RollingWindowTests(FlaskDBTestCase):
             scrape_engine.execute_scrape(self.app, force=True)
 
         mock_recent.assert_not_called()
+
+    def test_ingest_backends_config_can_disable_recent_fetch(self):
+        from app.services import scrape_engine
+
+        self.app.config["SCRAPER_CONFIG"]["scraper"]["rolling_window_days"] = 2
+        self.app.config["SCRAPER_CONFIG"]["ingest"] = {"backends": ["rss"]}
+
+        with (
+            patch.object(scrape_engine, "parse_feed_entries", return_value=[]),
+            patch.object(scrape_engine, "fetch_recent_papers") as mock_recent,
+            patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
+            patch.object(scrape_engine, "_process_entries_parallel", return_value=iter([])),
+        ):
+            scrape_engine.execute_scrape(self.app, force=True)
+
+        mock_recent.assert_not_called()
+
+
+class HistoricalScrapeTests(FlaskDBTestCase):
+    def test_execute_historical_scrape_uses_orchestrator_bridge(self):
+        from app.services import scrape_engine
+        from app.services.ingest import PaperCandidate
+
+        self.app.config["SCRAPER_CONFIG"]["ingest"] = {"backends": ["arxiv_api"]}
+
+        class FakeOrchestrator:
+            def fetch(self, **kwargs):
+                self.kwargs = kwargs
+                return [
+                    PaperCandidate(
+                        arxiv_id="0007",
+                        link="https://arxiv.org/abs/0007",
+                        title="Historical Paper",
+                        author="Author A",
+                        authors_list=["Author A"],
+                        publication_date="2026-01-01",
+                    )
+                ]
+
+        orchestrator = FakeOrchestrator()
+
+        def fake_process(
+            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None
+        ):
+            for i, entry in enumerate(entries, 1):
+                result = _make_result(entry["link"], entry["title"])
+                result["arxiv_id"] = entry.get("arxiv_id")
+                yield i, i, result
+
+        with (
+            patch.object(scrape_engine, "_build_ingest_orchestrator", return_value=orchestrator),
+            patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
+            patch.object(scrape_engine, "_process_entries_parallel", side_effect=fake_process),
+        ):
+            summary = scrape_engine.execute_historical_scrape(
+                self.app,
+                ["cs.CV"],
+                date(2026, 1, 1),
+                date(2026, 1, 2),
+            )
+
+        self.assertEqual(orchestrator.kwargs["mode"].value, "backfill")
+        self.assertEqual(orchestrator.kwargs["categories"], ["cs.CV"])
+        self.assertEqual(orchestrator.kwargs["backend_names"], ["arxiv_api"])
+        self.assertIn("new_papers", summary)
 
 
 if __name__ == "__main__":

@@ -259,3 +259,14 @@ class DigestRun(db.Model):
     error_message = db.Column(db.Text, nullable=True)
     started_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False, index=True)
     finished_at = db.Column(db.DateTime, nullable=True, index=True)
+
+
+class SyncState(db.Model):
+    __tablename__ = "sync_state"
+
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(64), nullable=False, unique=True)
+    last_synced_submitted_at = db.Column(db.DateTime, nullable=True)
+    last_synced_updated_at = db.Column(db.DateTime, nullable=True)
+    last_synced_paper_count = db.Column(db.Integer, nullable=False, default=0)
+    updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now(), nullable=False)
