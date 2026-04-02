@@ -33,102 +33,99 @@ preferences:
     authors: []
     affiliations: []
     topics: []
-
 whitelists:
   titles:
-    - "Few Shot"
-    - "Low Light"
-    - "MOT"
-    - "Multiple Object Tracking"
-    - "Nerf"
-    - "Open Set"
-    - "Remote Sensing"
-    - "SAR"
-    - "Satellite"
-    - "Zero Shot"
-
+  - Few Shot
+  - Low Light
+  - MOT
+  - Multiple Object Tracking
+  - Nerf
+  - Open Set
+  - Remote Sensing
+  - SAR
+  - Satellite
+  - Zero Shot
   affiliations:
-    - "Adobe"
-    - "Apple"
-    - "Berkeley"
-    - "ByteDance"
-    - "Caltech"
-    - "California Institute of Technology"
-    - "Carnegie Mellon University"
-    - "CMU"
-    - "DeepMind"
-    - "Freiburg"
-    - "Google"
-    - "HKUST"
-    - "IDEA-Research"
-    - "INRIA"
-    - "KAIST"
-    - "Michigan"
-    - "Microsoft"
-    - "MIT"
-    - "Massachusetts Institute of Technology"
-    - "Meta"
-    - "Munich"
-    - "Nvidia"
-    - "Oxford"
-    - "Princeton"
-    - "Stanford"
-    - "Technion"
-    - "Tel-Aviv"
-    - "Toronto"
-    - "Toyota"
-    - "Tsinghua"
-    - "Voxel51"
-    - "Weizmann"
-    - "Yale"
-    - "Zurich"
-
+  - Adobe
+  - Apple
+  - Berkeley
+  - ByteDance
+  - Caltech
+  - California Institute of Technology
+  - Carnegie Mellon University
+  - CMU
+  - DeepMind
+  - Freiburg
+  - Google
+  - HKUST
+  - IDEA-Research
+  - INRIA
+  - KAIST
+  - Michigan
+  - Microsoft
+  - MIT
+  - Massachusetts Institute of Technology
+  - Meta
+  - Munich
+  - Nvidia
+  - Oxford
+  - Princeton
+  - Stanford
+  - Technion
+  - Tel-Aviv
+  - Toronto
+  - Toyota
+  - Tsinghua
+  - Voxel51
+  - Weizmann
+  - Yale
+  - Zurich
   authors:
-    - "Andrew Y. Ng"
-    - "Shai Avidan"
-    - "Yoshua Bengio"
-    - "Serge Belongie"
-    - "Andrei Bursuc"
-    - "Christian Wolf"
-    - "Jason J. Corso"
-    - "Daniel Cremers"
-    - "Trevor Darrell"
-    - "Tali Dekel"
-    - "Piotr Dollár"
-    - "Ali Farhadi"
-    - "Li Fei-Fei"
-    - "Christoph Feichtenhofer"
-    - "Andreas Geiger"
-    - "Ross Girshick"
-    - "Georgia Gkioxari"
-    - "Ian Goodfellow"
-    - "Kristen Grauman"
-    - "Leonidas J. Guibas"
-    - "Lars Hammarstrand"
-    - "Geoffrey E. Hinton"
-    - "Sergey Ioffe"
-    - "Ishan Misra"
-    - "Justin Johnson"
-    - "Kaiming He"
-    - "Takeo Kanade"
-    - "Alexander Kirillov"
-    - "Yann LeCun"
-    - "Laura Leal-Taixé"
-    - "Lior Wolf"
-    - "Or Litany"
-    - "Jitendra Malik"
-    - "Mubarak Shah"
-    - "Matthias Nießner"
-    - "Marc Pollefeys"
-    - "Deva Ramanan"
-    - "Silvio Savarese"
-    - "Davide Scaramuzza"
-    - "Jürgen Schmidhuber"
-    - "Sebastian Thrun"
-    - "Noah Snavely"
-    - "Joshua M. Susskind"
-    - "Lennart Svensson"
-    - "Antonio Torralba"
-    - "Philip H. S. Torr"
-    - "Andrea Vedaldi"
-    - "Andrew Zisserman"
+  - Andrew Y. Ng
+  - Shai Avidan
+  - Yoshua Bengio
+  - Serge Belongie
+  - Andrei Bursuc
+  - Christian Wolf
+  - Jason J. Corso
+  - Daniel Cremers
+  - Trevor Darrell
+  - Tali Dekel
+  - "Piotr Doll\xE1r"
+  - Ali Farhadi
+  - Li Fei-Fei
+  - Christoph Feichtenhofer
+  - Andreas Geiger
+  - Ross Girshick
+  - Georgia Gkioxari
+  - Ian Goodfellow
+  - Kristen Grauman
+  - Leonidas J. Guibas
+  - Lars Hammarstrand
+  - Geoffrey E. Hinton
+  - Sergey Ioffe
+  - Ishan Misra
+  - Justin Johnson
+  - Kaiming He
+  - Takeo Kanade
+  - Alexander Kirillov
+  - Yann LeCun
+  - "Laura Leal-Taix\xE9"
+  - Lior Wolf
+  - Or Litany
+  - Jitendra Malik
+  - Mubarak Shah
+  - "Matthias Nie\xDFner"
+  - Marc Pollefeys
+  - Deva Ramanan
+  - Silvio Savarese
+  - Davide Scaramuzza
+  - "J\xFCrgen Schmidhuber"
+  - Sebastian Thrun
+  - Noah Snavely
+  - Joshua M. Susskind
+  - Lennart Svensson
+  - Antonio Torralba
+  - Philip H. S. Torr
+  - Andrea Vedaldi
+  - Andrew Zisserman
