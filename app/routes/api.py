@@ -412,36 +412,105 @@ def remove_paper_from_collection(collection_id: int, paper_id: int):
 # ── Saved Searches API ──
 
 
+def _serialize_saved_search(s: SavedSearch) -> dict:
+    return {
+        "id": s.id,
+        "name": s.name,
+        "filters": s.filters,
+        "categories": s.categories or [],
+        "include_keywords": s.include_keywords or [],
+        "exclude_keywords": s.exclude_keywords or [],
+        "author_filters": s.author_filters or [],
+        "date_window_days": s.date_window_days,
+        "min_citations": s.min_citations,
+        "methods_mentions": s.methods_mentions or [],
+        "is_active": s.is_active,
+        "notify_on_match": s.notify_on_match,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "last_used_at": s.last_used_at.isoformat() if s.last_used_at else None,
+    }
+
+
 @api_bp.route("/saved-searches", methods=["GET"])
 def list_saved_searches():
     searches = SavedSearch.query.order_by(SavedSearch.created_at.desc()).all()
-    return jsonify(
-        [
-            {
-                "id": s.id,
-                "name": s.name,
-                "filters": s.filters,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
-            }
-            for s in searches
-        ]
-    )
+    return jsonify([_serialize_saved_search(s) for s in searches])
 
 
 @api_bp.route("/saved-searches", methods=["POST"])
 def create_saved_search():
+    from app.services.saved_search import validate_saved_search
+
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
     if not name:
         return jsonify({"error": "Missing 'name'"}), 400
+
+    errors = validate_saved_search(payload)
+    if errors:
+        return jsonify({"errors": errors}), 400
+
     filters = payload.get("filters", {})
     if not isinstance(filters, dict):
         return jsonify({"error": "'filters' must be a dict"}), 400
-    s = SavedSearch(name=name, filters=filters)
+
+    s = SavedSearch(
+        name=name,
+        filters=filters,
+        categories=payload.get("categories", []),
+        include_keywords=payload.get("include_keywords", []),
+        exclude_keywords=payload.get("exclude_keywords", []),
+        author_filters=payload.get("author_filters", []),
+        date_window_days=payload.get("date_window_days"),
+        min_citations=payload.get("min_citations"),
+        methods_mentions=payload.get("methods_mentions", []),
+        is_active=payload.get("is_active", True),
+        notify_on_match=payload.get("notify_on_match", False),
+    )
     db.session.add(s)
     db.session.commit()
-    return jsonify({"id": s.id, "name": s.name}), 201
+    return jsonify(_serialize_saved_search(s)), 201
+
+
+@api_bp.route("/saved-searches/<int:search_id>", methods=["GET"])
+def get_saved_search(search_id: int):
+    s = db.session.get(SavedSearch, search_id) or abort(404)
+    return jsonify(_serialize_saved_search(s))
+
+
+@api_bp.route("/saved-searches/<int:search_id>", methods=["PUT"])
+def update_saved_search(search_id: int):
+    from app.services.saved_search import validate_saved_search
+
+    validate_csrf_token()
+    s = db.session.get(SavedSearch, search_id) or abort(404)
+    payload = request.get_json(silent=True) or {}
+
+    errors = validate_saved_search(payload)
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    if "name" in payload:
+        name = (payload["name"] or "").strip()
+        if name:
+            s.name = name
+    if "filters" in payload:
+        s.filters = payload["filters"] if isinstance(payload["filters"], dict) else s.filters
+    for field in ("categories", "include_keywords", "exclude_keywords", "author_filters", "methods_mentions"):
+        if field in payload:
+            setattr(s, field, payload[field])
+    if "date_window_days" in payload:
+        s.date_window_days = payload["date_window_days"]
+    if "min_citations" in payload:
+        s.min_citations = payload["min_citations"]
+    if "is_active" in payload:
+        s.is_active = bool(payload["is_active"])
+    if "notify_on_match" in payload:
+        s.notify_on_match = bool(payload["notify_on_match"])
+
+    db.session.commit()
+    return jsonify(_serialize_saved_search(s))
 
 
 @api_bp.route("/saved-searches/<int:search_id>", methods=["DELETE"])
@@ -451,6 +520,36 @@ def delete_saved_search(search_id: int):
     db.session.delete(s)
     db.session.commit()
     return jsonify({"deleted": True})
+
+
+@api_bp.route("/saved-searches/<int:search_id>/run", methods=["POST"])
+def run_saved_search(search_id: int):
+    from app.services.saved_search import execute_saved_search
+
+    validate_csrf_token()
+    s = db.session.get(SavedSearch, search_id) or abort(404)
+    payload = request.get_json(silent=True) or {}
+    limit = min(int(payload.get("limit", 100)), 500)
+
+    papers = execute_saved_search(s, limit=limit)
+    return jsonify({
+        "search_id": s.id,
+        "search_name": s.name,
+        "count": len(papers),
+        "results": [
+            {
+                "id": p.id,
+                "arxiv_id": p.arxiv_id,
+                "title": p.title,
+                "authors": p.authors,
+                "abstract": (p.abstract_text or "")[:300],
+                "paper_score": float(p.paper_score or 0),
+                "publication_dt": p.publication_dt.isoformat() if p.publication_dt else None,
+                "citation_count": p.citation_count,
+            }
+            for p in papers
+        ],
+    })
 
 
 # ── Bulk Operations API ──

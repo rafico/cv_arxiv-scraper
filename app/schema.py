@@ -17,6 +17,18 @@ FEEDBACK_COLUMN_DEFS = {
     "note": "TEXT",
 }
 
+SAVED_SEARCH_COLUMN_DEFS = {
+    "categories": "TEXT NOT NULL DEFAULT '[]'",
+    "include_keywords": "TEXT NOT NULL DEFAULT '[]'",
+    "exclude_keywords": "TEXT NOT NULL DEFAULT '[]'",
+    "author_filters": "TEXT NOT NULL DEFAULT '[]'",
+    "date_window_days": "INTEGER",
+    "min_citations": "INTEGER",
+    "methods_mentions": "TEXT NOT NULL DEFAULT '[]'",
+    "is_active": "INTEGER NOT NULL DEFAULT 1",
+    "notify_on_match": "INTEGER NOT NULL DEFAULT 0",
+}
+
 FTS5_CREATE = """
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
     title, abstract_text, authors, topic_tags,
@@ -134,6 +146,7 @@ def ensure_schema() -> None:
         PaperCollection,
         PaperFeedback,
         PaperRelation,
+        PaperSection,
         SavedSearch,
         ScrapeRun,
         SyncState,
@@ -147,6 +160,7 @@ def ensure_schema() -> None:
     PaperCollection.__table__.create(bind=db.engine, checkfirst=True)
     PaperRelation.__table__.create(bind=db.engine, checkfirst=True)
     SavedSearch.__table__.create(bind=db.engine, checkfirst=True)
+    PaperSection.__table__.create(bind=db.engine, checkfirst=True)
     SyncState.__table__.create(bind=db.engine, checkfirst=True)
 
     # Migrate paper_feedback columns for richer triage events.
@@ -156,6 +170,16 @@ def ensure_schema() -> None:
             if col_name not in feedback_columns:
                 db.session.execute(
                     text(f"ALTER TABLE paper_feedback ADD COLUMN {col_name} {col_type}")  # noqa: S608
+                )
+        db.session.commit()
+
+    # Migrate saved_searches columns for structured query fields.
+    if "saved_searches" in inspector.get_table_names():
+        ss_columns = {col["name"] for col in inspector.get_columns("saved_searches")}
+        for col_name, col_type in SAVED_SEARCH_COLUMN_DEFS.items():
+            if col_name not in ss_columns:
+                db.session.execute(
+                    text(f"ALTER TABLE saved_searches ADD COLUMN {col_name} {col_type}")  # noqa: S608
                 )
         db.session.commit()
 

@@ -135,6 +135,104 @@ class EmbeddingService:
             results.append((pid, float(score)))
         return results[:top_k]
 
+    def add_sections(
+        self,
+        entries: list[tuple[int, str, str]],
+    ) -> int:
+        """Add section-level embeddings to the section index.
+
+        Args:
+            entries: list of (paper_id, section_type, text) tuples.
+
+        Returns count of sections added.
+        """
+        if not entries:
+            return 0
+
+        import faiss
+
+        # Lazy-init the section index.
+        if not hasattr(self, "_section_index"):
+            section_index_path = self._index_dir / "sections.index"
+            section_map_path = self._index_dir / "section_id_map.json"
+            if section_index_path.exists() and section_map_path.exists():
+                self._section_index = faiss.read_index(str(section_index_path))
+                with open(section_map_path) as f:
+                    self._section_id_map = json.load(f)
+            else:
+                self._section_index = faiss.IndexFlatIP(DIMENSION)
+                self._section_id_map = []
+
+        texts = [text for _, _, text in entries]
+        meta = [{"paper_id": pid, "section_type": stype} for pid, stype, _ in entries]
+
+        embeddings = self.encode(texts)
+
+        with self._lock:
+            self._section_index.add(embeddings)
+            self._section_id_map.extend(meta)
+
+        return len(entries)
+
+    def search_sections(
+        self,
+        query_text: str,
+        top_k: int = 20,
+        section_type: str | None = None,
+    ) -> list[dict]:
+        """Search section-level embeddings.
+
+        Returns list of dicts with paper_id, section_type, score.
+        """
+        if not hasattr(self, "_section_index") or self._section_index.ntotal == 0:
+            return []
+
+        query_vec = self.encode([query_text])
+
+        with self._lock:
+            # Search more than needed if filtering by type.
+            search_k = min(top_k * 3 if section_type else top_k, self._section_index.ntotal)
+            scores, indices = self._section_index.search(query_vec, search_k)
+            map_snapshot = list(self._section_id_map)
+
+        results = []
+        for score, idx in zip(scores[0], indices[0]):
+            if idx < 0 or idx >= len(map_snapshot):
+                continue
+            entry = map_snapshot[idx]
+            if section_type and entry["section_type"] != section_type:
+                continue
+            results.append({
+                "paper_id": entry["paper_id"],
+                "section_type": entry["section_type"],
+                "score": float(score),
+            })
+            if len(results) >= top_k:
+                break
+
+        return results
+
+    def save_sections(self) -> None:
+        """Persist section FAISS index to disk."""
+        import faiss
+
+        if not hasattr(self, "_section_index"):
+            return
+
+        with self._lock:
+            section_index_path = self._index_dir / "sections.index"
+            section_map_path = self._index_dir / "section_id_map.json"
+
+            tmp_index = str(section_index_path) + ".tmp"
+            tmp_map = str(section_map_path) + ".tmp"
+
+            faiss.write_index(self._section_index, tmp_index)
+            with open(tmp_map, "w") as f:
+                json.dump(self._section_id_map, f)
+
+            os.replace(tmp_index, str(section_index_path))
+            os.replace(tmp_map, str(section_map_path))
+
     def save(self) -> None:
         """Persist FAISS index to disk atomically."""
         import faiss
