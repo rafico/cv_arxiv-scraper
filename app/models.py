@@ -196,6 +196,15 @@ class SavedSearch(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(128), nullable=False)
     filters = db.Column(JSONDict, nullable=False, default=dict)
+    categories = db.Column(JSONList, nullable=False, default=list)
+    include_keywords = db.Column(JSONList, nullable=False, default=list)
+    exclude_keywords = db.Column(JSONList, nullable=False, default=list)
+    author_filters = db.Column(JSONList, nullable=False, default=list)
+    date_window_days = db.Column(db.Integer, nullable=True)
+    min_citations = db.Column(db.Integer, nullable=True)
+    methods_mentions = db.Column(JSONList, nullable=False, default=list)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    notify_on_match = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     last_used_at = db.Column(db.DateTime, nullable=True)
 
@@ -227,6 +236,23 @@ class PaperFeedback(db.Model):
     created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
 
     paper = db.relationship("Paper", back_populates="feedback")
+
+
+class PaperSection(db.Model):
+    __tablename__ = "paper_sections"
+    __table_args__ = (
+        db.Index("idx_paper_sections_paper_id", "paper_id"),
+        db.Index("idx_paper_sections_type", "section_type"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False)
+    section_type = db.Column(db.String(32), nullable=False)
+    text = db.Column(db.Text, nullable=False, default="")
+    order_index = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+    paper = db.relationship("Paper", backref=db.backref("sections", cascade="all, delete-orphan", lazy="dynamic"))
 
 
 class ScrapeRun(db.Model):

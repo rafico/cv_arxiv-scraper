@@ -498,6 +498,52 @@ def _generate_embeddings(app, results: list[dict]) -> None:
         LOGGER.warning("Embedding generation failed (non-fatal)", exc_info=True)
 
 
+def _extract_sections(app, results: list[dict]) -> None:
+    """Optionally extract PDF sections and generate section-level embeddings."""
+    scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {})
+    if not scraper_config.get("extract_sections", False):
+        return
+
+    from app.models import Paper
+    from app.services.pdf_extraction import extract_and_store_sections
+
+    total_sections = 0
+    with app.app_context():
+        for result in results:
+            pdf_content = result.get("pdf_content")
+            if not pdf_content:
+                continue
+            paper = Paper.query.filter_by(link=result["link"]).first()
+            if not paper:
+                continue
+            try:
+                count = extract_and_store_sections(paper.id, pdf_content, app=app)
+                total_sections += count
+            except Exception:
+                LOGGER.warning("Section extraction failed for %s", result.get("link"), exc_info=True)
+
+    if total_sections > 0:
+        LOGGER.info("Extracted %d sections from matched papers", total_sections)
+
+        # Generate section-level embeddings.
+        try:
+            from app.models import PaperSection
+            from app.services.embeddings import get_embedding_service
+
+            service = get_embedding_service(app)
+            with app.app_context():
+                sections = PaperSection.query.join(Paper).filter(
+                    Paper.link.in_([r["link"] for r in results])
+                ).all()
+                entries = [(s.paper_id, s.section_type, s.text) for s in sections if s.text]
+                if entries:
+                    added = service.add_sections(entries)
+                    service.save_sections()
+                    LOGGER.info("Generated section embeddings for %d sections", added)
+        except Exception:
+            LOGGER.warning("Section embedding generation failed (non-fatal)", exc_info=True)
+
+
 def _build_summary(new_count: int, skipped: int, total_matched: int, total_in_feed: int) -> dict:
     return {
         "new_papers": new_count,
@@ -816,6 +862,9 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         _emit(event_callback, "status", {"phase": "embeddings", "message": "Generating embeddings..."})
         _generate_embeddings(app, results)
 
+        _emit(event_callback, "status", {"phase": "sections", "message": "Extracting PDF sections..."})
+        _extract_sections(app, results)
+
         summary = _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
         _emit(event_callback, "done", summary)
         _finish_scrape_run(app, scrape_run_id, status="success")
@@ -896,5 +945,6 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
 
     _generate_thumbnails(app, results, session)
     _generate_embeddings(app, results)
+    _extract_sections(app, results)
 
     return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
