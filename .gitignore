@@ -36,6 +36,7 @@ codex-claude-bridge/
 .continue/checks/
 HANDOFF.md
 tailwindcss
+.github/PULL_REQUEST_TEMPLATE_DRAFT.md
 
 app/static/thumbnails/
 .codex

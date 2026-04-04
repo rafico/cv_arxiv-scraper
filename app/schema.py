@@ -20,6 +20,7 @@ def _validate_column_name(name: str) -> None:
     if not _SAFE_COLUMN_NAME_RE.match(name):
         raise ValueError(f"Unsafe column name for schema migration: {name!r}")
 
+
 FEEDBACK_COLUMN_DEFS = {
     "reason": "TEXT",
     "note": "TEXT",

@@ -32,7 +32,10 @@ class IngestOrchestratorTests(TestCase):
             rolling_window_days=2,
         )
 
-        self.assertEqual([candidate.title for candidate in candidates], ["rss:https://rss.arxiv.org/rss/cs.CV", "recent-new:https://rss.arxiv.org/rss/cs.CV"])
+        self.assertEqual(
+            [candidate.title for candidate in candidates],
+            ["rss:https://rss.arxiv.org/rss/cs.CV", "recent-new:https://rss.arxiv.org/rss/cs.CV"],
+        )
 
     def test_daily_watch_raises_when_all_feeds_fail(self):
         def failing_fetcher(feed_url, *, session=None):
@@ -66,7 +69,9 @@ class IngestOrchestratorTests(TestCase):
     def test_daily_watch_with_explicit_arxiv_api_backend_uses_one_day_window_when_zero(self):
         orchestrator = IngestOrchestrator(
             rss_candidate_fetcher=lambda feed_url, *, session=None: [],
-            rolling_window_fetcher=lambda days, feed_url, *, session=None: [_candidate(f"{days:04d}", f"recent:{days}")],
+            rolling_window_fetcher=lambda days, feed_url, *, session=None: [
+                _candidate(f"{days:04d}", f"recent:{days}")
+            ],
         )
 
         candidates = orchestrator.fetch(
@@ -170,9 +175,7 @@ class IngestOrchestratorTests(TestCase):
                 "cs.CV": datetime(2026, 1, 7, 12, 0, 0),
                 "cs.LG": datetime(2026, 1, 9, 9, 30, 0),
             },
-            sync_state_writer=lambda category, **kwargs: updates.append(
-                (category, kwargs)
-            ),
+            sync_state_writer=lambda category, **kwargs: updates.append((category, kwargs)),
             clock=lambda: datetime(2026, 1, 15, 8, 0, 0),
         )
 
@@ -274,7 +277,18 @@ class IngestOrchestratorTests(TestCase):
         self.assertEqual([candidate.arxiv_id for candidate in candidates], ["resume-001"])
         self.assertEqual(backend.calls[0]["offset"], 100)
         self.assertEqual(backend.calls[0]["resume_after_arxiv_id"], "2601.00099")
-        self.assertEqual(updates[-1], ("cs.CV", {"synced_through": datetime(2026, 1, 15, 23, 59, 59, 999999), "updated_at": datetime(2026, 1, 15, 8, 0, 0), "paper_count": 1, "clear_cursor": True}))
+        self.assertEqual(
+            updates[-1],
+            (
+                "cs.CV",
+                {
+                    "synced_through": datetime(2026, 1, 15, 23, 59, 59, 999999),
+                    "updated_at": datetime(2026, 1, 15, 8, 0, 0),
+                    "paper_count": 1,
+                    "clear_cursor": True,
+                },
+            ),
+        )
 
     def test_catch_up_requires_sync_state_cursor_for_each_category(self):
         orchestrator = IngestOrchestrator(

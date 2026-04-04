@@ -6,7 +6,7 @@ import io
 import logging
 import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from urllib.parse import urlparse
 
 import defusedxml.ElementTree as ET
@@ -34,6 +34,8 @@ _ATOM_NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "arxiv": "http://arxiv.org/schemas/atom",
 }
+
+
 def parse_feed_entries(feed_url: str, session: requests.Session | None = None) -> list[dict]:
     backend = RssFeedBackend([feed_url])
     return [candidate.to_entry_dict() for candidate in backend.fetch(session=session)]

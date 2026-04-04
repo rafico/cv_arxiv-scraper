@@ -227,8 +227,7 @@ class IngestOrchestrator:
 
         raw_sync_state_by_category = self._sync_state_reader(categories)
         sync_state_by_category = {
-            category: self._normalize_sync_cursor(raw_sync_state_by_category.get(category))
-            for category in categories
+            category: self._normalize_sync_cursor(raw_sync_state_by_category.get(category)) for category in categories
         }
         missing_categories = [
             category for category in categories if sync_state_by_category[category].submitted_at is None
@@ -287,7 +286,9 @@ class IngestOrchestrator:
         return candidates
 
     @staticmethod
-    def _merge_candidates(primary: Sequence[PaperCandidate], secondary: Sequence[PaperCandidate]) -> list[PaperCandidate]:
+    def _merge_candidates(
+        primary: Sequence[PaperCandidate], secondary: Sequence[PaperCandidate]
+    ) -> list[PaperCandidate]:
         merged_candidates: dict[str, PaperCandidate] = {}
         for candidate in primary:
             merged_candidates[candidate.arxiv_id or candidate.link] = candidate
@@ -409,7 +410,4 @@ class IngestOrchestrator:
     ) -> list[PaperCandidate]:
         from app.services.enrichment import fetch_recent_papers
 
-        return [
-            PaperCandidate.from_entry_dict(entry)
-            for entry in fetch_recent_papers(days, feed_url, session=session)
-        ]
+        return [PaperCandidate.from_entry_dict(entry) for entry in fetch_recent_papers(days, feed_url, session=session)]

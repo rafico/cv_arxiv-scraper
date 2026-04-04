@@ -679,24 +679,26 @@ def run_saved_search(search_id: int):
     s.last_used_at = db.func.now()
     db.session.commit()
 
-    return jsonify({
-        "search_id": s.id,
-        "search_name": s.name,
-        "count": len(papers),
-        "results": [
-            {
-                "id": p.id,
-                "arxiv_id": p.arxiv_id,
-                "title": p.title,
-                "authors": p.authors,
-                "abstract": (p.abstract_text or "")[:300],
-                "paper_score": float(p.paper_score or 0),
-                "publication_dt": p.publication_dt.isoformat() if p.publication_dt else None,
-                "citation_count": p.citation_count,
-            }
-            for p in papers
-        ],
-    })
+    return jsonify(
+        {
+            "search_id": s.id,
+            "search_name": s.name,
+            "count": len(papers),
+            "results": [
+                {
+                    "id": p.id,
+                    "arxiv_id": p.arxiv_id,
+                    "title": p.title,
+                    "authors": p.authors,
+                    "abstract": (p.abstract_text or "")[:300],
+                    "paper_score": float(p.paper_score or 0),
+                    "publication_dt": p.publication_dt.isoformat() if p.publication_dt else None,
+                    "citation_count": p.citation_count,
+                }
+                for p in papers
+            ],
+        }
+    )
 
 
 # ── Bulk Operations API ──

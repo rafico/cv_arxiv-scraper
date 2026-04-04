@@ -118,7 +118,9 @@ class CorpusApiTests(FlaskDBTestCase):
         with patch("app.services.corpus_analysis.analyze_topic_clusters") as mock_analyze:
             mock_analyze.return_value = {"window_days": 14, "offset_days": 2, "clusters": []}
 
-            response = self.client.get("/api/corpus/clusters?window_days=14&offset_days=2&clusters=3&limit=150&paper_limit=4")
+            response = self.client.get(
+                "/api/corpus/clusters?window_days=14&offset_days=2&clusters=3&limit=150&paper_limit=4"
+            )
 
         self.assertEqual(response.status_code, 200)
         mock_analyze.assert_called_once_with(

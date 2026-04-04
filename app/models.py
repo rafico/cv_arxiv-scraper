@@ -213,9 +213,7 @@ class SavedSearch(db.Model):
 
 class RankingConfig(db.Model):
     __tablename__ = "ranking_configs"
-    __table_args__ = (
-        db.Index("idx_ranking_configs_active_created", "is_active", "created_at"),
-    )
+    __table_args__ = (db.Index("idx_ranking_configs_active_created", "is_active", "created_at"),)
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(128), nullable=False, unique=True)
@@ -226,9 +224,7 @@ class RankingConfig(db.Model):
 
 class RecommendationMetric(db.Model):
     __tablename__ = "recommendation_metrics"
-    __table_args__ = (
-        db.Index("idx_recommendation_metrics_name_measured", "metric_name", "measured_at"),
-    )
+    __table_args__ = (db.Index("idx_recommendation_metrics_name_measured", "metric_name", "measured_at"),)
 
     id = db.Column(db.Integer, primary_key=True)
     metric_name = db.Column(db.String(64), nullable=False)
