@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+import re
 
 from app.models import Paper, db
 from app.services.feedback import apply_feedback_action
@@ -102,3 +103,20 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertIn("https://example.com/code/0", text)
         self.assertNotIn("https://arxiv.org/abs/2602.1001", text)
         self.assertIn("Has resources", text)
+
+    def test_dashboard_shows_citation_provenance_tooltip_and_openalex_fallback(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+        paper.citation_count = None
+        paper.openalex_id = "W999"
+        paper.openalex_cited_by_count = 17
+        paper.citation_source = "openalex"
+        paper.citation_provenance = {"source": "openalex", "updated_at": "2026-04-01T12:00:00"}
+        db.session.commit()
+
+        response = self.client.get("/")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Citation count from OpenAlex, updated 2026-04-01", text)
+        self.assertIn("https://openalex.org/W999", text)
+        self.assertRegex(text, re.compile(r">\s*17\s*</a>"))

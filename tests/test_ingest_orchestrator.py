@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from unittest import TestCase
 
-from app.services.ingest import IngestMode, IngestOrchestrator, PaperCandidate
+from app.services.ingest import IngestMode, IngestOrchestrator, PaperCandidate, SyncCursor
 
 
 def _candidate(arxiv_id: str, title: str) -> PaperCandidate:
@@ -158,9 +158,11 @@ class IngestOrchestratorTests(TestCase):
             def fetch(self, **kwargs):
                 self.calls.append(kwargs)
                 category = kwargs["categories"][0]
-                return [_candidate(f"{category}-001", f"catch-up:{category}")]
+                candidate = _candidate(f"{category}-001", f"catch-up:{category}")
+                kwargs["progress_callback"](1, candidate)
+                return [candidate]
 
-        updates: list[tuple[str, datetime, datetime, int]] = []
+        updates: list[tuple[str, dict]] = []
         backend = FakeArxivBackend()
         orchestrator = IngestOrchestrator(
             arxiv_api_backend=backend,
@@ -168,8 +170,8 @@ class IngestOrchestratorTests(TestCase):
                 "cs.CV": datetime(2026, 1, 7, 12, 0, 0),
                 "cs.LG": datetime(2026, 1, 9, 9, 30, 0),
             },
-            sync_state_writer=lambda category, *, synced_through, updated_at, paper_count: updates.append(
-                (category, synced_through, updated_at, paper_count)
+            sync_state_writer=lambda category, **kwargs: updates.append(
+                (category, kwargs)
             ),
             clock=lambda: datetime(2026, 1, 15, 8, 0, 0),
         )
@@ -182,32 +184,97 @@ class IngestOrchestratorTests(TestCase):
         )
 
         self.assertEqual([candidate.title for candidate in candidates], ["catch-up:cs.CV", "catch-up:cs.LG"])
-        self.assertEqual(
-            backend.calls,
-            [
-                {
-                    "categories": ["cs.CV"],
-                    "start_dt": date(2026, 1, 7),
-                    "end_dt": date(2026, 1, 15),
-                    "max_results": 25,
-                    "session": None,
-                },
-                {
-                    "categories": ["cs.LG"],
-                    "start_dt": date(2026, 1, 9),
-                    "end_dt": date(2026, 1, 15),
-                    "max_results": 25,
-                    "session": None,
-                },
-            ],
-        )
+        self.assertEqual(backend.calls[0]["categories"], ["cs.CV"])
+        self.assertEqual(backend.calls[0]["start_dt"], date(2026, 1, 7))
+        self.assertEqual(backend.calls[0]["end_dt"], date(2026, 1, 15))
+        self.assertEqual(backend.calls[0]["max_results"], 25)
+        self.assertEqual(backend.calls[0]["offset"], 0)
+        self.assertIsNone(backend.calls[0]["resume_after_arxiv_id"])
+        self.assertTrue(callable(backend.calls[0]["progress_callback"]))
+        self.assertEqual(backend.calls[1]["categories"], ["cs.LG"])
+        self.assertEqual(backend.calls[1]["start_dt"], date(2026, 1, 9))
+        self.assertEqual(backend.calls[1]["offset"], 0)
         self.assertEqual(
             updates,
             [
-                ("cs.CV", datetime(2026, 1, 15, 23, 59, 59, 999999), datetime(2026, 1, 15, 8, 0, 0), 1),
-                ("cs.LG", datetime(2026, 1, 15, 23, 59, 59, 999999), datetime(2026, 1, 15, 8, 0, 0), 1),
+                (
+                    "cs.CV",
+                    {
+                        "updated_at": datetime(2026, 1, 15, 8, 0, 0),
+                        "paper_count": 1,
+                        "cursor_page": 1,
+                        "cursor_arxiv_id": "cs.CV-001",
+                    },
+                ),
+                (
+                    "cs.CV",
+                    {
+                        "synced_through": datetime(2026, 1, 15, 23, 59, 59, 999999),
+                        "updated_at": datetime(2026, 1, 15, 8, 0, 0),
+                        "paper_count": 1,
+                        "clear_cursor": True,
+                    },
+                ),
+                (
+                    "cs.LG",
+                    {
+                        "updated_at": datetime(2026, 1, 15, 8, 0, 0),
+                        "paper_count": 1,
+                        "cursor_page": 1,
+                        "cursor_arxiv_id": "cs.LG-001",
+                    },
+                ),
+                (
+                    "cs.LG",
+                    {
+                        "synced_through": datetime(2026, 1, 15, 23, 59, 59, 999999),
+                        "updated_at": datetime(2026, 1, 15, 8, 0, 0),
+                        "paper_count": 1,
+                        "clear_cursor": True,
+                    },
+                ),
             ],
         )
+
+    def test_catch_up_resumes_from_saved_page_cursor(self):
+        class FakeArxivBackend:
+            page_size = 50
+
+            def __init__(self):
+                self.calls: list[dict] = []
+
+            def fetch(self, **kwargs):
+                self.calls.append(kwargs)
+                candidate = _candidate("resume-001", "catch-up:resume")
+                kwargs["progress_callback"](3, candidate)
+                return [candidate]
+
+        updates: list[tuple[str, dict]] = []
+        backend = FakeArxivBackend()
+        orchestrator = IngestOrchestrator(
+            arxiv_api_backend=backend,
+            sync_state_reader=lambda categories: {
+                "cs.CV": SyncCursor(
+                    submitted_at=datetime(2026, 1, 7, 12, 0, 0),
+                    cursor_page=3,
+                    last_arxiv_id="2601.00099",
+                )
+            },
+            sync_state_writer=lambda category, **kwargs: updates.append((category, kwargs)),
+            clock=lambda: datetime(2026, 1, 15, 8, 0, 0),
+        )
+
+        candidates = orchestrator.fetch(
+            mode=IngestMode.CATCH_UP,
+            categories=["cs.CV"],
+            end_dt=date(2026, 1, 15),
+            max_results=25,
+        )
+
+        self.assertEqual([candidate.arxiv_id for candidate in candidates], ["resume-001"])
+        self.assertEqual(backend.calls[0]["offset"], 100)
+        self.assertEqual(backend.calls[0]["resume_after_arxiv_id"], "2601.00099")
+        self.assertEqual(updates[-1], ("cs.CV", {"synced_through": datetime(2026, 1, 15, 23, 59, 59, 999999), "updated_at": datetime(2026, 1, 15, 8, 0, 0), "paper_count": 1, "clear_cursor": True}))
 
     def test_catch_up_requires_sync_state_cursor_for_each_category(self):
         orchestrator = IngestOrchestrator(

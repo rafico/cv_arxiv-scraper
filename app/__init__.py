@@ -14,6 +14,7 @@ from app.services.preferences import get_preferences
 
 DEFAULT_DATABASE_URI = "sqlite:///arxiv_papers.db"
 DEFAULT_LLM_KEY_FILENAME = ".llm_api_key"
+_SECRET_KEY_FILENAME = ".flask_secret"
 
 
 def _load_config(path: Path) -> dict:
@@ -77,6 +78,36 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
                 raise ValueError(
                     f"'ingest.backends' contains unknown backends: {', '.join(unknown_backends)}"
                 )
+
+        user_agent = ingest.get("user_agent")
+        if user_agent is not None and (not isinstance(user_agent, str) or not user_agent.strip()):
+            raise ValueError("'ingest.user_agent' must be a non-empty string when provided")
+
+        rate_limit = ingest.get("rate_limit")
+        if rate_limit is not None:
+            if not isinstance(rate_limit, dict):
+                raise ValueError("'ingest.rate_limit' must be a dict")
+
+            requests_per_second = rate_limit.get("requests_per_second")
+            if requests_per_second is not None:
+                if isinstance(requests_per_second, bool):
+                    raise ValueError("'ingest.rate_limit.requests_per_second' must be positive")
+                try:
+                    if float(requests_per_second) <= 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise ValueError("'ingest.rate_limit.requests_per_second' must be positive") from None
+
+            burst = rate_limit.get("burst")
+            if burst is not None:
+                if isinstance(burst, bool):
+                    raise ValueError("'ingest.rate_limit.burst' must be a positive integer")
+                try:
+                    burst_value = int(burst)
+                    if float(burst_value) != float(burst) or burst_value < 1:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise ValueError("'ingest.rate_limit.burst' must be a positive integer") from None
 
     # --- whitelists section ---
     if "whitelists" not in config:
@@ -144,18 +175,40 @@ def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(api_bp)
 
 
+def _ensure_secret_key(instance_path: Path) -> str:
+    """Load or generate a persistent secret key in the instance folder."""
+    env_key = os.environ.get("SECRET_KEY", "").strip()
+    if env_key:
+        return env_key
+    key_path = instance_path / _SECRET_KEY_FILENAME
+    if key_path.is_file():
+        try:
+            return key_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    key = os.urandom(32).hex()
+    try:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_text(key, encoding="utf-8")
+        os.chmod(key_path, 0o600)
+    except OSError:
+        pass  # Fall back to ephemeral key if we can't write.
+    return key
+
+
 def create_app(config_overrides: dict | None = None) -> Flask:
     app = Flask(__name__, instance_relative_config=True)
+    Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     app.config.update(
         SQLALCHEMY_DATABASE_URI=DEFAULT_DATABASE_URI,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        SECRET_KEY=os.environ.get("SECRET_KEY") or os.urandom(32).hex(),
+        SECRET_KEY=_ensure_secret_key(Path(app.instance_path)),
     )
 
     if config_overrides:
         app.config.update(config_overrides)
 
-    Path(app.instance_path).mkdir(parents=True, exist_ok=True)
+    # instance_path already created above before _ensure_secret_key call
     app.config.setdefault("FAISS_INDEX_DIR", str(Path(app.instance_path) / "faiss_index"))
 
     config_path = Path(app.config.get("CONFIG_PATH", (Path(app.root_path).parent / "config.yaml").resolve()))

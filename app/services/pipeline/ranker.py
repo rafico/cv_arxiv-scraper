@@ -13,6 +13,7 @@ from app.services.pipeline.features import (
     FeatureExtractor,
     FeatureVector,
 )
+from app.services.ranking import compute_paper_score
 
 
 @dataclass(slots=True)
@@ -73,7 +74,8 @@ class Ranker(Protocol):
 class WeightedSumRanker:
     """Ranks candidates using a weighted sum of features.
 
-    Replicates the exact scoring behavior of compute_paper_score().
+    Delegates scoring to ranking.compute_paper_score() to keep the formula
+    in a single canonical location.
     """
 
     def __init__(
@@ -88,7 +90,15 @@ class WeightedSumRanker:
         ranked = []
         for candidate in candidates:
             features = self.extractor.extract(candidate)
-            score = self._compute_score(features)
+            score = compute_paper_score(
+                match_types=candidate.match_types,
+                matched_terms_count=len(candidate.matched_terms),
+                publication_dt=candidate.entry_data.get("publication_dt"),
+                resource_count=features.resource_count,
+                llm_relevance_score=features.llm_relevance,
+                citation_count=features.citation_count,
+                config=self.config,
+            )
             ranked.append(
                 RankedPaper(
                     entry_data=candidate.entry_data,
@@ -108,21 +118,6 @@ class WeightedSumRanker:
             reverse=True,
         )
         return ranked
-
-    def _compute_score(self, features: FeatureVector) -> float:
-        match_score = (
-            features.author_match_score
-            + features.affiliation_match_score
-            + features.title_match_score
-        )
-        raw = (
-            match_score
-            + features.term_score
-            + features.resource_score
-            + features.llm_bonus
-            + features.citation_bonus
-        )
-        return round(raw * features.recency, 3)
 
     def generate_explanation(self, ranked_paper: RankedPaper) -> list[str]:
         """Generate human-readable explanation strings for a ranked paper."""
@@ -162,3 +157,4 @@ class WeightedSumRanker:
             explanations.append("Code or dataset available")
 
         return explanations
+

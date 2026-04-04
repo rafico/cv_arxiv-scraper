@@ -19,6 +19,49 @@ from app.services.preferences import (
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+def _parse_int_query_arg(
+    name: str,
+    *,
+    default: int | None,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int | None:
+    raw = request.args.get(name, "").strip()
+    if not raw:
+        return default
+
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"Invalid '{name}' parameter") from exc
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"'{name}' must be at least {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"'{name}' must be at most {maximum}")
+    return value
+
+
+def _parse_bool_query_arg(name: str, *, default: bool) -> bool:
+    raw = request.args.get(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid '{name}' parameter")
+
+
+def _parse_paper_ids_query(raw: str) -> list[int]:
+    if not raw.strip():
+        return []
+    try:
+        return [int(value.strip()) for value in raw.split(",") if value.strip()]
+    except ValueError as exc:
+        raise ValueError("Invalid 'paper_ids' parameter") from exc
+
+
 @api_bp.route("/scrape", methods=["POST"])
 def trigger_scrape():
     validate_csrf_token()
@@ -122,6 +165,88 @@ def search_papers():
             )
 
     return jsonify({"query": q, "mode": mode, "results": enriched})
+
+
+@api_bp.route("/corpus/clusters", methods=["GET"])
+def corpus_clusters():
+    from app.services.corpus_analysis import analyze_topic_clusters
+
+    try:
+        window_days = _parse_int_query_arg("window_days", default=7, minimum=1, maximum=365)
+        offset_days = _parse_int_query_arg("offset_days", default=0, minimum=0, maximum=365)
+        limit = _parse_int_query_arg("limit", default=200, minimum=1, maximum=1000)
+        cluster_count = _parse_int_query_arg("clusters", default=None, minimum=1, maximum=25)
+        paper_limit = _parse_int_query_arg("paper_limit", default=5, minimum=1, maximum=50)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    result = analyze_topic_clusters(
+        window_days=window_days or 7,
+        offset_days=offset_days or 0,
+        limit=limit or 200,
+        cluster_count=cluster_count,
+        paper_limit=paper_limit or 5,
+    )
+    return jsonify(result)
+
+
+@api_bp.route("/corpus/emerging", methods=["GET"])
+def corpus_emerging():
+    from app.services.corpus_analysis import detect_emerging_topics
+
+    try:
+        recent_days = _parse_int_query_arg("recent_days", default=7, minimum=1, maximum=365)
+        baseline_days = _parse_int_query_arg("baseline_days", default=28, minimum=1, maximum=3650)
+        limit = _parse_int_query_arg("limit", default=200, minimum=1, maximum=1000)
+        cluster_count = _parse_int_query_arg("clusters", default=None, minimum=1, maximum=25)
+        paper_limit = _parse_int_query_arg("paper_limit", default=3, minimum=1, maximum=50)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    result = detect_emerging_topics(
+        recent_days=recent_days or 7,
+        baseline_days=baseline_days or 28,
+        limit=limit or 200,
+        cluster_count=cluster_count,
+        paper_limit=paper_limit or 3,
+    )
+    return jsonify(result)
+
+
+@api_bp.route("/corpus/neighbors", methods=["GET"])
+def corpus_neighbors():
+    from app.services.corpus_analysis import find_neighbor_papers
+
+    try:
+        limit = _parse_int_query_arg("limit", default=20, minimum=1, maximum=100)
+        collection_id = _parse_int_query_arg("collection_id", default=None, minimum=1)
+        exclude_tracked_authors = _parse_bool_query_arg("exclude_tracked_authors", default=True)
+        seed_paper_ids = _parse_paper_ids_query(request.args.get("paper_ids", ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if collection_id is not None:
+        collection = db.session.get(Collection, collection_id) or abort(404)
+        seed_paper_ids.extend(
+            paper_collection.paper_id
+            for paper_collection in PaperCollection.query.filter_by(collection_id=collection.id)
+            .order_by(PaperCollection.added_at.desc())
+            .all()
+        )
+
+    if not seed_paper_ids:
+        return jsonify({"error": "Provide 'paper_ids' or 'collection_id'"}), 400
+
+    tracked_authors = current_app.config.get("SCRAPER_CONFIG", {}).get("whitelists", {}).get("authors", [])
+    result = find_neighbor_papers(
+        seed_paper_ids,
+        limit=limit or 20,
+        tracked_authors=tracked_authors,
+        exclude_tracked_authors=exclude_tracked_authors,
+    )
+    if collection_id is not None:
+        result["collection_id"] = collection_id
+    return jsonify(result)
 
 
 @api_bp.route("/export", methods=["GET"])
@@ -319,7 +444,20 @@ def mute_recommendation(paper_id: int):
 
 @api_bp.route("/collections", methods=["GET"])
 def list_collections():
-    collections = Collection.query.order_by(Collection.name).all()
+    paper_count_subquery = (
+        db.session.query(
+            PaperCollection.collection_id,
+            db.func.count(PaperCollection.id).label("paper_count"),
+        )
+        .group_by(PaperCollection.collection_id)
+        .subquery()
+    )
+    results = (
+        db.session.query(Collection, db.func.coalesce(paper_count_subquery.c.paper_count, 0))
+        .outerjoin(paper_count_subquery, Collection.id == paper_count_subquery.c.collection_id)
+        .order_by(Collection.name)
+        .all()
+    )
     return jsonify(
         [
             {
@@ -327,9 +465,9 @@ def list_collections():
                 "name": c.name,
                 "description": c.description or "",
                 "color": c.color,
-                "paper_count": PaperCollection.query.filter_by(collection_id=c.id).count(),
+                "paper_count": count,
             }
-            for c in collections
+            for c, count in results
         ]
     )
 
@@ -496,7 +634,9 @@ def update_saved_search(search_id: int):
         if name:
             s.name = name
     if "filters" in payload:
-        s.filters = payload["filters"] if isinstance(payload["filters"], dict) else s.filters
+        if not isinstance(payload["filters"], dict):
+            return jsonify({"error": "'filters' must be a dict"}), 400
+        s.filters = payload["filters"]
     for field in ("categories", "include_keywords", "exclude_keywords", "author_filters", "methods_mentions"):
         if field in payload:
             setattr(s, field, payload[field])
@@ -529,9 +669,16 @@ def run_saved_search(search_id: int):
     validate_csrf_token()
     s = db.session.get(SavedSearch, search_id) or abort(404)
     payload = request.get_json(silent=True) or {}
-    limit = min(int(payload.get("limit", 100)), 500)
+    try:
+        limit = min(int(payload.get("limit", 100)), 500)
+    except (ValueError, TypeError):
+        limit = 100
 
     papers = execute_saved_search(s, limit=limit)
+
+    s.last_used_at = db.func.now()
+    db.session.commit()
+
     return jsonify({
         "search_id": s.id,
         "search_name": s.name,

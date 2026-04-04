@@ -18,13 +18,14 @@ from flask import (
 )
 
 from app import _validate_config
+from app.constants import DEFAULT_LLM_MODEL
 from app.csrf import get_or_create_csrf_token, validate_csrf_token
 from app.models import Paper, db
 from app.services.llm_client import has_api_key, write_api_key
 from app.services.preferences import get_preferences, save_config, update_preferences_from_form
 from app.services.ranking import recompute_all_paper_scores
 
-log = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 settings_bp = Blueprint("settings", __name__)
 _LLM_MASK_VALUE = "********"
@@ -63,7 +64,7 @@ def _llm_provider_defaults(provider: str) -> dict[str, str]:
             "base_url": "http://localhost:11434/v1",
         }
     return {
-        "model": "anthropic/claude-sonnet-4",
+        "model": DEFAULT_LLM_MODEL,
         "base_url": "https://openrouter.ai/api/v1",
     }
 
@@ -379,7 +380,7 @@ def send_test_digest():
         )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         flash(f"Failed to send digest: {exc}", "error")
-        log.exception("Test digest failed")
+        LOGGER.exception("Test digest failed")
 
     return redirect(url_for("settings.view_settings", section="automation"))
 

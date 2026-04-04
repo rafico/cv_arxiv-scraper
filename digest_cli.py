@@ -19,7 +19,7 @@ import argparse
 import sys
 
 from app import create_app
-from app.scraper import run_scrape
+from app.services.scrape_engine import run_scrape
 from app.services.email_digest import send_digest
 
 

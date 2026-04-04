@@ -275,10 +275,15 @@
                     AI: {{ paper.llm_relevance_score|round|int }}/10
                 </span>
                 {% endif %}
-                {% if paper.citation_count is not none %}
-                <a {% if paper.semantic_scholar_id %}href="https://www.semanticscholar.org/paper/{{ paper.semantic_scholar_id }}" target="_blank"{% endif %} class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors" title="Citations on Semantic Scholar">
+                {% set citation_display_count = paper.citation_count if paper.citation_count is not none else paper.openalex_cited_by_count %}
+                {% set citation_source = paper.citation_source or ('semantic_scholar' if paper.citation_count is not none else ('openalex' if paper.openalex_cited_by_count is not none else None)) %}
+                {% set citation_updated_at = paper.citation_provenance.get('updated_at') if paper.citation_provenance else None %}
+                {% set citation_source_label = 'Semantic Scholar' if citation_source == 'semantic_scholar' else ('OpenAlex' if citation_source == 'openalex' else 'Citation source') %}
+                {% set citation_title = 'Citation count from ' ~ citation_source_label ~ (', updated ' ~ citation_updated_at[:10] if citation_updated_at else '') %}
+                {% if citation_display_count is not none %}
+                <a {% if citation_source == 'semantic_scholar' and paper.semantic_scholar_id %}href="https://www.semanticscholar.org/paper/{{ paper.semantic_scholar_id }}" target="_blank"{% elif citation_source == 'openalex' and paper.openalex_id %}href="https://openalex.org/{{ paper.openalex_id }}" target="_blank"{% endif %} class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors" title="{{ citation_title }}">
                     <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-                    {{ paper.citation_count }}
+                    {{ citation_display_count }}
                 </a>
                 {% endif %}
                 <span class="text-[11px] text-gray-400 ml-auto tabular-nums">

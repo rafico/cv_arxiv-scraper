@@ -36,6 +36,8 @@ class TestNormalizeSectionType:
 
 def _make_pdf(lines: list[str]) -> bytes:
     """Create a minimal PDF with the given text lines using fpdf."""
+    import os
+    import pathlib
     import tempfile
 
     from fpdf import FPDF
@@ -48,8 +50,10 @@ def _make_pdf(lines: list[str]) -> bytes:
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         pdf.output(tmp.name)
-        tmp.seek(0)
-        return open(tmp.name, "rb").read()
+    try:
+        return pathlib.Path(tmp.name).read_bytes()
+    finally:
+        os.unlink(tmp.name)
 
 
 class TestExtractSections:

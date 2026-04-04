@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from math import exp
 
-from app.services.preferences import get_preferences
+from app.services.preferences import DEFAULT_PREFERENCES, get_preferences
 from app.services.text import utc_today
 
 MATCH_TYPE_WEIGHTS = {
@@ -30,16 +30,97 @@ FEEDBACK_WEIGHTS = {
     "shared": 15,
 }
 
+RANKING_WEIGHT_ALIASES = {
+    "Author": "author_weight",
+    "Affiliation": "affiliation_weight",
+    "Title": "title_weight",
+    "half_life_days": "freshness_half_life_days",
+}
 
-def resolve_ranking_preferences(config: dict | None = None) -> dict[str, float]:
+
+def _normalize_ranking_weights(raw_weights: dict | None) -> dict[str, float]:
+    defaults = DEFAULT_PREFERENCES["ranking"]
+    if not isinstance(raw_weights, dict):
+        return {}
+
+    normalized: dict[str, float] = {}
+    for raw_key, raw_value in raw_weights.items():
+        canonical_key = RANKING_WEIGHT_ALIASES.get(raw_key, raw_key)
+        if canonical_key not in defaults:
+            continue
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if 0 < value <= 1000:
+            normalized[canonical_key] = value
+    return normalized
+
+
+def get_active_ranking_config():
+    try:
+        from flask import has_app_context
+
+        if not has_app_context():
+            return None
+
+        from app.models import RankingConfig
+
+        return (
+            RankingConfig.query.filter(RankingConfig.is_active.is_(True))
+            .order_by(RankingConfig.created_at.desc(), RankingConfig.id.desc())
+            .first()
+        )
+    except Exception:
+        return None
+
+
+def resolve_ranking_weight_snapshot(config: dict | None = None, *, ranking_config=None) -> dict[str, float]:
     preferences = get_preferences(config)
+    weights = dict(preferences["ranking"])
+
+    active_config = ranking_config if ranking_config is not None else get_active_ranking_config()
+    if active_config is None:
+        return weights
+
+    if isinstance(active_config, dict):
+        raw_weights = active_config.get("weights") if isinstance(active_config.get("weights"), dict) else active_config
+    else:
+        raw_weights = getattr(active_config, "weights", {})
+
+    weights.update(_normalize_ranking_weights(raw_weights))
+    return weights
+
+
+def build_ranking_config_snapshot(config: dict | None = None, *, ranking_config=None) -> dict:
+    active_config = ranking_config if ranking_config is not None else get_active_ranking_config()
+    snapshot = {
+        "source": "db" if active_config is not None else "config",
+        "weights": resolve_ranking_weight_snapshot(config, ranking_config=ranking_config),
+    }
+    if active_config is None:
+        return snapshot
+    if isinstance(active_config, dict):
+        if active_config.get("name"):
+            snapshot["name"] = str(active_config["name"])
+        if "is_active" in active_config:
+            snapshot["is_active"] = bool(active_config["is_active"])
+        return snapshot
+    snapshot["name"] = active_config.name
+    snapshot["ranking_config_id"] = active_config.id
+    snapshot["is_active"] = bool(active_config.is_active)
+    return snapshot
+
+
+def resolve_ranking_preferences(config: dict | None = None, *, ranking_config=None) -> dict[str, float]:
+    weights = resolve_ranking_weight_snapshot(config, ranking_config=ranking_config)
     return {
-        "Author": float(preferences["ranking"]["author_weight"]),
-        "Affiliation": float(preferences["ranking"]["affiliation_weight"]),
-        "Title": float(preferences["ranking"]["title_weight"]),
-        "ai_weight": float(preferences["ranking"]["ai_weight"]),
-        "citation_weight": float(preferences.get("ranking", {}).get("citation_weight", 0.5)),
-        "half_life_days": float(preferences["ranking"]["freshness_half_life_days"]),
+        "Author": float(weights["author_weight"]),
+        "Affiliation": float(weights["affiliation_weight"]),
+        "Title": float(weights["title_weight"]),
+        "ai_weight": float(weights["ai_weight"]),
+        "citation_weight": float(weights["citation_weight"]),
+        "half_life_days": float(weights["freshness_half_life_days"]),
     }
 
 
@@ -68,8 +149,9 @@ def compute_paper_score(
     llm_relevance_score: float | None = None,
     citation_count: int | None = None,
     config: dict | None = None,
+    ranking_config=None,
 ) -> float:
-    preferences = resolve_ranking_preferences(config)
+    preferences = resolve_ranking_preferences(config, ranking_config=ranking_config)
     match_score = sum(
         preferences.get(match_type, MATCH_TYPE_WEIGHTS.get(match_type, 0.0)) for match_type in match_types
     )
@@ -97,8 +179,9 @@ def explain_score(
     citation_count: int | None = None,
     feedback_score: int = 0,
     config: dict | None = None,
+    ranking_config=None,
 ) -> dict[str, float]:
-    preferences = resolve_ranking_preferences(config)
+    preferences = resolve_ranking_preferences(config, ranking_config=ranking_config)
     match_score = sum(preferences.get(match_type, 0.0) for match_type in match_types)
     term_score = matched_terms_count * TERM_MATCH_WEIGHT
     resource_score = min(resource_count, 4) * RESOURCE_SIGNAL_WEIGHT

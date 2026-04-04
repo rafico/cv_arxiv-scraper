@@ -33,7 +33,7 @@ from app.models import DigestRun, Paper, db
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score
 from app.services.text import now_utc, utc_today
 
-log = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 # Only permission needed: send email. Cannot read, list, or delete.
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
@@ -604,7 +604,7 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
     msg.attach(MIMEText(html_body, "html"))
 
     if dry_run:
-        log.info("Dry run — email not sent (would send to %s)", recipient)
+        LOGGER.info("Dry run — email not sent (would send to %s)", recipient)
         _finish_digest_run(app, digest_run_id, status="preview")
         return {"papers_count": len(papers), "sent": False, "recipient": recipient}
 
@@ -619,6 +619,6 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
         _finish_digest_run(app, digest_run_id, status="error", error_message=str(exc))
         raise
 
-    log.info("Digest sent to %s (%d papers)", recipient, len(papers))
+    LOGGER.info("Digest sent to %s (%d papers)", recipient, len(papers))
     _finish_digest_run(app, digest_run_id, status="success")
     return {"papers_count": len(papers), "sent": True, "recipient": recipient}

@@ -73,6 +73,15 @@ class TestEmbeddingService:
         service.add_papers([1], ["test"])
         assert service.search_by_id(999) == []
 
+    def test_get_paper_vectors_returns_indexed_ids_in_requested_order(self, index_dir):
+        service = _make_service(index_dir)
+        service.add_papers([1, 2, 3], ["alpha", "beta", "gamma"])
+
+        paper_ids, vectors = service.get_paper_vectors([3, 999, 1])
+
+        assert paper_ids == [3, 1]
+        assert vectors.shape == (2, 768)
+
     def test_no_duplicate_adds(self, index_dir):
         service = _make_service(index_dir)
         service.add_papers([1, 2], ["a", "b"])

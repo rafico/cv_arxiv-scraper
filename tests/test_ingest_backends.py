@@ -130,6 +130,59 @@ class ArxivApiBackendTests(TestCase):
         self.assertEqual(entries[0]["doi"], "10.48550/arXiv.2604.00002")
         self.assertIn("categories", entries[0])
 
+    @patch("app.services.ingest.arxiv_api_backend.arxiv.Search")
+    @patch("app.services.ingest.arxiv_api_backend.arxiv.Client")
+    def test_fetch_resumes_from_offset_and_skips_processed_cursor(self, mock_client_cls, mock_search_cls):
+        fake_results = [
+            SimpleNamespace(
+                entry_id="https://arxiv.org/abs/2604.00003v1",
+                title="Paper 3",
+                authors=[SimpleNamespace(name="Author A")],
+                published=datetime(2026, 4, 1, 8, 0, 0),
+                summary="Abstract 3",
+                categories=["cs.CV"],
+                comment="",
+                doi="",
+            ),
+            SimpleNamespace(
+                entry_id="https://arxiv.org/abs/2604.00004v1",
+                title="Paper 4",
+                authors=[SimpleNamespace(name="Author A")],
+                published=datetime(2026, 4, 1, 8, 0, 0),
+                summary="Abstract 4",
+                categories=["cs.CV"],
+                comment="",
+                doi="",
+            ),
+            SimpleNamespace(
+                entry_id="https://arxiv.org/abs/2604.00005v1",
+                title="Paper 5",
+                authors=[SimpleNamespace(name="Author A")],
+                published=datetime(2026, 4, 1, 8, 0, 0),
+                summary="Abstract 5",
+                categories=["cs.CV"],
+                comment="",
+                doi="",
+            ),
+        ]
+        mock_client_cls.return_value.results.return_value = fake_results
+        progress: list[tuple[int, str | None]] = []
+
+        backend = ArxivApiBackend(page_size=2)
+        candidates = backend.fetch(
+            categories=["cs.CV"],
+            start_dt=date(2026, 4, 1),
+            end_dt=date(2026, 4, 2),
+            max_results=25,
+            offset=2,
+            resume_after_arxiv_id="2604.00004",
+            progress_callback=lambda page_number, candidate: progress.append((page_number, candidate.arxiv_id)),
+        )
+
+        self.assertEqual([candidate.arxiv_id for candidate in candidates], ["2604.00005"])
+        self.assertEqual(progress, [(3, "2604.00005")])
+        self.assertEqual(mock_client_cls.return_value.results.call_args.kwargs["offset"], 2)
+
 
 class ArxivAdapterTests(TestCase):
     def test_result_to_entry_uses_candidate_shape(self):

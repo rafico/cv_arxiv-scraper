@@ -135,6 +135,44 @@ class EmbeddingService:
             results.append((pid, float(score)))
         return results[:top_k]
 
+    def get_paper_vectors(self, paper_ids: list[int]) -> tuple[list[int], np.ndarray]:
+        """Return indexed paper IDs and their reconstructed embedding vectors."""
+        if not paper_ids or self._index.ntotal == 0:
+            return [], np.empty((0, DIMENSION), dtype=np.float32)
+
+        found_ids: list[int] = []
+        vectors: list[np.ndarray] = []
+
+        with self._lock:
+            for paper_id in paper_ids:
+                row = self._pk_to_row.get(paper_id)
+                if row is None:
+                    continue
+                found_ids.append(paper_id)
+                vectors.append(self._index.reconstruct(row))
+
+        if not found_ids:
+            return [], np.empty((0, DIMENSION), dtype=np.float32)
+
+        return found_ids, np.asarray(vectors, dtype=np.float32)
+
+    def _ensure_section_index(self) -> None:
+        """Load or create the section-level FAISS index."""
+        if hasattr(self, "_section_index"):
+            return
+
+        import faiss
+
+        section_index_path = self._index_dir / "sections.index"
+        section_map_path = self._index_dir / "section_id_map.json"
+        if section_index_path.exists() and section_map_path.exists():
+            self._section_index = faiss.read_index(str(section_index_path))
+            with open(section_map_path) as f:
+                self._section_id_map = json.load(f)
+        else:
+            self._section_index = faiss.IndexFlatIP(DIMENSION)
+            self._section_id_map = []
+
     def add_sections(
         self,
         entries: list[tuple[int, str, str]],
@@ -149,19 +187,7 @@ class EmbeddingService:
         if not entries:
             return 0
 
-        import faiss
-
-        # Lazy-init the section index.
-        if not hasattr(self, "_section_index"):
-            section_index_path = self._index_dir / "sections.index"
-            section_map_path = self._index_dir / "section_id_map.json"
-            if section_index_path.exists() and section_map_path.exists():
-                self._section_index = faiss.read_index(str(section_index_path))
-                with open(section_map_path) as f:
-                    self._section_id_map = json.load(f)
-            else:
-                self._section_index = faiss.IndexFlatIP(DIMENSION)
-                self._section_id_map = []
+        self._ensure_section_index()
 
         texts = [text for _, _, text in entries]
         meta = [{"paper_id": pid, "section_type": stype} for pid, stype, _ in entries]
@@ -184,7 +210,8 @@ class EmbeddingService:
 
         Returns list of dicts with paper_id, section_type, score.
         """
-        if not hasattr(self, "_section_index") or self._section_index.ntotal == 0:
+        self._ensure_section_index()
+        if self._section_index.ntotal == 0:
             return []
 
         query_vec = self.encode([query_text])
@@ -234,7 +261,8 @@ class EmbeddingService:
             os.replace(tmp_map, str(section_map_path))
 
     def save(self) -> None:
-        """Persist FAISS index to disk atomically."""
+        """Persist FAISS index (and section index if loaded) to disk atomically."""
+        self.save_sections()
         import faiss
 
         with self._lock:

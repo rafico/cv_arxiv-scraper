@@ -55,6 +55,8 @@ def upsert_sync_state(
     state.last_synced_submitted_at = chunk_end_timestamp(synced_through)
     state.last_synced_updated_at = synced_at or now_utc()
     state.last_synced_paper_count = paper_count
+    state.last_cursor_page = None
+    state.last_cursor_arxiv_id = None
     db.session.commit()
     return state
 

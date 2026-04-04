@@ -2,7 +2,7 @@
 
 from app import create_app
 from app.models import Paper
-from app.scraper import run_scrape
+from app.services.scrape_engine import run_scrape
 
 
 def _load_latest_matched(limit):

@@ -4,7 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.models import Paper, db
+from app.models import Collection, Paper, PaperCollection, db
 from tests.helpers import FlaskDBTestCase
 
 
@@ -91,3 +91,69 @@ class ApiCsrfTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         muted_topics = self.app.config["SCRAPER_CONFIG"]["preferences"]["muted"]["topics"]
         self.assertIn("Segmentation", muted_topics)
+
+
+class CorpusApiTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.app.test_client()
+        seed_paper = Paper(
+            arxiv_id="2603.0101",
+            title="Seed Paper",
+            authors="Author A",
+            link="https://arxiv.org/abs/2603.0101",
+            pdf_link="https://arxiv.org/pdf/2603.0101",
+            abstract_text="seed abstract",
+            match_type="Title",
+            matched_terms=["Vision"],
+            paper_score=1.0,
+            publication_date="2026-03-19",
+            scraped_date="2026-03-19",
+        )
+        db.session.add(seed_paper)
+        db.session.commit()
+        self.seed_paper = seed_paper
+
+    def test_corpus_clusters_endpoint_forwards_query_arguments(self):
+        with patch("app.services.corpus_analysis.analyze_topic_clusters") as mock_analyze:
+            mock_analyze.return_value = {"window_days": 14, "offset_days": 2, "clusters": []}
+
+            response = self.client.get("/api/corpus/clusters?window_days=14&offset_days=2&clusters=3&limit=150&paper_limit=4")
+
+        self.assertEqual(response.status_code, 200)
+        mock_analyze.assert_called_once_with(
+            window_days=14,
+            offset_days=2,
+            limit=150,
+            cluster_count=3,
+            paper_limit=4,
+        )
+        self.assertEqual(response.get_json()["window_days"], 14)
+
+    def test_corpus_emerging_endpoint_rejects_invalid_days(self):
+        response = self.client.get("/api/corpus/emerging?recent_days=abc")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.get_json())
+
+    def test_corpus_neighbors_endpoint_uses_collection_and_whitelist_authors(self):
+        collection = Collection(name="Saved Set", description="", color="#123456")
+        db.session.add(collection)
+        db.session.commit()
+        db.session.add(PaperCollection(collection_id=collection.id, paper_id=self.seed_paper.id))
+        db.session.commit()
+        self.app.config["SCRAPER_CONFIG"]["whitelists"]["authors"] = ["Tracked Author"]
+
+        with patch("app.services.corpus_analysis.find_neighbor_papers") as mock_neighbors:
+            mock_neighbors.return_value = {"seed_paper_ids": [self.seed_paper.id], "results": []}
+
+            response = self.client.get(
+                f"/api/corpus/neighbors?collection_id={collection.id}&limit=7&exclude_tracked_authors=0"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["collection_id"], collection.id)
+        self.assertEqual(mock_neighbors.call_args.args[0], [self.seed_paper.id])
+        self.assertEqual(mock_neighbors.call_args.kwargs["limit"], 7)
+        self.assertEqual(mock_neighbors.call_args.kwargs["tracked_authors"], ["Tracked Author"])
+        self.assertFalse(mock_neighbors.call_args.kwargs["exclude_tracked_authors"])

@@ -107,6 +107,8 @@ class Paper(db.Model):
     citation_count = db.Column(db.Integer, nullable=True)
     influential_citation_count = db.Column(db.Integer, nullable=True)
     semantic_scholar_id = db.Column(db.Text, nullable=True)
+    citation_source = db.Column(db.String(32), nullable=True)
+    citation_provenance = db.Column(JSONDict, nullable=False, default=dict)
     citation_updated_at = db.Column(db.DateTime, nullable=True)
 
     openalex_id = db.Column(db.Text, nullable=True)
@@ -209,6 +211,32 @@ class SavedSearch(db.Model):
     last_used_at = db.Column(db.DateTime, nullable=True)
 
 
+class RankingConfig(db.Model):
+    __tablename__ = "ranking_configs"
+    __table_args__ = (
+        db.Index("idx_ranking_configs_active_created", "is_active", "created_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False, unique=True)
+    weights = db.Column(JSONDict, nullable=False, default=dict)
+    is_active = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
+
+
+class RecommendationMetric(db.Model):
+    __tablename__ = "recommendation_metrics"
+    __table_args__ = (
+        db.Index("idx_recommendation_metrics_name_measured", "metric_name", "measured_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    metric_name = db.Column(db.String(64), nullable=False)
+    metric_value = db.Column(db.Float, nullable=False)
+    config_snapshot = db.Column(JSONDict, nullable=False, default=dict)
+    measured_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
+
+
 class FeedSource(db.Model):
     __tablename__ = "feed_sources"
 
@@ -219,6 +247,33 @@ class FeedSource(db.Model):
     enabled = db.Column(db.Boolean, nullable=False, default=True)
     last_fetched_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+
+class EnrichmentCache(db.Model):
+    __tablename__ = "enrichment_cache"
+    __table_args__ = (
+        db.UniqueConstraint("paper_id", "source", name="uq_enrichment_cache_paper_source"),
+        db.Index("idx_enrichment_cache_source_fetched_at", "source", "fetched_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    source = db.Column(db.String(32), nullable=False)
+    data = db.Column(JSONDict, nullable=False, default=dict)
+    fetched_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
+    ttl_hours = db.Column(db.Integer, nullable=False, default=168)
+
+    paper = db.relationship("Paper")
+
+    def is_fresh(self, *, reference_time=None) -> bool:
+        from datetime import timedelta
+
+        from app.services.text import now_utc
+
+        if self.fetched_at is None or self.ttl_hours <= 0:
+            return False
+        reference = reference_time or now_utc()
+        return (reference - self.fetched_at) <= timedelta(hours=self.ttl_hours)
 
 
 class PaperFeedback(db.Model):
@@ -295,4 +350,6 @@ class SyncState(db.Model):
     last_synced_submitted_at = db.Column(db.DateTime, nullable=True)
     last_synced_updated_at = db.Column(db.DateTime, nullable=True)
     last_synced_paper_count = db.Column(db.Integer, nullable=False, default=0)
+    last_cursor_page = db.Column(db.Integer, nullable=True)
+    last_cursor_arxiv_id = db.Column(db.String(64), nullable=True)
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now(), nullable=False)

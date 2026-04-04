@@ -112,15 +112,6 @@ class TestExecuteSavedSearch(FlaskDBTestCase):
         assert recent.id in result_ids
         assert old.id not in result_ids
 
-    def test_updates_last_used_at(self):
-        self._add_paper(arxiv_id="u1", link="https://arxiv.org/abs/u1")
-        search = SavedSearch(name="test")
-        db.session.add(search)
-        db.session.commit()
-        assert search.last_used_at is None
-        execute_saved_search(search)
-        assert search.last_used_at is not None
-
     def test_combined_filters(self):
         p1 = self._add_paper(
             title="Transformer for Remote Sensing",
@@ -228,6 +219,10 @@ class TestSavedSearchApi(FlaskDBTestCase):
         data = response.get_json()
         self.assertEqual(data["count"], 1)
         self.assertEqual(data["results"][0]["title"], "Transformer Paper")
+
+        # Running a search should update last_used_at.
+        db.session.refresh(s)
+        self.assertIsNotNone(s.last_used_at)
 
     def test_validate_rejects_bad_data(self):
         response = self.client.post(
