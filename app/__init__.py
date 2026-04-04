@@ -9,17 +9,38 @@ import yaml
 from flask import Flask
 
 from app.models import db
+from app.rank import get_preferences
 from app.schema import ensure_schema
-from app.services.preferences import get_preferences
 
 DEFAULT_DATABASE_URI = "sqlite:///arxiv_papers.db"
+DEFAULT_CONFIG_FILENAME = "config.yaml"
 DEFAULT_LLM_KEY_FILENAME = ".llm_api_key"
+_CONFIG_PATH_ENV_VAR = "CV_ARXIV_CONFIG"
 _SECRET_KEY_FILENAME = ".flask_secret"
 
 
 def _load_config(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as config_file:
         return yaml.safe_load(config_file)
+
+
+def _resolve_config_path(config_path: str | os.PathLike[str] | None = None) -> Path:
+    if config_path is not None:
+        return Path(config_path).expanduser().resolve()
+
+    env_path = os.environ.get(_CONFIG_PATH_ENV_VAR, "").strip()
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+
+    cwd_candidate = (Path.cwd() / DEFAULT_CONFIG_FILENAME).resolve()
+    if cwd_candidate.is_file():
+        return cwd_candidate
+
+    repo_candidate = (Path(__file__).resolve().parent.parent / DEFAULT_CONFIG_FILENAME).resolve()
+    if repo_candidate.is_file():
+        return repo_candidate
+
+    return cwd_candidate
 
 
 def _resolve_llm_key_path(config_path: Path | None = None) -> Path:
@@ -68,16 +89,18 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
 
         backends = ingest.get("backends")
         if backends is not None:
-            if not isinstance(backends, list) or not backends or not all(isinstance(name, str) and name.strip() for name in backends):
+            if (
+                not isinstance(backends, list)
+                or not backends
+                or not all(isinstance(name, str) and name.strip() for name in backends)
+            ):
                 raise ValueError("'ingest.backends' must be a non-empty list of backend names")
 
-            from app.services.ingest.orchestrator import BACKEND_REGISTRY
+            from app.ingest.orchestrator import BACKEND_REGISTRY
 
             unknown_backends = [name for name in backends if name not in BACKEND_REGISTRY]
             if unknown_backends:
-                raise ValueError(
-                    f"'ingest.backends' contains unknown backends: {', '.join(unknown_backends)}"
-                )
+                raise ValueError(f"'ingest.backends' contains unknown backends: {', '.join(unknown_backends)}")
 
         user_agent = ingest.get("user_agent")
         if user_agent is not None and (not isinstance(user_agent, str) or not user_agent.strip()):
@@ -211,7 +234,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     # instance_path already created above before _ensure_secret_key call
     app.config.setdefault("FAISS_INDEX_DIR", str(Path(app.instance_path) / "faiss_index"))
 
-    config_path = Path(app.config.get("CONFIG_PATH", (Path(app.root_path).parent / "config.yaml").resolve()))
+    config_path = _resolve_config_path(app.config.get("CONFIG_PATH"))
     app.config["CONFIG_PATH"] = str(config_path)
     app.config["LLM_KEY_PATH"] = str(Path(app.config.get("LLM_KEY_PATH", _resolve_llm_key_path(config_path))).resolve())
 
@@ -234,7 +257,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     # Start built-in scheduler if configured.
     scheduler_config = app.config["SCRAPER_CONFIG"].get("scheduler", {})
     if scheduler_config.get("enabled"):
-        from app.services.scheduler import SCRAPE_SCHEDULER
+        from app.web.scheduler import SCRAPE_SCHEDULER
 
         daily_at = str(scheduler_config.get("daily_at", "08:00"))
         SCRAPE_SCHEDULER.start(app, daily_at=daily_at)
