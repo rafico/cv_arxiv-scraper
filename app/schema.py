@@ -12,6 +12,14 @@ from app.models import db
 
 LOGGER = logging.getLogger(__name__)
 
+_SAFE_COLUMN_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def _validate_column_name(name: str) -> None:
+    """Assert column names are safe for SQL interpolation."""
+    if not _SAFE_COLUMN_NAME_RE.match(name):
+        raise ValueError(f"Unsafe column name for schema migration: {name!r}")
+
 FEEDBACK_COLUMN_DEFS = {
     "reason": "TEXT",
     "note": "TEXT",
@@ -27,6 +35,11 @@ SAVED_SEARCH_COLUMN_DEFS = {
     "methods_mentions": "TEXT NOT NULL DEFAULT '[]'",
     "is_active": "INTEGER NOT NULL DEFAULT 1",
     "notify_on_match": "INTEGER NOT NULL DEFAULT 0",
+}
+
+SYNC_STATE_COLUMN_DEFS = {
+    "last_cursor_page": "INTEGER",
+    "last_cursor_arxiv_id": "TEXT",
 }
 
 FTS5_CREATE = """
@@ -76,6 +89,8 @@ PAPER_COLUMN_DEFS = {
     "citation_count": "INTEGER",
     "influential_citation_count": "INTEGER",
     "semantic_scholar_id": "TEXT",
+    "citation_source": "TEXT",
+    "citation_provenance": "TEXT NOT NULL DEFAULT '{}'",
     "citation_updated_at": "DATETIME",
     "openalex_id": "TEXT",
     "openalex_topics": "TEXT NOT NULL DEFAULT '[]'",
@@ -132,6 +147,7 @@ def ensure_schema() -> None:
     for column_name, column_type in PAPER_COLUMN_DEFS.items():
         if column_name in existing_columns:
             continue
+        _validate_column_name(column_name)
         db.session.execute(
             text(f"ALTER TABLE papers ADD COLUMN {column_name} {column_type}")  # noqa: S608
         )
@@ -142,11 +158,14 @@ def ensure_schema() -> None:
     from app.models import (  # local import to avoid circular dependency
         Collection,
         DigestRun,
+        EnrichmentCache,
         FeedSource,
         PaperCollection,
         PaperFeedback,
         PaperRelation,
         PaperSection,
+        RankingConfig,
+        RecommendationMetric,
         SavedSearch,
         ScrapeRun,
         SyncState,
@@ -156,18 +175,32 @@ def ensure_schema() -> None:
     ScrapeRun.__table__.create(bind=db.engine, checkfirst=True)
     DigestRun.__table__.create(bind=db.engine, checkfirst=True)
     FeedSource.__table__.create(bind=db.engine, checkfirst=True)
+    EnrichmentCache.__table__.create(bind=db.engine, checkfirst=True)
     Collection.__table__.create(bind=db.engine, checkfirst=True)
     PaperCollection.__table__.create(bind=db.engine, checkfirst=True)
     PaperRelation.__table__.create(bind=db.engine, checkfirst=True)
     SavedSearch.__table__.create(bind=db.engine, checkfirst=True)
     PaperSection.__table__.create(bind=db.engine, checkfirst=True)
+    RankingConfig.__table__.create(bind=db.engine, checkfirst=True)
+    RecommendationMetric.__table__.create(bind=db.engine, checkfirst=True)
     SyncState.__table__.create(bind=db.engine, checkfirst=True)
+
+    if "sync_state" in inspect(db.engine).get_table_names():
+        sync_state_columns = {col["name"] for col in inspect(db.engine).get_columns("sync_state")}
+        for col_name, col_type in SYNC_STATE_COLUMN_DEFS.items():
+            if col_name not in sync_state_columns:
+                _validate_column_name(col_name)
+                db.session.execute(
+                    text(f"ALTER TABLE sync_state ADD COLUMN {col_name} {col_type}")  # noqa: S608
+                )
+        db.session.commit()
 
     # Migrate paper_feedback columns for richer triage events.
     if "paper_feedback" in tables:
         feedback_columns = {col["name"] for col in inspector.get_columns("paper_feedback")}
         for col_name, col_type in FEEDBACK_COLUMN_DEFS.items():
             if col_name not in feedback_columns:
+                _validate_column_name(col_name)
                 db.session.execute(
                     text(f"ALTER TABLE paper_feedback ADD COLUMN {col_name} {col_type}")  # noqa: S608
                 )
@@ -178,6 +211,7 @@ def ensure_schema() -> None:
         ss_columns = {col["name"] for col in inspector.get_columns("saved_searches")}
         for col_name, col_type in SAVED_SEARCH_COLUMN_DEFS.items():
             if col_name not in ss_columns:
+                _validate_column_name(col_name)
                 db.session.execute(
                     text(f"ALTER TABLE saved_searches ADD COLUMN {col_name} {col_type}")  # noqa: S608
                 )

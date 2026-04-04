@@ -135,8 +135,4 @@ def execute_saved_search(
     # Order by score descending.
     query = query.order_by(Paper.paper_score.desc())
 
-    # Update last_used_at.
-    search.last_used_at = now_utc()
-    db.session.commit()
-
     return query.limit(limit).all()

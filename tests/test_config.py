@@ -67,6 +67,33 @@ class ConfigValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError, msg="unknown backends"):
             _validate_config(cfg)
 
+    def test_ingest_rate_limit_accepts_positive_values(self):
+        cfg = self._valid_config()
+        cfg["ingest"] = {
+            "backends": ["rss", "arxiv_api"],
+            "user_agent": "cv-arxiv-scraper/1.0 (test@example.com)",
+            "rate_limit": {"requests_per_second": 2.5, "burst": 3},
+        }
+        _validate_config(cfg)
+
+    def test_ingest_rate_limit_rejects_non_positive_requests_per_second(self):
+        cfg = self._valid_config()
+        cfg["ingest"] = {"rate_limit": {"requests_per_second": 0}}
+        with self.assertRaises(ValueError, msg="requests_per_second"):
+            _validate_config(cfg)
+
+    def test_ingest_rate_limit_rejects_non_integer_burst(self):
+        cfg = self._valid_config()
+        cfg["ingest"] = {"rate_limit": {"burst": 1.5}}
+        with self.assertRaises(ValueError, msg="burst"):
+            _validate_config(cfg)
+
+    def test_ingest_user_agent_must_be_non_empty_string(self):
+        cfg = self._valid_config()
+        cfg["ingest"] = {"user_agent": "   "}
+        with self.assertRaises(ValueError, msg="user_agent"):
+            _validate_config(cfg)
+
     def test_scraper_not_dict(self):
         cfg = self._valid_config()
         cfg["scraper"] = "bad"

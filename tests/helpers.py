@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from app import create_app
+from app.constants import DEFAULT_LLM_MODEL
 from app.models import db
 
 TEST_SCRAPER_CONFIG = {
@@ -23,7 +24,7 @@ TEST_SCRAPER_CONFIG = {
     "llm": {
         "enabled": False,
         "provider": "openrouter",
-        "model": "anthropic/claude-sonnet-4",
+        "model": DEFAULT_LLM_MODEL,
         "base_url": "https://openrouter.ai/api/v1",
         "max_concurrent": 4,
     },

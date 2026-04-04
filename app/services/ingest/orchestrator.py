@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, time
 
 import requests
@@ -18,7 +19,7 @@ LOGGER = logging.getLogger(__name__)
 RssCandidateFetcher = Callable[..., list[PaperCandidate]]
 RollingWindowFetcher = Callable[..., list[PaperCandidate]]
 BackendRegistry = Mapping[str, type]
-SyncStateReader = Callable[[Sequence[str]], Mapping[str, datetime | None]]
+SyncStateReader = Callable[[Sequence[str]], Mapping[str, object]]
 SyncStateWriter = Callable[..., None]
 Clock = Callable[[], datetime]
 
@@ -26,6 +27,13 @@ BACKEND_REGISTRY: dict[str, type] = {
     "rss": RssFeedBackend,
     "arxiv_api": ArxivApiBackend,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class SyncCursor:
+    submitted_at: datetime | None
+    cursor_page: int | None = None
+    last_arxiv_id: str | None = None
 
 
 class IngestOrchestrator:
@@ -60,6 +68,7 @@ class IngestOrchestrator:
         end_dt: date | None = None,
         max_results: int = 2000,
         backend_names: Sequence[str] | None = None,
+        user_agent: str | None = None,
     ) -> list[PaperCandidate]:
         selected_backend_names = self._resolve_backend_names(backend_names)
         if mode == IngestMode.DAILY_WATCH:
@@ -80,6 +89,7 @@ class IngestOrchestrator:
                 end_dt=end_dt,
                 max_results=max_results,
                 session=session,
+                user_agent=user_agent,
             )
         if mode == IngestMode.CATCH_UP:
             self._require_backend(selected_backend_names, backend_name="arxiv_api", mode=mode)
@@ -88,6 +98,7 @@ class IngestOrchestrator:
                 end_dt=end_dt or utc_today(),
                 max_results=max_results,
                 session=session,
+                user_agent=user_agent,
             )
         raise ValueError(f"Unsupported ingest mode: {mode}")
 
@@ -185,6 +196,10 @@ class IngestOrchestrator:
         end_dt: date,
         max_results: int,
         session: requests.Session | None = None,
+        offset: int = 0,
+        resume_after_arxiv_id: str | None = None,
+        progress_callback=None,
+        user_agent: str | None = None,
     ) -> list[PaperCandidate]:
         return self._arxiv_api_backend.fetch(
             categories=categories,
@@ -192,6 +207,10 @@ class IngestOrchestrator:
             end_dt=end_dt,
             max_results=max_results,
             session=session,
+            offset=offset,
+            resume_after_arxiv_id=resume_after_arxiv_id,
+            progress_callback=progress_callback,
+            user_agent=user_agent,
         )
 
     def _fetch_catch_up(
@@ -201,12 +220,19 @@ class IngestOrchestrator:
         end_dt: date,
         max_results: int,
         session: requests.Session | None = None,
+        user_agent: str | None = None,
     ) -> list[PaperCandidate]:
         if not categories:
             return []
 
-        sync_state_by_category = self._sync_state_reader(categories)
-        missing_categories = [category for category in categories if sync_state_by_category.get(category) is None]
+        raw_sync_state_by_category = self._sync_state_reader(categories)
+        sync_state_by_category = {
+            category: self._normalize_sync_cursor(raw_sync_state_by_category.get(category))
+            for category in categories
+        }
+        missing_categories = [
+            category for category in categories if sync_state_by_category[category].submitted_at is None
+        ]
         if missing_categories:
             raise ValueError(
                 "CATCH_UP mode requires SyncState.last_synced_submitted_at for categories: "
@@ -218,13 +244,36 @@ class IngestOrchestrator:
 
         candidates: list[PaperCandidate] = []
         for category in categories:
-            last_synced_at = sync_state_by_category.get(category)
+            cursor = sync_state_by_category[category]
+            last_synced_at = cursor.submitted_at
+            progress_count = 0
+            offset = 0
+            resume_after_arxiv_id = None
+            if cursor.cursor_page is not None and cursor.cursor_page > 0:
+                offset = (cursor.cursor_page - 1) * self._arxiv_api_backend.page_size
+                resume_after_arxiv_id = cursor.last_arxiv_id
+
+            def progress_callback(page_number: int, candidate: PaperCandidate) -> None:
+                nonlocal progress_count
+                progress_count += 1
+                self._sync_state_writer(
+                    category,
+                    updated_at=self._clock(),
+                    paper_count=progress_count,
+                    cursor_page=page_number,
+                    cursor_arxiv_id=candidate.arxiv_id,
+                )
+
             category_candidates = self._fetch_arxiv_api(
                 categories=[category],
                 start_dt=last_synced_at.date(),
                 end_dt=end_dt,
                 max_results=max_results,
                 session=session,
+                offset=offset,
+                resume_after_arxiv_id=resume_after_arxiv_id,
+                progress_callback=progress_callback,
+                user_agent=user_agent,
             )
             candidates.extend(category_candidates)
             self._sync_state_writer(
@@ -232,6 +281,7 @@ class IngestOrchestrator:
                 synced_through=synced_through,
                 updated_at=synced_at,
                 paper_count=len(category_candidates),
+                clear_cursor=True,
             )
 
         return candidates
@@ -257,15 +307,25 @@ class IngestOrchestrator:
         from app.models import SyncState
 
         states = SyncState.query.filter(SyncState.category.in_(list(categories))).all()
-        return {state.category: state.last_synced_submitted_at for state in states}
+        return {
+            state.category: SyncCursor(
+                submitted_at=state.last_synced_submitted_at,
+                cursor_page=state.last_cursor_page,
+                last_arxiv_id=state.last_cursor_arxiv_id,
+            )
+            for state in states
+        }
 
     @staticmethod
     def _default_sync_state_writer(
         category: str,
         *,
-        synced_through: datetime,
+        synced_through: datetime | None = None,
         updated_at: datetime,
-        paper_count: int,
+        paper_count: int | None = None,
+        cursor_page: int | None = None,
+        cursor_arxiv_id: str | None = None,
+        clear_cursor: bool = False,
     ) -> None:
         from app.models import SyncState, db
 
@@ -274,10 +334,38 @@ class IngestOrchestrator:
             state = SyncState(category=category)
             db.session.add(state)
 
-        state.last_synced_submitted_at = synced_through
+        if synced_through is not None:
+            state.last_synced_submitted_at = synced_through
         state.last_synced_updated_at = updated_at
-        state.last_synced_paper_count = paper_count
+        if paper_count is not None:
+            state.last_synced_paper_count = paper_count
+        if clear_cursor:
+            state.last_cursor_page = None
+            state.last_cursor_arxiv_id = None
+        else:
+            if cursor_page is not None:
+                state.last_cursor_page = cursor_page
+            if cursor_arxiv_id is not None:
+                state.last_cursor_arxiv_id = cursor_arxiv_id
         db.session.commit()
+
+    @staticmethod
+    def _normalize_sync_cursor(raw_value: object) -> SyncCursor:
+        if isinstance(raw_value, SyncCursor):
+            return raw_value
+        if isinstance(raw_value, datetime) or raw_value is None:
+            return SyncCursor(submitted_at=raw_value)
+        if isinstance(raw_value, Mapping):
+            return SyncCursor(
+                submitted_at=raw_value.get("submitted_at", raw_value.get("last_synced_submitted_at")),
+                cursor_page=raw_value.get("cursor_page", raw_value.get("last_cursor_page")),
+                last_arxiv_id=raw_value.get("last_arxiv_id", raw_value.get("last_cursor_arxiv_id")),
+            )
+        return SyncCursor(
+            submitted_at=getattr(raw_value, "submitted_at", getattr(raw_value, "last_synced_submitted_at", None)),
+            cursor_page=getattr(raw_value, "cursor_page", getattr(raw_value, "last_cursor_page", None)),
+            last_arxiv_id=getattr(raw_value, "last_arxiv_id", getattr(raw_value, "last_cursor_arxiv_id", None)),
+        )
 
     @staticmethod
     def _require_backend(

@@ -11,15 +11,14 @@ from pathlib import Path
 import requests
 from sqlalchemy.exc import IntegrityError
 
-from app.constants import DEFAULT_MAX_WORKERS
+from app.constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_WORKERS
 from app.services.enrichment import (
     enrich_entries_with_api_metadata,
     extract_affiliation_text,
     fetch_recent_papers,
-    now_utc,
     parse_feed_entries,
 )
-from app.services.http_client import create_session, request_with_backoff
+from app.services.http_client import create_session, request_with_backoff, resolve_user_agent
 from app.services.ingest import IngestMode, IngestOrchestrator, PaperCandidate
 from app.services.llm_client import LLMClient, resolve_api_key
 from app.services.matching import (
@@ -32,6 +31,7 @@ from app.services.pipeline import WeightedSumRanker, WhitelistCandidateGenerator
 from app.services.preferences import get_preferences
 from app.services.ranking import compute_paper_score
 from app.services.summary import extract_topic_tags, generate_llm_summary, generate_summary
+from app.services.text import now_utc
 
 LOGGER = logging.getLogger(__name__)
 
@@ -213,52 +213,6 @@ def _process_paper_entry(
     return result
 
 
-def _process_entries_parallel(
-    entries: list[dict],
-    whitelists: dict,
-    scraper_config: dict,
-    session: requests.Session,
-    llm_client: LLMClient | None = None,
-    interests_text: str = "",
-    product_config: dict | None = None,
-):
-    max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
-    processed = 0
-    matched = 0
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(
-                _process_paper_entry,
-                entry,
-                whitelists,
-                scraper_config,
-                session,
-                llm_client,
-                interests_text,
-                product_config,
-            ): entry
-            for entry in entries
-        }
-
-        for future in as_completed(futures):
-            entry = futures[future]
-            processed += 1
-            result = None
-            try:
-                result = future.result()
-            except Exception:
-                LOGGER.exception(
-                    "Unhandled worker exception while processing paper: %s (%s)",
-                    entry.get("title"),
-                    entry.get("link"),
-                )
-
-            if result:
-                matched += 1
-
-            yield processed, matched, result
-
 
 def _enrich_candidate_with_llm(
     candidate,
@@ -421,6 +375,8 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 citation_count=result.get("citation_count"),
                 influential_citation_count=result.get("influential_citation_count"),
                 semantic_scholar_id=result.get("semantic_scholar_id"),
+                citation_source=result.get("citation_source"),
+                citation_provenance=result.get("citation_provenance", {}),
                 citation_updated_at=result.get("citation_updated_at"),
                 openalex_id=result.get("openalex_id"),
                 openalex_topics=result.get("openalex_topics", []),
@@ -517,7 +473,7 @@ def _extract_sections(app, results: list[dict]) -> None:
             if not paper:
                 continue
             try:
-                count = extract_and_store_sections(paper.id, pdf_content, app=app)
+                count = extract_and_store_sections(paper.id, pdf_content)
                 total_sections += count
             except Exception:
                 LOGGER.warning("Section extraction failed for %s", result.get("link"), exc_info=True)
@@ -648,7 +604,7 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
             LOGGER.warning("LLM is enabled but no API key is available")
             return None, ""
         default_base_url = "https://openrouter.ai/api/v1"
-        default_model = "anthropic/claude-sonnet-4"
+        default_model = DEFAULT_LLM_MODEL
 
     try:
         client = LLMClient(
@@ -694,6 +650,11 @@ def _enrich_results_with_citations(
             res["influential_citation_count"] = data.get("influential_citation_count")
             res["semantic_scholar_id"] = data.get("semantic_scholar_id")
             if res["citation_count"] is not None:
+                res["citation_source"] = "semantic_scholar"
+                res["citation_provenance"] = {
+                    "source": "semantic_scholar",
+                    "updated_at": now.isoformat(),
+                }
                 res["citation_updated_at"] = now
             res["paper_score"] = compute_paper_score(
                 match_types=res.get("match_types", []),
@@ -726,6 +687,7 @@ def _enrich_results_with_openalex(
 
     email = openalex_config.get("email") or None
     openalex_data = fetch_openalex_batch(arxiv_ids, session=session, email=email)
+    now = now_utc()
     for res in results:
         arxiv_id = res.get("arxiv_id")
         if arxiv_id and arxiv_id in openalex_data:
@@ -735,6 +697,12 @@ def _enrich_results_with_openalex(
             res["oa_status"] = data.get("oa_status")
             res["openalex_cited_by_count"] = data.get("openalex_cited_by_count")
             res["referenced_works_count"] = data.get("referenced_works_count")
+            if res.get("citation_count") is None and res["openalex_cited_by_count"] is not None:
+                res["citation_source"] = "openalex"
+                res["citation_provenance"] = {
+                    "source": "openalex",
+                    "updated_at": now.isoformat(),
+                }
 
 
 def execute_scrape(app, event_callback: EventCallback = None, force: bool = False) -> dict:
@@ -760,7 +728,12 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
 
     try:
         max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
-        session = create_session(pool_size=max_workers)
+        user_agent = resolve_user_agent(config)
+        session = create_session(
+            pool_size=max_workers,
+            scraper_config=config,
+            rate_limit_profile="interactive",
+        )
         orchestrator = _build_ingest_orchestrator()
 
         _emit(event_callback, "status", {"phase": "feed", "message": "Fetching RSS feed..."})
@@ -784,6 +757,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
                 feed_urls=feed_urls,
                 rolling_window_days=rolling_window_days,
                 backend_names=ingest_config.get("backends"),
+                user_agent=user_agent,
             )
         )
 
@@ -902,7 +876,12 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
     scraper_config = config["scraper"]
     ingest_config = config.get("ingest") or {}
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
-    session = create_session(pool_size=max_workers)
+    user_agent = resolve_user_agent(config)
+    session = create_session(
+        pool_size=max_workers,
+        scraper_config=config,
+        rate_limit_profile="bulk",
+    )
     orchestrator = _build_ingest_orchestrator()
 
     entries = _candidate_entries(
@@ -914,6 +893,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
             end_dt=end_dt,
             max_results=2000,
             backend_names=ingest_config.get("backends"),
+            user_agent=user_agent,
         )
     )
     total_entries = len(entries)

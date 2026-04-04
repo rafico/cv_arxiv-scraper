@@ -333,10 +333,3 @@ def extract_affiliation_text(
 
     lines = page_text.splitlines()
     return "\n".join(lines[lines_start:max_header_lines])
-
-
-def now_utc() -> datetime:
-    # Kept for backward compatibility; canonical version is in app.services.text.
-    from app.services.text import now_utc as _now_utc
-
-    return _now_utc()

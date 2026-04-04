@@ -18,7 +18,7 @@ import requests
 if TYPE_CHECKING:
     from app.models import Paper
 
-log = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_CREDENTIALS_PATH = _PROJECT_ROOT / ".zotero_credentials"

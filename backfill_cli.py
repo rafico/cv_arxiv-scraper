@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -20,6 +22,24 @@ DEFAULT_DELAY_SECONDS = 1.0
 EMBEDDINGS_BATCH_SIZE = 64
 
 
+def _paper_index_paths(index_dir: Path) -> tuple[Path, Path]:
+    return index_dir / "papers.index", index_dir / "id_map.json"
+
+
+def _remove_paper_index_files(index_dir: Path) -> int:
+    removed = 0
+    for path in (
+        index_dir / "papers.index",
+        index_dir / "id_map.json",
+        index_dir / "papers.index.tmp",
+        index_dir / "id_map.json.tmp",
+    ):
+        if path.exists():
+            path.unlink()
+            removed += 1
+    return removed
+
+
 def run_embeddings_backfill(app, *, batch_size: int = EMBEDDINGS_BATCH_SIZE, emit: Emit = print) -> int:
     from app.services.embed_backfill import backfill_embeddings
 
@@ -27,6 +47,53 @@ def run_embeddings_backfill(app, *, batch_size: int = EMBEDDINGS_BATCH_SIZE, emi
     added = backfill_embeddings(app, batch_size=batch_size)
     emit(f"Embeddings backfill complete: {added} added")
     return added
+
+
+def rebuild_semantic_index(app, *, batch_size: int = EMBEDDINGS_BATCH_SIZE, emit: Emit = print) -> int:
+    from app.services.embeddings import EmbeddingService, reset_embedding_service
+
+    index_dir = Path(app.config["FAISS_INDEX_DIR"])
+    index_dir.mkdir(parents=True, exist_ok=True)
+    emit(f"Rebuilding semantic index with batch size {batch_size}...")
+
+    batch_number = 0
+    total_indexed = 0
+
+    with tempfile.TemporaryDirectory(prefix="paper-index-rebuild-", dir=index_dir) as staging_dir:
+        service = EmbeddingService(Path(staging_dir))
+
+        with app.app_context():
+            offset = 0
+            while True:
+                papers = Paper.query.order_by(Paper.id).offset(offset).limit(batch_size).all()
+                if not papers:
+                    break
+
+                batch_number += 1
+                paper_ids = [paper.id for paper in papers]
+                texts = [f"{paper.title} {paper.abstract_text or ''}" for paper in papers]
+                added = service.add_papers(paper_ids, texts)
+                total_indexed += added
+                emit(
+                    f"Index rebuild batch {batch_number}: "
+                    f"indexed {added}/{len(papers)} papers (total {total_indexed})"
+                )
+                offset += batch_size
+
+        service.save()
+        staging_index_path, staging_id_map_path = _paper_index_paths(Path(staging_dir))
+        final_index_path, final_id_map_path = _paper_index_paths(index_dir)
+        removed = _remove_paper_index_files(index_dir)
+
+        os.replace(staging_index_path, final_index_path)
+        os.replace(staging_id_map_path, final_id_map_path)
+
+    reset_embedding_service()
+    emit(
+        f"Semantic index rebuild complete: {total_indexed} indexed "
+        f"across {batch_number} batch(es); replaced {removed} existing file(s)"
+    )
+    return total_indexed
 
 
 def backfill_citations(
@@ -40,7 +107,7 @@ def backfill_citations(
 
     total_updated = 0
     last_seen_id = 0
-    session = create_session(pool_size=1)
+    session = create_session(pool_size=1, scraper_config=app.config.get("SCRAPER_CONFIG"), rate_limit_profile="bulk")
 
     try:
         with app.app_context():
@@ -73,6 +140,11 @@ def backfill_citations(
                     paper.influential_citation_count = data.get("influential_citation_count")
                     paper.semantic_scholar_id = data.get("semantic_scholar_id")
                     if paper.citation_count is not None:
+                        paper.citation_source = "semantic_scholar"
+                        paper.citation_provenance = {
+                            "source": "semantic_scholar",
+                            "updated_at": timestamp.isoformat(),
+                        }
                         paper.citation_updated_at = timestamp
                     updated_now += 1
 
@@ -101,7 +173,7 @@ def backfill_openalex(
 
     total_updated = 0
     last_seen_id = 0
-    session = create_session(pool_size=1)
+    session = create_session(pool_size=1, scraper_config=app.config.get("SCRAPER_CONFIG"), rate_limit_profile="bulk")
     email = ((app.config.get("SCRAPER_CONFIG") or {}).get("openalex") or {}).get("email") or None
 
     try:
@@ -124,6 +196,7 @@ def backfill_openalex(
                 arxiv_ids = [paper.arxiv_id for paper in papers if paper.arxiv_id]
                 openalex_data = fetch_openalex_batch(arxiv_ids, session=session, email=email)
                 updated_now = 0
+                timestamp = now_utc()
 
                 for paper in papers:
                     data = openalex_data.get(paper.arxiv_id or "")
@@ -135,6 +208,12 @@ def backfill_openalex(
                     paper.oa_status = data.get("oa_status")
                     paper.openalex_cited_by_count = data.get("openalex_cited_by_count")
                     paper.referenced_works_count = data.get("referenced_works_count")
+                    if paper.citation_count is None and paper.openalex_cited_by_count is not None:
+                        paper.citation_source = "openalex"
+                        paper.citation_provenance = {
+                            "source": "openalex",
+                            "updated_at": timestamp.isoformat(),
+                        }
                     updated_now += 1
 
                 db.session.commit()
@@ -162,7 +241,7 @@ def backfill_thumbnails(
 
     total_generated = 0
     last_seen_id = 0
-    session = create_session(pool_size=1)
+    session = create_session(pool_size=1, scraper_config=app.config.get("SCRAPER_CONFIG"), rate_limit_profile="bulk")
 
     try:
         with app.app_context():
@@ -236,6 +315,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     embeddings = subparsers.add_parser("embeddings", help="Backfill missing embeddings")
     embeddings.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
+    index_rebuild = subparsers.add_parser("index-rebuild", help="Rebuild the semantic paper index from the DB")
+    index_rebuild.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
 
     for command in ("citations", "openalex", "thumbnails", "all"):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
@@ -253,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "embeddings":
             run_embeddings_backfill(app, batch_size=args.batch_size)
+        elif args.command == "index-rebuild":
+            rebuild_semantic_index(app, batch_size=args.batch_size)
         elif args.command == "citations":
             backfill_citations(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "openalex":

@@ -38,6 +38,8 @@ class SyncCliStateTests(FlaskDBTestCase):
         self.assertEqual(stored.last_synced_submitted_at, datetime(2026, 1, 7, 23, 59, 59, 999999))
         self.assertEqual(stored.last_synced_updated_at, datetime(2026, 1, 8, 9, 30, 0))
         self.assertEqual(stored.last_synced_paper_count, 12)
+        self.assertIsNone(stored.last_cursor_page)
+        self.assertIsNone(stored.last_cursor_arxiv_id)
 
     @patch("sync_cli.execute_historical_scrape")
     def test_run_sync_executes_historical_scrape_inside_app_context(self, mock_historical_scrape):
@@ -115,6 +117,8 @@ class SyncCliStateTests(FlaskDBTestCase):
         self.assertEqual(stored.last_synced_submitted_at, datetime(2026, 1, 10, 23, 59, 59, 999999))
         self.assertEqual(stored.last_synced_updated_at, datetime(2026, 1, 15, 10, 0, 0))
         self.assertEqual(stored.last_synced_paper_count, 4)
+        self.assertIsNone(stored.last_cursor_page)
+        self.assertIsNone(stored.last_cursor_arxiv_id)
         self.assertTrue(messages[0].startswith("Starting sync for cs.CV"))
         self.assertTrue(messages[-1].startswith("Sync complete:"))
 
