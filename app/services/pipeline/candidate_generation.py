@@ -65,9 +65,7 @@ class WhitelistCandidateGenerator:
     def _check_fast_matches(self, entry_data: dict) -> dict[str, list[str]]:
         """Check title and author matches -- no network needed."""
         return {
-            "Author": check_author_match(
-                entry_data["authors_list"], self.whitelists["authors"]
-            ),
+            "Author": check_author_match(entry_data["authors_list"], self.whitelists["authors"]),
             "Title": check_whitelist_match(
                 [entry_data["title"], entry_data.get("abstract", "")],
                 self.whitelists["titles"],
@@ -81,9 +79,7 @@ class WhitelistCandidateGenerator:
 
         api_affiliations = entry_data.get("api_affiliations", "")
         if api_affiliations:
-            affiliation_matches = check_whitelist_match(
-                [api_affiliations], self.whitelists["affiliations"]
-            )
+            affiliation_matches = check_whitelist_match([api_affiliations], self.whitelists["affiliations"])
 
         if not affiliation_matches:
             link = entry_data["link"]
@@ -110,13 +106,9 @@ class WhitelistCandidateGenerator:
                     smart_header=self.scraper_config.get("pdf_smart_header", True),
                 )
                 if affiliation_text:
-                    affiliation_matches = check_whitelist_match(
-                        [affiliation_text], self.whitelists["affiliations"]
-                    )
+                    affiliation_matches = check_whitelist_match([affiliation_text], self.whitelists["affiliations"])
             except Exception as exc:
-                LOGGER.warning(
-                    "Error fetching PDF for %s: %s", entry_data.get("link"), exc
-                )
+                LOGGER.warning("Error fetching PDF for %s: %s", entry_data.get("link"), exc)
 
         return affiliation_matches, pdf_content
 
@@ -126,13 +118,9 @@ class WhitelistCandidateGenerator:
 
         if check_author_match(entry_data["authors_list"], self.muted["authors"]):
             return True
-        if check_whitelist_match(
-            [entry_data.get("api_affiliations", "")], self.muted["affiliations"]
-        ):
+        if check_whitelist_match([entry_data.get("api_affiliations", "")], self.muted["affiliations"]):
             return True
-        topic_tags = extract_topic_tags(
-            entry_data["title"], entry_data.get("abstract", "")
-        )
+        topic_tags = extract_topic_tags(entry_data["title"], entry_data.get("abstract", ""))
         if check_whitelist_match(topic_tags, self.muted["topics"]):
             return True
         return False
@@ -151,9 +139,7 @@ class WhitelistCandidateGenerator:
             return None
 
         match_types = [name for name, terms in category_matches.items() if terms]
-        matched_terms = dedupe_preserve_order(
-            term for terms in category_matches.values() for term in terms
-        )
+        matched_terms = dedupe_preserve_order(term for terms in category_matches.values() for term in terms)
 
         return ScoredCandidate(
             entry_data=entry_data,

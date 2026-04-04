@@ -149,12 +149,9 @@ class WeightedSumRanker:
             explanations.append("Published very recently")
 
         if features.llm_relevance is not None and features.llm_relevance >= 7:
-            explanations.append(
-                f"AI rated highly relevant ({features.llm_relevance:.0f}/10)"
-            )
+            explanations.append(f"AI rated highly relevant ({features.llm_relevance:.0f}/10)")
 
         if ranked_paper.entry_data.get("resource_links"):
             explanations.append("Code or dataset available")
 
         return explanations
-

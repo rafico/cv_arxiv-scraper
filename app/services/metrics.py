@@ -118,9 +118,7 @@ def compute_author_follow_hit_rate(
 ) -> float:
     resolved_config = _resolve_scraper_config(config) or {}
     tracked_authors = (
-        tracked_authors
-        if tracked_authors is not None
-        else resolved_config.get("whitelists", {}).get("authors", [])
+        tracked_authors if tracked_authors is not None else resolved_config.get("whitelists", {}).get("authors", [])
     )
     tracked_authors = [author for author in tracked_authors if author]
     if not tracked_authors:

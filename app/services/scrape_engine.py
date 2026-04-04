@@ -42,12 +42,10 @@ EventCallback = Callable[[str, dict], None] | None
 def _build_ingest_orchestrator() -> IngestOrchestrator:
     return IngestOrchestrator(
         rss_candidate_fetcher=lambda feed_url, *, session=None: [
-            PaperCandidate.from_entry_dict(entry)
-            for entry in parse_feed_entries(feed_url, session=session)
+            PaperCandidate.from_entry_dict(entry) for entry in parse_feed_entries(feed_url, session=session)
         ],
         rolling_window_fetcher=lambda days, feed_url, *, session=None: [
-            PaperCandidate.from_entry_dict(entry)
-            for entry in fetch_recent_papers(days, feed_url, session=session)
+            PaperCandidate.from_entry_dict(entry) for entry in fetch_recent_papers(days, feed_url, session=session)
         ],
     )
 
@@ -213,7 +211,6 @@ def _process_paper_entry(
     return result
 
 
-
 def _enrich_candidate_with_llm(
     candidate,
     llm_client: LLMClient | None,
@@ -230,9 +227,7 @@ def _enrich_candidate_with_llm(
         else generate_summary(title, abstract)
     )
     entry["llm_relevance_score"] = (
-        llm_client.rate_relevance(title, abstract, interests_text)
-        if llm_client is not None
-        else None
+        llm_client.rate_relevance(title, abstract, interests_text) if llm_client is not None else None
     )
     entry["topic_tags"] = extract_topic_tags(title, abstract)
 
@@ -267,12 +262,8 @@ def _process_entries_with_pipeline(
     matched = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(generator._process_single, entry): entry
-            for entry in entries
-        }
+        futures = {executor.submit(generator._process_single, entry): entry for entry in entries}
 
-        candidates = []
         for future in as_completed(futures):
             entry = futures[future]
             processed += 1
@@ -488,9 +479,7 @@ def _extract_sections(app, results: list[dict]) -> None:
 
             service = get_embedding_service(app)
             with app.app_context():
-                sections = PaperSection.query.join(Paper).filter(
-                    Paper.link.in_([r["link"] for r in results])
-                ).all()
+                sections = PaperSection.query.join(Paper).filter(Paper.link.in_([r["link"] for r in results])).all()
                 entries = [(s.paper_id, s.section_type, s.text) for s in sections if s.text]
                 if entries:
                     added = service.add_sections(entries)

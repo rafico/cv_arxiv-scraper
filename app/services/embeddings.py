@@ -229,11 +229,13 @@ class EmbeddingService:
             entry = map_snapshot[idx]
             if section_type and entry["section_type"] != section_type:
                 continue
-            results.append({
-                "paper_id": entry["paper_id"],
-                "section_type": entry["section_type"],
-                "score": float(score),
-            })
+            results.append(
+                {
+                    "paper_id": entry["paper_id"],
+                    "section_type": entry["section_type"],
+                    "score": float(score),
+                }
+            )
             if len(results) >= top_k:
                 break
 

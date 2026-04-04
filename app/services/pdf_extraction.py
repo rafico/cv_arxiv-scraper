@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pdfplumber
 
@@ -31,17 +31,13 @@ _HEADING_RE = re.compile(
     r"(?:[0-9]+\.?\s+)|"  # "1. " or "1 "
     r"(?:[IVXLC]+\.?\s+)"  # "III. " or "IV "
     r")?"
-    r"("
-    + "|".join(re.escape(s) for s in SECTION_TYPES)
-    + r")"
+    r"(" + "|".join(re.escape(s) for s in SECTION_TYPES) + r")"
     r"(?:\s*[:.]?\s*$|\s+)",
     re.IGNORECASE,
 )
 
 # Broader heading pattern for detecting section boundaries by formatting.
-_ALLCAPS_HEADING_RE = re.compile(
-    r"^(?:[0-9]+\.?\s+|[IVXLC]+\.?\s+)?[A-Z][A-Z\s]{2,}$"
-)
+_ALLCAPS_HEADING_RE = re.compile(r"^(?:[0-9]+\.?\s+|[IVXLC]+\.?\s+)?[A-Z][A-Z\s]{2,}$")
 
 
 @dataclass

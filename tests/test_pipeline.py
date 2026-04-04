@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import math
 from datetime import date
 
 from app.services.pipeline import (
-    DefaultFeatureExtractor,
     FeatureVector,
     ScoredCandidate,
     WeightedSumRanker,
-    WhitelistCandidateGenerator,
 )
 from app.services.ranking import compute_paper_score
 

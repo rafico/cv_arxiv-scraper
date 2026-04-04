@@ -12,11 +12,16 @@ from tests.helpers import FlaskDBTestCase
 
 class TestValidateSavedSearch:
     def test_valid_data(self):
-        assert validate_saved_search({
-            "include_keywords": ["transformer", "attention"],
-            "date_window_days": 30,
-            "min_citations": 10,
-        }) == []
+        assert (
+            validate_saved_search(
+                {
+                    "include_keywords": ["transformer", "attention"],
+                    "date_window_days": 30,
+                    "min_citations": 10,
+                }
+            )
+            == []
+        )
 
     def test_negative_date_window(self):
         errors = validate_saved_search({"date_window_days": -1})
@@ -56,7 +61,9 @@ class TestExecuteSavedSearch(FlaskDBTestCase):
 
     def test_include_keywords_filter(self):
         p1 = self._add_paper(title="Transformer Architecture", arxiv_id="k1", link="https://arxiv.org/abs/k1")
-        p2 = self._add_paper(title="CNN Baseline", arxiv_id="k2", link="https://arxiv.org/abs/k2", abstract_text="A CNN paper.")
+        p2 = self._add_paper(
+            title="CNN Baseline", arxiv_id="k2", link="https://arxiv.org/abs/k2", abstract_text="A CNN paper."
+        )
         search = SavedSearch(name="test", include_keywords=["transformer"])
         db.session.add(search)
         db.session.commit()
@@ -66,8 +73,15 @@ class TestExecuteSavedSearch(FlaskDBTestCase):
         assert p2.id not in result_ids
 
     def test_exclude_keywords_filter(self):
-        p1 = self._add_paper(title="Good Paper", arxiv_id="e1", link="https://arxiv.org/abs/e1", abstract_text="About vision.")
-        p2 = self._add_paper(title="Bad Survey Paper", arxiv_id="e2", link="https://arxiv.org/abs/e2", abstract_text="A survey of methods.")
+        p1 = self._add_paper(
+            title="Good Paper", arxiv_id="e1", link="https://arxiv.org/abs/e1", abstract_text="About vision."
+        )
+        p2 = self._add_paper(
+            title="Bad Survey Paper",
+            arxiv_id="e2",
+            link="https://arxiv.org/abs/e2",
+            abstract_text="A survey of methods.",
+        )
         search = SavedSearch(name="test", exclude_keywords=["survey"])
         db.session.add(search)
         db.session.commit()
@@ -77,7 +91,9 @@ class TestExecuteSavedSearch(FlaskDBTestCase):
         assert p2.id not in result_ids
 
     def test_author_filter(self):
-        p1 = self._add_paper(title="P1", authors="Andrew Y. Ng, John Smith", arxiv_id="a1", link="https://arxiv.org/abs/a1")
+        p1 = self._add_paper(
+            title="P1", authors="Andrew Y. Ng, John Smith", arxiv_id="a1", link="https://arxiv.org/abs/a1"
+        )
         p2 = self._add_paper(title="P2", authors="Jane Doe", arxiv_id="a2", link="https://arxiv.org/abs/a2")
         search = SavedSearch(name="test", author_filters=["Andrew Y. Ng"])
         db.session.add(search)
@@ -99,9 +115,13 @@ class TestExecuteSavedSearch(FlaskDBTestCase):
         assert p2.id not in result_ids
 
     def test_date_window_filter(self):
-        recent = self._add_paper(title="Recent", arxiv_id="d1", link="https://arxiv.org/abs/d1", publication_dt=date.today())
+        recent = self._add_paper(
+            title="Recent", arxiv_id="d1", link="https://arxiv.org/abs/d1", publication_dt=date.today()
+        )
         old = self._add_paper(
-            title="Old", arxiv_id="d2", link="https://arxiv.org/abs/d2",
+            title="Old",
+            arxiv_id="d2",
+            link="https://arxiv.org/abs/d2",
             publication_dt=date.today() - timedelta(days=60),
         )
         search = SavedSearch(name="test", date_window_days=30)
@@ -120,7 +140,7 @@ class TestExecuteSavedSearch(FlaskDBTestCase):
             link="https://arxiv.org/abs/combo1",
             citation_count=20,
         )
-        p2 = self._add_paper(
+        self._add_paper(
             title="CNN Baseline",
             authors="Jane Doe",
             arxiv_id="combo2",

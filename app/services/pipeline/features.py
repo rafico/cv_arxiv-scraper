@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from datetime import date
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.services.pipeline.candidate_generation import ScoredCandidate
@@ -68,7 +67,11 @@ class DefaultFeatureExtractor:
         match_types = candidate.match_types
 
         author_score = self.preferences.get("Author", MATCH_TYPE_WEIGHTS["Author"]) if "Author" in match_types else 0.0
-        affiliation_score = self.preferences.get("Affiliation", MATCH_TYPE_WEIGHTS["Affiliation"]) if "Affiliation" in match_types else 0.0
+        affiliation_score = (
+            self.preferences.get("Affiliation", MATCH_TYPE_WEIGHTS["Affiliation"])
+            if "Affiliation" in match_types
+            else 0.0
+        )
         title_score = self.preferences.get("Title", MATCH_TYPE_WEIGHTS["Title"]) if "Title" in match_types else 0.0
 
         term_count = len(candidate.matched_terms)

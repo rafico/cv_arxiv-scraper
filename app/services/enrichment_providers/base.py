@@ -46,13 +46,10 @@ def get_cached_payloads(
     if not paper_by_arxiv_id:
         return {}, ordered_ids, {}
 
-    cache_rows = (
-        EnrichmentCache.query.filter(
-            EnrichmentCache.source == source,
-            EnrichmentCache.paper_id.in_([paper.id for paper in paper_by_arxiv_id.values()]),
-        )
-        .all()
-    )
+    cache_rows = EnrichmentCache.query.filter(
+        EnrichmentCache.source == source,
+        EnrichmentCache.paper_id.in_([paper.id for paper in paper_by_arxiv_id.values()]),
+    ).all()
     cache_by_paper_id = {row.paper_id: row for row in cache_rows}
     reference_time = now_utc()
 
@@ -86,13 +83,10 @@ def store_cached_payloads(
     if not paper_ids:
         return
 
-    existing_rows = (
-        EnrichmentCache.query.filter(
-            EnrichmentCache.source == source,
-            EnrichmentCache.paper_id.in_(paper_ids),
-        )
-        .all()
-    )
+    existing_rows = EnrichmentCache.query.filter(
+        EnrichmentCache.source == source,
+        EnrichmentCache.paper_id.in_(paper_ids),
+    ).all()
     existing_by_paper_id = {row.paper_id: row for row in existing_rows}
     fetched_at = now_utc()
 
