@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 from app.models import Paper, ScrapeRun, db
+from app.services.ranking import compute_paper_score
 from app.services.summary import generate_summary
 from app.services.text import now_utc
 from tests.helpers import FlaskDBTestCase
@@ -374,6 +375,47 @@ class RollingWindowTests(FlaskDBTestCase):
             scrape_engine.execute_scrape(self.app, force=True)
 
         mock_recent.assert_not_called()
+
+
+class OpenAlexEnrichmentTests(FlaskDBTestCase):
+    @patch("app.services.openalex.fetch_openalex_batch")
+    def test_openalex_fallback_populates_citation_count_and_rescores(self, mock_fetch):
+        from app.services.scrape_engine import _enrich_results_with_openalex
+
+        result = _make_result("https://arxiv.org/abs/0007")
+        result["arxiv_id"] = "0007"
+        result["match_type"] = "Title"
+        result["match_types"] = ["Title"]
+        result["paper_score"] = 1.0
+        result["publication_dt"] = date(2026, 1, 1)
+        mock_fetch.return_value = {
+            "0007": {
+                "openalex_id": "W7",
+                "openalex_topics": [{"name": "Vision", "score": 0.9}],
+                "oa_status": "green",
+                "openalex_cited_by_count": 7,
+                "referenced_works_count": 2,
+            }
+        }
+
+        _enrich_results_with_openalex([result], session=None, config=self.app.config["SCRAPER_CONFIG"])
+
+        self.assertEqual(result["citation_count"], 7)
+        self.assertEqual(result["citation_source"], "openalex")
+        self.assertEqual(result["openalex_cited_by_count"], 7)
+        self.assertIsNotNone(result["citation_updated_at"])
+        self.assertEqual(
+            result["paper_score"],
+            compute_paper_score(
+                match_types=result["match_types"],
+                matched_terms_count=len(result["matches"]),
+                publication_dt=result["publication_dt"],
+                resource_count=len(result["resource_links"]),
+                llm_relevance_score=result.get("llm_relevance_score"),
+                citation_count=result["citation_count"],
+                config=self.app.config["SCRAPER_CONFIG"],
+            ),
+        )
 
 
 class HistoricalScrapeTests(FlaskDBTestCase):

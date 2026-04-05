@@ -8,6 +8,7 @@ import numpy as np
 
 from app.models import Paper, db
 from app.services.embeddings import EmbeddingService, reset_embedding_service
+from app.services.ranking import compute_paper_score
 from backfill_cli import (
     backfill_citations,
     backfill_openalex,
@@ -73,6 +74,18 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertEqual(stored.citation_source, "semantic_scholar")
         self.assertEqual(stored.citation_provenance["source"], "semantic_scholar")
         self.assertIsNotNone(stored.citation_updated_at)
+        self.assertEqual(
+            stored.paper_score,
+            compute_paper_score(
+                match_types=[part.strip() for part in (stored.match_type or "").split("+") if part.strip()],
+                matched_terms_count=len(stored.matched_terms_list),
+                publication_dt=stored.publication_dt,
+                resource_count=len(stored.resource_links_list),
+                llm_relevance_score=stored.llm_relevance_score,
+                citation_count=stored.citation_count,
+                config=self.app.config["SCRAPER_CONFIG"],
+            ),
+        )
         self.assertTrue(messages[-1].startswith("Citations batch"))
 
     @patch("app.services.openalex.fetch_openalex_batch")
@@ -95,10 +108,24 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertEqual(updated, 1)
         self.assertEqual(stored.openalex_id, "W123")
         self.assertEqual(stored.oa_status, "green")
+        self.assertEqual(stored.citation_count, 7)
         self.assertEqual(stored.openalex_cited_by_count, 7)
         self.assertEqual(stored.referenced_works_count, 2)
         self.assertEqual(stored.citation_source, "openalex")
         self.assertEqual(stored.citation_provenance["source"], "openalex")
+        self.assertIsNotNone(stored.citation_updated_at)
+        self.assertEqual(
+            stored.paper_score,
+            compute_paper_score(
+                match_types=[part.strip() for part in (stored.match_type or "").split("+") if part.strip()],
+                matched_terms_count=len(stored.matched_terms_list),
+                publication_dt=stored.publication_dt,
+                resource_count=len(stored.resource_links_list),
+                llm_relevance_score=stored.llm_relevance_score,
+                citation_count=stored.citation_count,
+                config=self.app.config["SCRAPER_CONFIG"],
+            ),
+        )
 
     @patch("app.services.thumbnail_generator.generate_thumbnail", return_value=True)
     def test_backfill_thumbnails_only_generates_missing_files(self, mock_generate):

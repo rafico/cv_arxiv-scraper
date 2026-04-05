@@ -22,6 +22,21 @@ DEFAULT_DELAY_SECONDS = 1.0
 EMBEDDINGS_BATCH_SIZE = 64
 
 
+def _recompute_paper_score(paper: Paper, config: dict | None) -> float:
+    from app.services.ranking import compute_paper_score
+
+    paper.paper_score = compute_paper_score(
+        match_types=[part.strip() for part in (paper.match_type or "").split("+") if part.strip()],
+        matched_terms_count=len(paper.matched_terms_list),
+        publication_dt=paper.publication_dt,
+        resource_count=len(paper.resource_links_list),
+        llm_relevance_score=paper.llm_relevance_score,
+        citation_count=paper.citation_count,
+        config=config,
+    )
+    return float(paper.paper_score or 0.0)
+
+
 def _paper_index_paths(index_dir: Path) -> tuple[Path, Path]:
     return index_dir / "papers.index", index_dir / "id_map.json"
 
@@ -110,6 +125,7 @@ def backfill_citations(
 
     try:
         with app.app_context():
+            scraper_config = app.config.get("SCRAPER_CONFIG")
             while True:
                 papers = (
                     Paper.query.filter(
@@ -145,6 +161,7 @@ def backfill_citations(
                             "updated_at": timestamp.isoformat(),
                         }
                         paper.citation_updated_at = timestamp
+                        _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()
@@ -177,6 +194,7 @@ def backfill_openalex(
 
     try:
         with app.app_context():
+            scraper_config = app.config.get("SCRAPER_CONFIG")
             while True:
                 papers = (
                     Paper.query.filter(
@@ -208,11 +226,14 @@ def backfill_openalex(
                     paper.openalex_cited_by_count = data.get("openalex_cited_by_count")
                     paper.referenced_works_count = data.get("referenced_works_count")
                     if paper.citation_count is None and paper.openalex_cited_by_count is not None:
+                        paper.citation_count = paper.openalex_cited_by_count
                         paper.citation_source = "openalex"
                         paper.citation_provenance = {
                             "source": "openalex",
                             "updated_at": timestamp.isoformat(),
                         }
+                        paper.citation_updated_at = timestamp
+                        _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()

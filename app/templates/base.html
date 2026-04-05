@@ -235,7 +235,7 @@
             overlay.classList.toggle("hidden", !visible);
         }
 
-        function startScrape(force = false) {
+        async function startScrape(force = false) {
             const btn = document.getElementById("scrape-btn");
             btn.disabled = true;
             document.getElementById("scrape-icon").classList.add("animate-spin");
@@ -258,86 +258,105 @@
 
             setOverlayVisible(true);
 
-            const params = new URLSearchParams();
-            if (force) {
-                params.set("force", "1");
-            }
             const csrfToken = getCsrfToken();
-            if (csrfToken) {
-                params.set("csrf_token", csrfToken);
-            }
-            const streamUrl = `/api/scrape/stream${params.toString() ? `?${params.toString()}` : ""}`;
-            const source = new EventSource(streamUrl);
-
-            source.addEventListener("feed", (event) => {
-                const data = JSON.parse(event.data);
-                document.getElementById("progress-title").textContent = "Processing papers";
-                document.getElementById("progress-subtitle").textContent = `Found ${data.total} papers in feed`;
-                document.getElementById("progress-counter").textContent = `0 / ${data.total}`;
-            });
-
-            source.addEventListener("progress", (event) => {
-                updateProgress(JSON.parse(event.data));
-            });
-
-            source.addEventListener("match", (event) => {
-                const data = JSON.parse(event.data);
-                updateProgress(data);
-                addMatchToFeed(data.paper);
-            });
-
-            source.addEventListener("status", (event) => {
-                const data = JSON.parse(event.data);
-                if (data.phase === "saving") {
-                    document.getElementById("progress-title").textContent = "Saving results";
-                    document.getElementById("progress-subtitle").textContent = "Writing to database...";
-                    document.getElementById("progress-bar").style.width = "100%";
-                    document.getElementById("progress-bar").classList.remove("bar-pulse");
-                }
-            });
-
-            source.addEventListener("scrape_error", (event) => {
-                const data = JSON.parse(event.data);
-                document.getElementById("progress-title").textContent = "Scrape error";
-                document.getElementById("progress-subtitle").textContent = data.message || "Unexpected failure";
-                document.getElementById("progress-footer").classList.remove("hidden");
-                source.close();
-                resetScrapeButton();
-            });
-
-            source.addEventListener("done", (event) => {
-                const data = JSON.parse(event.data);
-                source.close();
-                showDone(data);
-            });
-
-            source.addEventListener("skipped", (event) => {
-                const data = JSON.parse(event.data);
-                source.close();
-
-                document.getElementById("progress-title").textContent = "Already scraped";
-                document.getElementById("progress-subtitle").textContent = data.reason || "Today's papers have already been fetched.";
-                document.getElementById("progress-bar").style.width = "100%";
-                document.getElementById("progress-bar").className = "h-full bg-amber-400 rounded-full transition-all duration-300 ease-out";
-                document.getElementById("progress-pct").textContent = "";
-                document.getElementById("progress-matches").textContent = "";
-                document.getElementById("progress-counter").textContent = "";
-
-                const footer = document.getElementById("progress-footer");
-                footer.className = "border-t border-gray-100 px-4 py-2 bg-gray-50 flex items-center justify-end gap-2";
-                footer.innerHTML =
-                    '<button onclick="setOverlayVisible(false); resetScrapeButton();" class="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 transition-colors">Dismiss</button>' +
-                    '<button onclick="startScrape(true)" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800 transition-colors">Run Again</button>';
-
-                resetScrapeButton();
-            });
-
-            source.onerror = () => {
-                source.close();
-                document.getElementById("progress-title").textContent = "Connection lost";
-                document.getElementById("progress-subtitle").textContent = "Checking if scrape is still running...";
-                pollScrapeStatus();
+            const headers = {
+                "Content-Type": "application/json",
             };
+            if (csrfToken) {
+                headers["X-CSRF-Token"] = csrfToken;
+            }
+
+            try {
+                const startResponse = await fetch("/api/scrape", {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({ force }),
+                });
+                const startData = await startResponse.json().catch(() => ({}));
+                if (!startResponse.ok || !startData.job_id) {
+                    throw new Error(startData.error || "Unable to start scrape");
+                }
+
+                const streamParams = new URLSearchParams({ job_id: startData.job_id });
+                const source = new EventSource(`/api/scrape/stream?${streamParams.toString()}`);
+
+                source.addEventListener("feed", (event) => {
+                    const data = JSON.parse(event.data);
+                    document.getElementById("progress-title").textContent = "Processing papers";
+                    document.getElementById("progress-subtitle").textContent = `Found ${data.total} papers in feed`;
+                    document.getElementById("progress-counter").textContent = `0 / ${data.total}`;
+                });
+
+                source.addEventListener("progress", (event) => {
+                    updateProgress(JSON.parse(event.data));
+                });
+
+                source.addEventListener("match", (event) => {
+                    const data = JSON.parse(event.data);
+                    updateProgress(data);
+                    addMatchToFeed(data.paper);
+                });
+
+                source.addEventListener("status", (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.phase === "saving") {
+                        document.getElementById("progress-title").textContent = "Saving results";
+                        document.getElementById("progress-subtitle").textContent = "Writing to database...";
+                        document.getElementById("progress-bar").style.width = "100%";
+                        document.getElementById("progress-bar").classList.remove("bar-pulse");
+                    }
+                });
+
+                source.addEventListener("scrape_error", (event) => {
+                    const data = JSON.parse(event.data);
+                    document.getElementById("progress-title").textContent = "Scrape error";
+                    document.getElementById("progress-subtitle").textContent = data.message || "Unexpected failure";
+                    document.getElementById("progress-footer").classList.remove("hidden");
+                    source.close();
+                    resetScrapeButton();
+                });
+
+                source.addEventListener("done", (event) => {
+                    const data = JSON.parse(event.data);
+                    source.close();
+                    showDone(data);
+                });
+
+                source.addEventListener("skipped", (event) => {
+                    const data = JSON.parse(event.data);
+                    source.close();
+
+                    document.getElementById("progress-title").textContent = "Already scraped";
+                    document.getElementById("progress-subtitle").textContent = data.reason || "Today's papers have already been fetched.";
+                    document.getElementById("progress-bar").style.width = "100%";
+                    document.getElementById("progress-bar").className = "h-full bg-amber-400 rounded-full transition-all duration-300 ease-out";
+                    document.getElementById("progress-pct").textContent = "";
+                    document.getElementById("progress-matches").textContent = "";
+                    document.getElementById("progress-counter").textContent = "";
+
+                    const footer = document.getElementById("progress-footer");
+                    footer.className = "border-t border-gray-100 px-4 py-2 bg-gray-50 flex items-center justify-end gap-2";
+                    footer.innerHTML =
+                        '<button onclick="setOverlayVisible(false); resetScrapeButton();" class="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 transition-colors">Dismiss</button>' +
+                        '<button onclick="startScrape(true)" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800 transition-colors">Run Again</button>';
+
+                    resetScrapeButton();
+                });
+
+                source.onerror = () => {
+                    source.close();
+                    document.getElementById("progress-title").textContent = "Connection lost";
+                    document.getElementById("progress-subtitle").textContent = "Checking if scrape is still running...";
+                    pollScrapeStatus();
+                };
+            } catch (error) {
+                document.getElementById("progress-title").textContent = "Unable to start scrape";
+                document.getElementById("progress-subtitle").textContent = error.message || "Unexpected failure";
+                document.getElementById("progress-bar").style.width = "100%";
+                document.getElementById("progress-bar").className = "h-full bg-red-500 rounded-full transition-all duration-300 ease-out";
+                document.getElementById("progress-footer").classList.remove("hidden");
+                resetScrapeButton();
+            }
         }
 
         function resetScrapeButton() {

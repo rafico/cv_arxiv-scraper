@@ -65,10 +65,24 @@ class ApiCsrfTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["job_id"], "job-1")
 
-    def test_scrape_stream_no_csrf_required(self):
+    @patch("app.routes.api.SCRAPE_JOB_MANAGER.stream_for_job")
+    def test_scrape_stream_no_csrf_required(self, mock_stream):
         """SSE stream is read-only; EventSource can't send headers, so no CSRF."""
+        mock_stream.return_value = iter(["event: status\ndata: {}\n\n"])
+
+        response = self.client.get("/api/scrape/stream?job_id=job-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(as_text=True), "event: status\ndata: {}\n\n")
+        mock_stream.assert_called_once_with("job-1")
+
+    @patch("app.routes.api.SCRAPE_JOB_MANAGER.start_or_get_active")
+    def test_scrape_stream_missing_job_id_does_not_start_job(self, mock_start):
         response = self.client.get("/api/scrape/stream")
-        self.assertNotEqual(response.status_code, 400)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], "Missing 'job_id' parameter")
+        mock_start.assert_not_called()
 
     def test_follow_endpoint_adds_author_to_whitelist(self):
         paper = Paper.query.first()

@@ -6,7 +6,7 @@ from app import _validate_config
 from app.csrf import validate_csrf_token
 from app.enums import FeedbackAction, ReadingStatus
 from app.models import Collection, Paper, PaperCollection, SavedSearch, db
-from app.services import SCRAPE_JOB_MANAGER, apply_feedback_action, stream_or_start_scrape
+from app.services import SCRAPE_JOB_MANAGER, apply_feedback_action
 from app.services.bibtex import paper_to_bibtex, papers_to_bibtex
 from app.services.export import generate_html_report
 from app.services.preferences import (
@@ -86,11 +86,13 @@ def scrape_status():
 @api_bp.route("/scrape/stream", methods=["GET"])
 def scrape_stream():
     # No CSRF validation: this is a read-only SSE endpoint and EventSource
-    # cannot send custom headers. Scrape initiation is CSRF-protected on POST.
-    app = current_app._get_current_object()
-    force = request.args.get("force", "").strip().lower() in {"1", "true", "yes", "on"}
+    # cannot send custom headers. Scrape initiation happens on the POST route.
+    job_id = request.args.get("job_id", "").strip()
+    if not job_id:
+        return jsonify({"error": "Missing 'job_id' parameter"}), 400
+
     return Response(
-        stream_or_start_scrape(app, force=force),
+        SCRAPE_JOB_MANAGER.stream_for_job(job_id),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

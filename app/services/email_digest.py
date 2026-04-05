@@ -579,7 +579,6 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    creds = _load_gmail_credentials()
     email_cfg = _get_email_config(app)
 
     recipient = email_cfg["recipient"]
@@ -608,6 +607,8 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
         LOGGER.info("Dry run — email not sent (would send to %s)", recipient)
         _finish_digest_run(app, digest_run_id, status="preview")
         return {"papers_count": len(papers), "sent": False, "recipient": recipient}
+
+    creds = _load_gmail_credentials()
 
     try:
         service = _build_gmail_service(creds)

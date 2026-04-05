@@ -180,5 +180,9 @@ class ScrapeJobManager:
         for event, data in self.stream_events(job.id):
             yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
+    def stream_for_job(self, job_id: str):
+        for event, data in self.stream_events(job_id):
+            yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
 
 SCRAPE_JOB_MANAGER = ScrapeJobManager()

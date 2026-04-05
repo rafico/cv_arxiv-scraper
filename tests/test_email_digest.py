@@ -145,6 +145,7 @@ class SendDigestTests(FlaskDBTestCase):
 
         result = send_digest(self.app, dry_run=True)
         self.assertFalse(result["sent"])
+        mock_creds.assert_not_called()
         mock_service.assert_not_called()
 
     def test_missing_token_raises(self):

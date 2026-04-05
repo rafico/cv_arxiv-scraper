@@ -669,6 +669,7 @@ def _enrich_results_with_openalex(
         return
 
     from app.services.openalex import fetch_openalex_batch
+    from app.services.ranking import compute_paper_score
 
     arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
     if not arxiv_ids:
@@ -687,11 +688,22 @@ def _enrich_results_with_openalex(
             res["openalex_cited_by_count"] = data.get("openalex_cited_by_count")
             res["referenced_works_count"] = data.get("referenced_works_count")
             if res.get("citation_count") is None and res["openalex_cited_by_count"] is not None:
+                res["citation_count"] = res["openalex_cited_by_count"]
                 res["citation_source"] = "openalex"
                 res["citation_provenance"] = {
                     "source": "openalex",
                     "updated_at": now.isoformat(),
                 }
+                res["citation_updated_at"] = now
+                res["paper_score"] = compute_paper_score(
+                    match_types=res.get("match_types", []),
+                    matched_terms_count=len(res.get("matches", [])),
+                    publication_dt=res.get("publication_dt"),
+                    resource_count=len(res.get("resource_links", [])),
+                    llm_relevance_score=res.get("llm_relevance_score"),
+                    citation_count=res.get("citation_count"),
+                    config=config,
+                )
 
 
 def execute_scrape(app, event_callback: EventCallback = None, force: bool = False) -> dict:
