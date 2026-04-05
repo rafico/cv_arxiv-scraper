@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -22,8 +23,8 @@ def _python_bin() -> str:
 
 
 def _build_cron_line(hour: int, minute: int, mode: str) -> str:
-    project = _project_dir()
-    python = _python_bin()
+    project = shlex.quote(str(_project_dir()))
+    python = shlex.quote(_python_bin())
 
     if mode == "scrape":
         script = "scrape_cli.py"

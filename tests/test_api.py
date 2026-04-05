@@ -65,9 +65,10 @@ class ApiCsrfTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["job_id"], "job-1")
 
-    def test_scrape_stream_requires_csrf(self):
+    def test_scrape_stream_no_csrf_required(self):
+        """SSE stream is read-only; EventSource can't send headers, so no CSRF."""
         response = self.client.get("/api/scrape/stream")
-        self.assertEqual(response.status_code, 400)
+        self.assertNotEqual(response.status_code, 400)
 
     def test_follow_endpoint_adds_author_to_whitelist(self):
         paper = Paper.query.first()

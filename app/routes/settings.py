@@ -45,9 +45,7 @@ def _save_config_key(key: str, value) -> None:
 
     full_config[key] = value
 
-    with config_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
-
+    save_config(config_path, full_config)
     current_app.config["SCRAPER_CONFIG"] = full_config
 
 
@@ -155,9 +153,9 @@ def save_settings():
 
     config_path = Path(current_app.config["CONFIG_PATH"])
     new_whitelists = {
-        "titles": _normalize_multiline(request.form["titles"]),
-        "affiliations": _normalize_multiline(request.form["affiliations"]),
-        "authors": _normalize_multiline(request.form["authors"]),
+        "titles": _normalize_multiline(request.form.get("titles", "")),
+        "affiliations": _normalize_multiline(request.form.get("affiliations", "")),
+        "authors": _normalize_multiline(request.form.get("authors", "")),
     }
 
     with config_path.open("r", encoding="utf-8") as handle:
@@ -165,9 +163,13 @@ def save_settings():
 
     full_config["whitelists"] = new_whitelists
 
-    with config_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
+    try:
+        _validate_config(full_config, config_path=config_path)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("settings.view_settings", section="interests"))
 
+    save_config(config_path, full_config)
     current_app.config["SCRAPER_CONFIG"] = full_config
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Settings saved successfully.", "success")
@@ -310,9 +312,7 @@ def save_llm_settings():
         flash(str(exc), "error")
         return redirect(url_for("settings.view_settings", section="ai"))
 
-    with config_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
-
+    save_config(config_path, full_config)
     current_app.config["SCRAPER_CONFIG"] = full_config
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("LLM settings saved.", "success")
@@ -409,8 +409,12 @@ def manage_cron():
     if action == "remove":
         result = remove_cron_job()
     else:
-        hour = int(request.form.get("cron_hour", 8))
-        minute = int(request.form.get("cron_minute", 0))
+        try:
+            hour = int(request.form.get("cron_hour", 8))
+            minute = int(request.form.get("cron_minute", 0))
+        except (ValueError, TypeError):
+            flash("Hour and minute must be integers.", "error")
+            return redirect(url_for("settings.view_settings", section="automation"))
         mode = request.form.get("cron_mode", "full")
         result = install_cron_job(hour, minute, mode)
 

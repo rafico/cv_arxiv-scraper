@@ -59,8 +59,8 @@ class TokenBucketRateLimiter:
             return 0.0
 
         waited = 0.0
-        with self._lock:
-            while True:
+        while True:
+            with self._lock:
                 now = self._time_fn()
                 self._refill(now)
                 if self._tokens >= tokens:
@@ -68,8 +68,10 @@ class TokenBucketRateLimiter:
                     return waited
 
                 delay = (tokens - self._tokens) / self.requests_per_second
-                self._sleep_fn(delay)
-                waited += delay
+
+            # Sleep outside the lock so other threads aren't blocked.
+            self._sleep_fn(delay)
+            waited += delay
 
 
 _SHARED_LIMITERS: dict[RateLimitSettings, TokenBucketRateLimiter] = {}

@@ -599,6 +599,7 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
     )
 
     msg = MIMEMultipart("alternative")
+    msg["From"] = "me"
     msg["To"] = recipient
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html"))

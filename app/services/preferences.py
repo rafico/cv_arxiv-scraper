@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+import threading
 from copy import deepcopy
 from pathlib import Path
 
 import yaml
+
+# Module-level lock to serialize config read-modify-write cycles.
+_CONFIG_LOCK = threading.Lock()
 
 DEFAULT_PREFERENCES = {
     "ranking": {
@@ -77,8 +83,19 @@ def update_preferences_from_form(config: dict, form) -> dict:
 
 
 def save_config(config_path: Path, full_config: dict) -> dict:
-    with config_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
+    """Atomically write config to disk using write-to-temp + rename."""
+    with _CONFIG_LOCK:
+        fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".yaml")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
+            os.replace(tmp_path, config_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     return full_config
 
 

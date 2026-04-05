@@ -292,7 +292,7 @@ def index():
 
     match_type = request.args.get("match_type")
     if match_type:
-        query = query.filter(Paper.match_type.contains(match_type))
+        query = query.filter(Paper.match_type == match_type)
 
     q = request.args.get("q", "").strip()
     search_mode = request.args.get("search_mode", "hybrid").strip()

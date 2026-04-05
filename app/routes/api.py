@@ -85,7 +85,8 @@ def scrape_status():
 
 @api_bp.route("/scrape/stream", methods=["GET"])
 def scrape_stream():
-    validate_csrf_token()
+    # No CSRF validation: this is a read-only SSE endpoint and EventSource
+    # cannot send custom headers. Scrape initiation is CSRF-protected on POST.
     app = current_app._get_current_object()
     force = request.args.get("force", "").strip().lower() in {"1", "true", "yes", "on"}
     return Response(
@@ -132,7 +133,10 @@ def search_papers():
 
     q = request.args.get("q", "").strip()
     mode = request.args.get("mode", "hybrid")
-    top_k = min(int(request.args.get("limit", 30)), 100)
+    try:
+        top_k = min(int(request.args.get("limit", 30)), 100)
+    except (ValueError, TypeError):
+        top_k = 30
 
     if not q:
         return jsonify({"query": "", "mode": mode, "results": []})

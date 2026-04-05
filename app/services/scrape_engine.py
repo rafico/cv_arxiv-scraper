@@ -715,6 +715,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
 
     scrape_run_id = _create_scrape_run(app, now, force=force)
 
+    session = None
     try:
         max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
         user_agent = resolve_user_agent(config)
@@ -843,6 +844,9 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
     except Exception:
         _finish_scrape_run(app, scrape_run_id, status="error")
         raise
+    finally:
+        if session is not None:
+            session.close()
 
 
 def run_scrape(app) -> dict:
@@ -871,49 +875,52 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
         scraper_config=config,
         rate_limit_profile="bulk",
     )
-    orchestrator = _build_ingest_orchestrator()
+    try:
+        orchestrator = _build_ingest_orchestrator()
 
-    entries = _candidate_entries(
-        orchestrator.fetch(
-            mode=IngestMode.BACKFILL,
-            session=session,
-            categories=categories,
-            start_dt=start_dt,
-            end_dt=end_dt,
-            max_results=2000,
-            backend_names=ingest_config.get("backends"),
-            user_agent=user_agent,
+        entries = _candidate_entries(
+            orchestrator.fetch(
+                mode=IngestMode.BACKFILL,
+                session=session,
+                categories=categories,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                max_results=2000,
+                backend_names=ingest_config.get("backends"),
+                user_agent=user_agent,
+            )
         )
-    )
-    total_entries = len(entries)
-    if not entries:
-        return _build_summary(0, 0, 0, 0)
+        total_entries = len(entries)
+        if not entries:
+            return _build_summary(0, 0, 0, 0)
 
-    existing_ids = _get_existing_ids(app, entries)
-    pre_filtered = 0
-    if existing_ids:
-        filtered_entries = [e for e in entries if not _identity_keys(e).intersection(existing_ids)]
-        pre_filtered = len(entries) - len(filtered_entries)
-        entries = filtered_entries
+        existing_ids = _get_existing_ids(app, entries)
+        pre_filtered = 0
+        if existing_ids:
+            filtered_entries = [e for e in entries if not _identity_keys(e).intersection(existing_ids)]
+            pre_filtered = len(entries) - len(filtered_entries)
+            entries = filtered_entries
 
-    llm_client, interests_text = _create_llm_client(app)
-    enrich_entries_with_api_metadata(entries, session=session)
+        llm_client, interests_text = _create_llm_client(app)
+        enrich_entries_with_api_metadata(entries, session=session)
 
-    results = []
-    for processed, matched, result in _process_entries_with_pipeline(
-        entries, whitelists, scraper_config, session, llm_client, interests_text, config
-    ):
-        if result:
-            results.append(result)
+        results = []
+        for processed, matched, result in _process_entries_with_pipeline(
+            entries, whitelists, scraper_config, session, llm_client, interests_text, config
+        ):
+            if result:
+                results.append(result)
 
-    _enrich_results_with_citations(results, session, config)
-    _enrich_results_with_openalex(results, session, config)
+        _enrich_results_with_citations(results, session, config)
+        _enrich_results_with_openalex(results, session, config)
 
-    _sort_results(results)
-    new_count, skipped = _save_results(app, results)
+        _sort_results(results)
+        new_count, skipped = _save_results(app, results)
 
-    _generate_thumbnails(app, results, session)
-    _generate_embeddings(app, results)
-    _extract_sections(app, results)
+        _generate_thumbnails(app, results, session)
+        _generate_embeddings(app, results)
+        _extract_sections(app, results)
 
-    return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
+        return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
+    finally:
+        session.close()

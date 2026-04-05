@@ -13,6 +13,17 @@ LOGGER = logging.getLogger(__name__)
 RRF_K = 60  # Reciprocal Rank Fusion constant
 
 
+def _sanitize_fts5_query(query: str) -> str:
+    """Escape user input for safe use in FTS5 MATCH by wrapping tokens in double quotes."""
+    # Remove existing double quotes and wrap each token as a quoted phrase
+    # to prevent FTS5 operator injection (NEAR, OR, NOT, *, etc.)
+    cleaned = query.replace('"', "")
+    tokens = cleaned.split()
+    if not tokens:
+        return '""'
+    return " ".join(f'"{token}"' for token in tokens)
+
+
 def _fts5_available() -> bool:
     """Check if the papers_fts table exists."""
     try:
@@ -32,9 +43,10 @@ def search_bm25(query: str, limit: int = 50) -> list[tuple[int, float]]:
         return []
 
     try:
+        safe_query = _sanitize_fts5_query(query)
         rows = db.session.execute(
             text("SELECT rowid, rank FROM papers_fts WHERE papers_fts MATCH :query ORDER BY rank LIMIT :limit"),
-            {"query": query, "limit": limit},
+            {"query": safe_query, "limit": limit},
         ).fetchall()
         # FTS5 rank is negative (more negative = better match), convert to positive score
         return [(int(row[0]), -float(row[1])) for row in rows]

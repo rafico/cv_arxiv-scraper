@@ -34,16 +34,26 @@ class ScrapeJobManager:
         self._jobs: dict[str, ScrapeJob] = {}
         self._active_job_id: str | None = None
 
-    def _trim_history(self, keep: int = 4) -> None:
+    def _trim_history(self, keep: int = 4, stale_hours: int = 2) -> None:
         if len(self._jobs) <= keep:
             return
 
+        now = now_utc()
         completed_jobs = sorted(
             (job for job in self._jobs.values() if job.finished_at is not None),
             key=lambda job: job.finished_at or job.started_at,
         )
         for job in completed_jobs[:-keep]:
             self._jobs.pop(job.id, None)
+
+        # Also evict jobs stuck in "running" state beyond the stale threshold.
+        for job_id, job in list(self._jobs.items()):
+            if (
+                job.finished_at is None
+                and job_id != self._active_job_id
+                and (now - job.started_at).total_seconds() > stale_hours * 3600
+            ):
+                self._jobs.pop(job_id, None)
 
     def _publish(self, job_id: str, event: str, data: dict) -> None:
         terminal_events = {"done", "scrape_error", "skipped"}

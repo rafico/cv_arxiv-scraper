@@ -13,6 +13,11 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_LIMIT = 100
 
 
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE wildcard characters."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def validate_saved_search(data: dict) -> list[str]:
     """Validate saved search filter fields. Returns list of error messages."""
     errors = []
@@ -53,22 +58,25 @@ def execute_saved_search(
     """
     query = Paper.query.filter(Paper.is_hidden.is_(False))
 
-    # Category filter.
+    # Category filter — match the quoted JSON element to avoid substring false positives.
     if search.categories:
         category_filters = []
         for cat in search.categories:
-            category_filters.append(Paper.categories.contains(cat))
+            escaped = f'%"{_escape_like(cat)}"%'
+            category_filters.append(
+                db.cast(Paper.categories, db.Text).ilike(escaped, escape="\\")
+            )
         query = query.filter(db.or_(*category_filters))
 
     # Include keywords (title or abstract must contain at least one).
     if search.include_keywords:
         keyword_filters = []
         for kw in search.include_keywords:
-            pattern = f"%{kw}%"
+            pattern = f"%{_escape_like(kw)}%"
             keyword_filters.append(
                 db.or_(
-                    Paper.title.ilike(pattern),
-                    Paper.abstract_text.ilike(pattern),
+                    Paper.title.ilike(pattern, escape="\\"),
+                    Paper.abstract_text.ilike(pattern, escape="\\"),
                 )
             )
         query = query.filter(db.or_(*keyword_filters))
@@ -76,17 +84,17 @@ def execute_saved_search(
     # Exclude keywords (none should match).
     if search.exclude_keywords:
         for kw in search.exclude_keywords:
-            pattern = f"%{kw}%"
+            pattern = f"%{_escape_like(kw)}%"
             query = query.filter(
-                ~Paper.title.ilike(pattern),
-                ~Paper.abstract_text.ilike(pattern),
+                ~Paper.title.ilike(pattern, escape="\\"),
+                ~Paper.abstract_text.ilike(pattern, escape="\\"),
             )
 
     # Author filters (at least one author must match).
     if search.author_filters:
         author_filters = []
         for author in search.author_filters:
-            author_filters.append(Paper.authors.ilike(f"%{author}%"))
+            author_filters.append(Paper.authors.ilike(f"%{_escape_like(author)}%", escape="\\"))
         query = query.filter(db.or_(*author_filters))
 
     # Date window filter.
@@ -111,11 +119,11 @@ def execute_saved_search(
     if search.methods_mentions:
         method_filters = []
         for method in search.methods_mentions:
-            pattern = f"%{method}%"
+            pattern = f"%{_escape_like(method)}%"
             method_filters.append(
                 db.or_(
-                    Paper.title.ilike(pattern),
-                    Paper.abstract_text.ilike(pattern),
+                    Paper.title.ilike(pattern, escape="\\"),
+                    Paper.abstract_text.ilike(pattern, escape="\\"),
                 )
             )
         query = query.filter(db.or_(*method_filters))
@@ -124,11 +132,12 @@ def execute_saved_search(
     filters = search.filters or {}
     if filters.get("q"):
         q = filters["q"]
+        escaped_q = _escape_like(q)
         query = query.filter(
             db.or_(
-                Paper.title.ilike(f"%{q}%"),
-                Paper.abstract_text.ilike(f"%{q}%"),
-                Paper.authors.ilike(f"%{q}%"),
+                Paper.title.ilike(f"%{escaped_q}%", escape="\\"),
+                Paper.abstract_text.ilike(f"%{escaped_q}%", escape="\\"),
+                Paper.authors.ilike(f"%{escaped_q}%", escape="\\"),
             )
         )
 

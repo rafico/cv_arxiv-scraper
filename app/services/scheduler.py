@@ -35,7 +35,11 @@ class ScrapeScheduler:
 
     def _seconds_until(self, time_str: str) -> float:
         now = datetime.now(timezone.utc)
-        hour, minute = (int(x) for x in time_str.split(":"))
+        try:
+            hour, minute = (int(x) for x in time_str.split(":"))
+        except (ValueError, TypeError):
+            LOGGER.warning("Invalid daily_at value %r, defaulting to 08:00", time_str)
+            hour, minute = 8, 0
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)
@@ -69,7 +73,10 @@ class ScrapeScheduler:
         if not self._enabled:
             return None
         now = datetime.now(timezone.utc)
-        hour, minute = (int(x) for x in self._daily_at.split(":"))
+        try:
+            hour, minute = (int(x) for x in self._daily_at.split(":"))
+        except (ValueError, TypeError):
+            hour, minute = 8, 0
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)
