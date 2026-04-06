@@ -32,6 +32,7 @@ class HelpRouteTests(FlaskDBTestCase):
         self.assertIn("Start Here", full_text)
         self.assertIn("Not Interested", full_text)
         self.assertIn("/settings?section=interests", full_text)
+        self.assertIn("/settings?section=ai", full_text)
 
         # Section headings across pages
         for section in [

@@ -5,25 +5,25 @@
 <section id="ranking" class="scroll-mt-6">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">How Ranking Works</h2>
     <div class="help-admonition bg-gray-50 border-l-4 border-gray-400 p-4 rounded-r-lg mb-4">
-        <p class="text-sm text-gray-700">You don&rsquo;t need to understand the formula. If something looks wrong, use <strong>Save</strong> or <strong>Not Interested</strong> and the ranking will adjust.</p>
+        <p class="text-sm text-gray-700">The score is a recommendation signal, not a judgment of paper quality. If something looks wrong, use <strong>Save</strong> or <strong>Not Interested</strong> and the ranking will adapt.</p>
     </div>
 
-    <p class="text-sm text-gray-600 mb-3">Papers rise to the top when:</p>
+    <p class="text-sm text-gray-600 mb-3">Papers rise to the top when they align with more of the signals you care about:</p>
     <ul class="space-y-2 text-sm text-gray-600 pl-5 list-disc marker:text-gray-400">
-        <li class="pl-1">They match more of the authors, labs, or topics you entered.</li>
-        <li class="pl-1">They are newer.</li>
+        <li class="pl-1">They match authors, labs, or topics from your Research Setup.</li>
+        <li class="pl-1">They are recent, unless your freshness settings prefer older work too.</li>
         <li class="pl-1">They are highly cited.</li>
         <li class="pl-1">You have previously saved similar papers.</li>
         <li class="pl-1">AI scoring is enabled and rates the paper as relevant.</li>
     </ul>
 
-    <p class="text-sm text-gray-600 mt-4">Multiple signals stack &mdash; a paper by a tracked author at a tracked lab on a tracked topic gets the highest score.</p>
+    <p class="text-sm text-gray-600 mt-4">Signals stack. A paper by a tracked author at a tracked lab on a tracked topic will usually rank much higher than a paper matching only one weak signal.</p>
 </section>
 
 <!-- Ranking Explanations -->
 <section id="explanations" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Ranking Explanations</h2>
-    <p class="text-sm text-gray-600">Each paper shows <em>why</em> it was recommended. Expand the score details to see reasons like:</p>
+    <p class="text-sm text-gray-600">Each paper shows <em>why</em> it was recommended. Expand the score details when you want to understand whether a result came from an author match, a topic match, citation strength, or saved-paper similarity.</p>
     <ul class="mt-2 space-y-1 text-sm text-gray-600 pl-5 list-disc marker:text-gray-400">
         <li class="pl-1">&ldquo;Matched author: Kaiming He&rdquo;</li>
         <li class="pl-1">&ldquo;Highly cited (342 citations)&rdquo;</li>
@@ -34,23 +34,23 @@
 <!-- Enrichment -->
 <section id="enrichment" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Enrichment</h2>
-    <p class="text-sm text-gray-600 mb-4">Papers are automatically enriched with external data during scrapes.</p>
+    <p class="text-sm text-gray-600 mb-4">Enrichment means the app adds extra metadata after a paper is ingested, so you can sort, filter, and inspect papers with more context.</p>
     <div class="grid gap-4 md:grid-cols-2">
         <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 class="text-sm font-bold text-gray-900 mb-2">Citations</h3>
-            <p class="text-sm text-gray-600">Citation counts from Semantic Scholar. Papers show a blue citation badge you can click. Sort by <strong>Most Cited</strong> to find influential work.</p>
+            <p class="text-sm text-gray-600">Citation counts from Semantic Scholar. Sort by <strong>Most Cited</strong> when you want influential work first instead of the newest work.</p>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 class="text-sm font-bold text-gray-900 mb-2">OpenAlex</h3>
-            <p class="text-sm text-gray-600">Topic classifications, open-access status, and additional citation data from <a href="https://openalex.org" target="_blank" class="font-medium text-blue-600 hover:text-blue-800">OpenAlex</a>. Enabled by default.</p>
+            <p class="text-sm text-gray-600">Topic classifications, open-access status, and additional citation data from <a href="https://openalex.org" target="_blank" class="font-medium text-blue-600 hover:text-blue-800">OpenAlex</a>. Enabled by default so papers arrive with better metadata.</p>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 class="text-sm font-bold text-gray-900 mb-2">SPECTER2 Embeddings</h3>
-            <p class="text-sm text-gray-600">Scientific paper embeddings power semantic search and related-paper recommendations. The model (~420MB) downloads automatically on first use.</p>
+            <p class="text-sm text-gray-600">Scientific paper embeddings power semantic search and related-paper recommendations. This is what lets the app find papers by meaning, not just exact words.</p>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 class="text-sm font-bold text-gray-900 mb-2">PDF Thumbnails</h3>
-            <p class="text-sm text-gray-600">First-page thumbnails for visual scanning. Generated during scrapes.</p>
+            <p class="text-sm text-gray-600">First-page thumbnails for quick visual scanning. Helpful when you want to skim many papers faster.</p>
         </div>
     </div>
 </section>
@@ -58,19 +58,19 @@
 <!-- Corpus Analytics -->
 <section id="corpus" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Corpus Analytics</h2>
-    <p class="text-sm text-gray-600 mb-4">Explore your paper library at a higher level.</p>
+    <p class="text-sm text-gray-600 mb-4">Use these tools when you want to explore your whole library at a higher level instead of reviewing one paper at a time.</p>
     <div class="grid gap-4 md:grid-cols-3">
         <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
             <h3 class="text-sm font-bold text-gray-900 mb-2">Topic Clusters</h3>
-            <p class="text-sm text-gray-600">Groups recent papers by theme so you can see what areas are active.</p>
+            <p class="text-sm text-gray-600">Groups recent papers by theme so you can see which areas of your feed are active.</p>
         </div>
         <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
             <h3 class="text-sm font-bold text-gray-900 mb-2">Emerging Topics</h3>
-            <p class="text-sm text-gray-600">Compares recent trends against a baseline to spot new research directions.</p>
+            <p class="text-sm text-gray-600">Compares recent trends against a baseline to spot research directions that are starting to pick up.</p>
         </div>
         <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
             <h3 class="text-sm font-bold text-gray-900 mb-2">Neighbor Papers</h3>
-            <p class="text-sm text-gray-600">Finds undiscovered papers similar to a collection or set of seed papers.</p>
+            <p class="text-sm text-gray-600">Finds additional papers similar to a collection or a set of seed papers you already like.</p>
         </div>
     </div>
 </section>
@@ -81,11 +81,11 @@
     <div class="grid gap-4 md:grid-cols-2">
         <div>
             <h3 class="text-base font-bold text-gray-900">Related Papers</h3>
-            <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to see links to similar papers from your library. Uses SPECTER2 embeddings for high-quality semantic matching.</p>
+            <p class="mt-1 text-sm text-gray-600">Expand a paper&rsquo;s details to see similar papers already in your library. This is useful when you want alternative baselines, follow-up work, or adjacent methods.</p>
         </div>
         <div>
             <h3 class="text-base font-bold text-gray-900">Duplicate Detection</h3>
-            <p class="mt-1 text-sm text-gray-600">Papers with nearly identical titles get an orange <strong>Dup</strong> badge so you know at a glance.</p>
+            <p class="mt-1 text-sm text-gray-600">Papers with nearly identical titles get an orange <strong>Dup</strong> badge so you can avoid reviewing or exporting the same work twice.</p>
         </div>
     </div>
 </section>

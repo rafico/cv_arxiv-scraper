@@ -4,13 +4,14 @@
 <!-- Quick Start -->
 <section id="quick-start" class="scroll-mt-6">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Quick Start</h2>
+    <p class="text-sm text-gray-600 mb-6">The core loop is simple: tell the app what you care about, fetch new papers, and triage the results.</p>
     
     <div class="help-admonition bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg mb-6">
         <div class="flex items-start">
             <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             <div>
                 <h4 class="text-sm font-bold text-blue-900">Note: Start simple</h4>
-                <p class="mt-1 text-sm text-blue-800">If you are new, focus on the basics first. You can ignore Gmail and AI until the core app is working for you.</p>
+                <p class="mt-1 text-sm text-blue-800">You do not need Gmail, AI, export tools, or automation before the app becomes useful. Get the basic workflow working first.</p>
             </div>
         </div>
     </div>
@@ -21,21 +22,21 @@
                 <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">1</div>
                 <div>
                     <h3 class="text-base font-semibold text-gray-900">Add interests</h3>
-                    <p class="mt-1 text-sm text-gray-600">Add authors, labs, or topics in <a href="/settings?section=interests" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Research Setup</a>.</p>
+                    <p class="mt-1 text-sm text-gray-600">Add authors, labs, or short topic phrases in <a href="{{ url_for('settings.view_settings', section='interests') }}" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Research Setup</a>. Start with a short, focused list instead of every possible keyword.</p>
                 </div>
             </div>
             <div class="flex gap-4">
                 <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">2</div>
                 <div>
                     <h3 class="text-base font-semibold text-gray-900">Run Scrape</h3>
-                    <p class="mt-1 text-sm text-gray-600">Click the <strong>Run Scrape</strong> button in the top navigation to collect matching papers.</p>
+                    <p class="mt-1 text-sm text-gray-600">Click <strong>Run Scrape</strong> in the top navigation. The app pulls recent papers from your enabled feeds, scores them against your interests, and adds the best matches to your inbox.</p>
                 </div>
             </div>
             <div class="flex gap-4">
                 <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">3</div>
                 <div>
                     <h3 class="text-base font-semibold text-gray-900">Review Inbox</h3>
-                    <p class="mt-1 text-sm text-gray-600">On the <a href="/" class="font-medium text-blue-600 hover:text-blue-800">Papers</a> page, use <strong>Save</strong> for good papers and <strong>Not Interested</strong> for bad matches.</p>
+                    <p class="mt-1 text-sm text-gray-600">On the <a href="/" class="font-medium text-blue-600 hover:text-blue-800">Papers</a> page, use <strong>Save</strong> for papers you want to keep and <strong>Not Interested</strong> for weak matches. Those actions also improve future ranking.</p>
                 </div>
             </div>
         </div>
@@ -58,7 +59,7 @@
                 <h3 class="mt-1 text-base font-semibold text-gray-900">Tell it what you care about</h3>
             </div>
             <div class="p-5">
-                <p class="text-sm text-gray-600 mb-4">In <strong>Research Setup</strong>, enter one item per line. Start small: a few authors, a few labs, and a few topic phrases.</p>
+                <p class="text-sm text-gray-600 mb-4">In <strong>Research Setup</strong>, enter one item per line. Good starting inputs are researcher names, lab names, and topic phrases you would actually type into a search box.</p>
                 <img src="{{ url_for('static', filename='help/settings_research.webp') }}" alt="Settings Research Setup tab" class="w-full rounded border border-gray-100" onerror="handleImgError(this)">
             </div>
         </div>
@@ -69,9 +70,9 @@
                 <h3 class="mt-1 text-base font-semibold text-gray-900">Run a scrape</h3>
             </div>
             <div class="p-5">
-                <p class="text-sm text-gray-600 mb-4">Press <strong>Run Scrape</strong>. The app will fetch recent papers and build your inbox with matches.</p>
+                <p class="text-sm text-gray-600 mb-4">Press <strong>Run Scrape</strong>. The app fetches new papers, enriches them with metadata, ranks them, and builds your inbox with the results worth reviewing.</p>
                 <div class="help-admonition bg-amber-50 border-l-4 border-amber-500 p-3 rounded-r">
-                    <p class="text-xs text-amber-800"><strong>Tip:</strong> You only need to scrape once a day. ArXiv typically updates its feed at 8pm EST.</p>
+                    <p class="text-xs text-amber-800"><strong>Tip:</strong> One scrape per day is usually enough unless you are backfilling older papers or testing new settings.</p>
                 </div>
             </div>
         </div>
@@ -82,7 +83,7 @@
                 <h3 class="mt-1 text-base font-semibold text-gray-900">Review the inbox</h3>
             </div>
             <div class="p-5">
-                <p class="text-sm text-gray-600 mb-4">Open the <strong>Papers</strong> page. Save the papers you want to keep, and mark weak matches as <strong>Not Interested</strong>.</p>
+                <p class="text-sm text-gray-600 mb-4">Open the <strong>Papers</strong> page. Save the papers you want to keep, and mark weak matches as <strong>Not Interested</strong>. This feedback helps the ranking adapt to your taste over time.</p>
                 <img src="{{ url_for('static', filename='help/papers_dashboard.webp') }}" alt="Dashboard displaying papers" class="w-full rounded border border-gray-100" onerror="handleImgError(this)">
             </div>
         </div>
@@ -93,8 +94,22 @@
                 <h3 class="mt-1 text-base font-semibold text-gray-900">Come back to Saved</h3>
             </div>
             <div class="p-5">
-                <p class="text-sm text-gray-600">The <strong>Saved</strong> tab is your shortlist. Use it for papers you want to revisit, cite, or share.</p>
+                <p class="text-sm text-gray-600">The <strong>Saved</strong> tab is your shortlist. Use it for papers you want to revisit, cite, export, or send to Mendeley/Zotero later.</p>
             </div>
+        </div>
+    </div>
+</section>
+
+<section id="first-adjustments" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">If The Results Look Off</h2>
+    <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Too few papers</h3>
+            <p class="text-sm text-gray-600">Broaden your topic phrases, add a few labs, or remove terms that are too niche. The app needs enough signal to find related work.</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Too much noise</h3>
+            <p class="text-sm text-gray-600">Remove generic keywords, use <strong>Not Interested</strong> aggressively, and add recurring false positives to muted topics or muted authors.</p>
         </div>
     </div>
 </section>

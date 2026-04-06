@@ -4,6 +4,7 @@
 <!-- CLI Commands -->
 <section id="cli" class="scroll-mt-6">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">CLI Commands</h2>
+    <p class="text-sm text-gray-600 mb-4">The web UI is enough for most users. Use the CLI if you want automation, historical backfills, headless operation, or shell scripting.</p>
     <p class="text-sm text-gray-600 mb-4">After installing with <code>pip install -e .</code>, these commands are available globally:</p>
     <div class="overflow-x-auto rounded-xl border border-gray-200">
         <table class="min-w-full divide-y divide-gray-200">
@@ -16,30 +17,30 @@
             <tbody class="bg-white divide-y divide-gray-200">
                 <tr>
                     <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-scrape</code></td>
-                    <td class="px-6 py-3 text-sm text-gray-600">One-shot scrape, prints matched papers to terminal</td>
+                    <td class="px-6 py-3 text-sm text-gray-600">Run one scrape from the terminal and print matched papers</td>
                 </tr>
                 <tr>
                     <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-digest</code></td>
-                    <td class="px-6 py-3 text-sm text-gray-600">Send email digest. Flags: <code>--dry-run</code>, <code>--send-only</code></td>
+                    <td class="px-6 py-3 text-sm text-gray-600">Build or send the email digest. Useful flags: <code>--dry-run</code>, <code>--send-only</code></td>
                 </tr>
                 <tr>
                     <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-sync</code></td>
-                    <td class="px-6 py-3 text-sm text-gray-600">Historical sync. Flags: <code>--from</code>, <code>--to</code>, <code>--category</code>, <code>--chunk-days</code></td>
+                    <td class="px-6 py-3 text-sm text-gray-600">Historical sync for backfilling older papers. Flags: <code>--from</code>, <code>--to</code>, <code>--category</code>, <code>--chunk-days</code></td>
                 </tr>
                 <tr>
                     <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-backfill</code></td>
-                    <td class="px-6 py-3 text-sm text-gray-600">Enrichment backfills (see below)</td>
+                    <td class="px-6 py-3 text-sm text-gray-600">Run enrichment backfills on papers already in your database</td>
                 </tr>
             </tbody>
         </table>
     </div>
-    <p class="text-sm text-gray-500 mt-3">Standalone scripts (<code>python scrape_cli.py</code>, <code>python export_cli.py</code>, etc.) also work without installing.</p>
+    <p class="text-sm text-gray-500 mt-3">Standalone scripts (<code>python scrape_cli.py</code>, <code>python export_cli.py</code>, etc.) also work without installing the package.</p>
 </section>
 
 <!-- Backfills -->
 <section id="backfills" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Enrichment Backfills</h2>
-    <p class="text-sm text-gray-600 mb-4">Enrich papers that were added before a feature existed:</p>
+    <p class="text-sm text-gray-600 mb-4">Use these when papers were added before a feature was enabled, or when you want to rebuild missing metadata later.</p>
     <div class="overflow-x-auto rounded-xl border border-gray-200">
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
@@ -106,21 +107,21 @@
             <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">1</div>
             <div>
                 <h4 class="text-sm font-semibold text-gray-900">Enable in Settings</h4>
-                <p class="mt-1 text-sm text-gray-600">Go to <a href="/settings?section=llm" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; LLM / AI</a> and toggle LLM on.</p>
+                <p class="mt-1 text-sm text-gray-600">Go to <a href="{{ url_for('settings.view_settings', section='ai') }}" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; LLM / AI</a> and toggle LLM on.</p>
             </div>
         </div>
         <div class="flex gap-4">
             <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">2</div>
             <div>
                 <h4 class="text-sm font-semibold text-gray-900">Choose a provider</h4>
-                <p class="mt-1 text-sm text-gray-600">Supported providers: <strong>OpenRouter</strong> (cloud, default) and <strong>Ollama</strong> (local). Set your API key or Ollama URL.</p>
+                <p class="mt-1 text-sm text-gray-600">Supported providers: <strong>OpenRouter</strong> for a hosted model, or <strong>Ollama</strong> for a local model. Add the API key or local base URL.</p>
             </div>
         </div>
         <div class="flex gap-4">
             <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">3</div>
             <div>
                 <h4 class="text-sm font-semibold text-gray-900">Run a scrape</h4>
-                <p class="mt-1 text-sm text-gray-600">AI summaries and relevance scores are generated during the scrape. Papers already in the database are not re-processed.</p>
+                <p class="mt-1 text-sm text-gray-600">AI summaries and relevance scores are generated during the scrape. Papers already in the database are not automatically re-processed unless you run a backfill workflow.</p>
             </div>
         </div>
     </div>

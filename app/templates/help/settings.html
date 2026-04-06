@@ -4,33 +4,34 @@
 <!-- Settings Overview -->
 <section id="settings-guide" class="scroll-mt-6">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Settings Overview</h2>
+    <p class="text-sm text-gray-600 mb-4">You can leave most settings alone at first. The only section you need for a useful first run is <strong>Research Setup</strong>.</p>
     <div class="space-y-4">
         <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-900 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Start Here</span></div>
             <div>
                 <h3 class="text-base font-bold text-gray-900">Research Setup</h3>
-                <p class="mt-1 text-sm text-gray-600">Add the authors, labs, and topic keywords you care about. One item per line. This is the only section you need to get started.</p>
+                <p class="mt-1 text-sm text-gray-600">Add the authors, labs, and topic keywords you care about. One item per line. This is what decides what lands in your inbox.</p>
             </div>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
             <div>
                 <h3 class="text-base font-bold text-gray-900">Ranking</h3>
-                <p class="mt-1 text-sm text-gray-600">Fine-tune how strongly the app reacts to authors, labs, topics, freshness, and muted terms.</p>
+                <p class="mt-1 text-sm text-gray-600">Fine-tune how strongly the app reacts to authors, labs, topics, freshness, citations, AI relevance, and muted terms. Most users can keep the defaults until they have some feedback history.</p>
             </div>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
             <div>
                 <h3 class="text-base font-bold text-gray-900">Automation</h3>
-                <p class="mt-1 text-sm text-gray-600">Email digests, scheduled scrapes, Mendeley/Zotero sync, and feed sources.</p>
+                <p class="mt-1 text-sm text-gray-600">Email digests, scheduled scrapes, Mendeley/Zotero sync, feed sources, and monitoring for recent automation runs.</p>
             </div>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
             <div>
                 <h3 class="text-base font-bold text-gray-900">LLM / AI</h3>
-                <p class="mt-1 text-sm text-gray-600">AI-powered summaries and relevance scores. See <a href="{{ url_for('help.view_page', page='cli') }}#llm-summaries" class="font-medium text-blue-600 hover:text-blue-800">CLI &rarr; AI Summaries</a> for setup details.</p>
+                <p class="mt-1 text-sm text-gray-600">AI-powered summaries and relevance scores. Useful if you want richer summaries or another ranking signal, but not required. See <a href="{{ url_for('help.view_page', page='cli') }}#llm-summaries" class="font-medium text-blue-600 hover:text-blue-800">CLI &rarr; AI Summaries</a> for setup details.</p>
             </div>
         </div>
     </div>
@@ -39,7 +40,7 @@
 <!-- OpenAlex -->
 <section id="openalex" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">OpenAlex</h2>
-    <p class="text-sm text-gray-600 mb-3">Enabled by default. Papers get topic classifications, open-access status, and citation counts from <a href="https://openalex.org" target="_blank" class="font-medium text-blue-600 hover:text-blue-800">OpenAlex</a>.</p>
+    <p class="text-sm text-gray-600 mb-3">Enabled by default. Papers get topic classifications, open-access status, and citation counts from <a href="https://openalex.org" target="_blank" class="font-medium text-blue-600 hover:text-blue-800">OpenAlex</a>, which makes filtering and browsing more useful without extra setup.</p>
     <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <pre class="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 overflow-x-auto"><code>openalex:
   enabled: true        # set to false to disable
