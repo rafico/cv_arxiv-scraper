@@ -4,7 +4,7 @@
 
 Stop drowning in the arXiv firehose. This tool scrapes the [arXiv cs.CV](https://arxiv.org/list/cs.CV/recent) RSS feed, matches papers against authors, affiliations, and topics you care about, then ranks and surfaces the ones worth reading — all in a clean web dashboard you run locally.
 
-![Python](https://img.shields.io/badge/python-3.9+-blue)
+![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![Flask](https://img.shields.io/badge/flask-3.1-green)
 ![License](https://img.shields.io/badge/license-MIT-gray)
 
@@ -17,11 +17,17 @@ Stop drowning in the arXiv firehose. This tool scrapes the [arXiv cs.CV](https:/
 - **Hybrid search** — Find papers using keyword (BM25), semantic (SPECTER2 embeddings), or combined search modes.
 - **Semantic paper similarity** — Related papers are found using SPECTER2 scientific document embeddings via a FAISS vector index — much higher quality than keyword matching.
 - **OpenAlex enrichment** — Papers are enriched with topic classifications, open-access status, and additional citation data from OpenAlex.
+- **Corpus analytics** — Discover topic clusters, emerging trends, and neighbor papers across your library.
 - **Zero signup, local-first** — Core scraping and ranking run locally. Gmail digest and optional LLM features require extra setup only if you want them.
 - **Rich triage workflow** — Save, skip, mark priority, or share papers. Your feedback tunes future rankings so the best papers rise to the top.
+- **Collections & organization** — Group papers into color-coded collections, add custom tags, set reading status, and attach notes.
+- **Saved searches** — Bookmark filter combinations with custom criteria (categories, keywords, authors, date windows, citation thresholds) and re-run them instantly.
 - **Auto-generated summaries & tags** — Each matched paper gets a short plain-language summary and topic tags so you can scan faster.
 - **Flexible time windows** — Browse today's papers, this week's, this month's, or everything.
 - **Daily email digest** — Get matched papers delivered to your inbox via Gmail (OAuth2, send-only scope).
+- **Reference manager sync** — Export BibTeX, or sync directly with Mendeley and Zotero.
+- **Multiple feed sources** — Monitor additional arXiv categories or custom RSS feeds beyond cs.CV.
+- **Historical sync** — Backfill papers from any arXiv date range, not just the daily feed.
 
 ---
 
@@ -31,7 +37,7 @@ Stop drowning in the arXiv firehose. This tool scrapes the [arXiv cs.CV](https:/
 # 1. Clone and install
 git clone https://github.com/<your-username>/cv_arxiv-scraper.git
 cd cv_arxiv-scraper
-pip install -r requirements.txt
+pip install -e .
 
 # 2. Launch the web dashboard
 python run.py
@@ -39,13 +45,30 @@ python run.py
 
 Open **http://127.0.0.1:5000** in your browser and click **Run Scrape** to pull the latest papers.
 
-### Prefer the command line?
+### Installable CLI commands
+
+After `pip install -e .`, the following commands are available globally:
+
+| Command | Description |
+|---|---|
+| `cv-arxiv-scrape` | One-shot scrape — prints matched papers to your terminal |
+| `cv-arxiv-digest` | Build and send the daily email digest |
+| `cv-arxiv-sync` | Sync historical papers over a date range |
+| `cv-arxiv-backfill` | Run selective enrichment backfills |
+
+### Standalone CLI scripts
+
+These scripts work without installing the package:
 
 ```bash
-python arxiv.py
+python run.py                    # Launch web dashboard
+python scrape_cli.py             # One-shot scrape (same as cv-arxiv-scrape)
+python digest_cli.py             # Email digest
+python sync_cli.py               # Historical sync
+python backfill_cli.py           # Enrichment backfills
+python export_cli.py             # Export papers to HTML report
+python gmail_auth_setup.py       # One-time Gmail OAuth setup
 ```
-
-Runs a one-shot scrape and prints matched papers with scores and summaries to your terminal.
 
 ---
 
@@ -101,6 +124,7 @@ Papers are embedded using [SPECTER2](https://huggingface.co/allenai/specter2), a
 - **Related papers** — High-quality similarity computed from paper meaning, not just shared keywords
 - **Semantic search** — Find papers by concept even when the exact terms don't match
 - **Hybrid search** — Combines keyword (BM25 via SQLite FTS5) and semantic search using Reciprocal Rank Fusion
+- **Corpus analytics** — Topic clustering and emerging-trend detection
 
 Embeddings are stored in a FAISS sidecar index alongside the SQLite database (`instance/faiss_index/`).
 
@@ -108,8 +132,44 @@ The first scrape will download the SPECTER2 model (~420MB) to `~/.cache/huggingf
 
 To backfill embeddings for existing papers:
 ```bash
-python -c "from app import create_app; from app.services.embed_backfill import backfill_embeddings; backfill_embeddings(create_app())"
+cv-arxiv-backfill embeddings
 ```
+
+To fully rebuild the semantic index from scratch:
+```bash
+cv-arxiv-backfill index-rebuild
+```
+
+---
+
+## Enrichment Backfills
+
+Use the backfill CLI to enrich papers that were added before a feature was available:
+
+```bash
+cv-arxiv-backfill embeddings       # Backfill missing SPECTER2 embeddings
+cv-arxiv-backfill index-rebuild    # Rebuild the full FAISS index from the database
+cv-arxiv-backfill citations        # Fetch citation counts from Semantic Scholar
+cv-arxiv-backfill openalex         # Fetch OpenAlex metadata (topics, OA status)
+cv-arxiv-backfill thumbnails       # Generate PDF first-page thumbnails
+cv-arxiv-backfill all              # Run all of the above
+```
+
+Options: `--batch-size N`, `--delay SECONDS` (rate-limit delay between batches).
+
+---
+
+## Historical Sync
+
+Backfill papers from any arXiv date range, not just the daily feed:
+
+```bash
+cv-arxiv-sync --category cs.CV --from 2024-01-01 --to 2024-03-31
+```
+
+The sync processes dates in weekly chunks with progress tracking. Options: `--chunk-days N`.
+
+You can also use the **Discover** page in the web UI to search arXiv by date range and category interactively.
 
 ---
 
@@ -136,13 +196,14 @@ Get a daily email with your matched papers — no need to open the dashboard.
 
 4. **Test it:**
    ```bash
-   python digest_cli.py --dry-run   # preview without sending
-   python digest_cli.py             # send now
+   cv-arxiv-digest --dry-run   # preview without sending
+   cv-arxiv-digest              # scrape + send
+   cv-arxiv-digest --send-only  # send from existing papers (no scrape)
    ```
 
 5. **Schedule with cron** (e.g. every day at 8 AM):
    ```
-   0 8 * * * cd /path/to/cv_arxiv-scraper && ~/venv/bin/python digest_cli.py
+   0 8 * * * cd /path/to/cv_arxiv-scraper && ~/venv/bin/python -m app.cli.digest
    ```
 
 ### Security notes
@@ -151,6 +212,16 @@ Get a daily email with your matched papers — no need to open the dashboard.
 - Token scope is limited to `gmail.send` only.
 - `credentials.json` and `token.json` are gitignored and stored with `chmod 600`.
 - All paper content is HTML-escaped before rendering in email bodies.
+
+---
+
+## Reference Manager Sync
+
+Export your papers to external reference managers:
+
+- **BibTeX** — Click the BibTeX button on any paper card for a single entry, or use the toolbar button to export all visible papers. Also available via API: `GET /api/export/bibtex`.
+- **Mendeley** — Connect via OAuth in **Settings > Automation** and use **Sync Saved Papers**.
+- **Zotero** — Enter your Zotero API key and user ID in **Settings > Automation** to sync to a specific collection.
 
 ---
 
@@ -178,6 +249,7 @@ Each paper also displays **ranking explanations** — human-readable reasons lik
 
 - **Hybrid search** — Search by keyword, semantic meaning, or both (toggle between modes)
 - **Filter by match type** — Show only Author / Affiliation / Title matches, or all
+- **Advanced filters** — Filter by arXiv category, resource availability, reading status, or show hidden papers
 - **Sort** — By score (trending), date (newest), recommendations, or citations
 - **Time windows** — Daily, weekly, monthly, or all-time views
 - **Feedback buttons** — Save, Priority, Skip, or Share papers to train rankings
@@ -185,22 +257,97 @@ Each paper also displays **ranking explanations** — human-readable reasons lik
 - **OpenAlex enrichment** — Topic badges and open-access status indicators
 - **Collections** — Organize papers into color-coded reading lists
 - **Notes & tags** — Annotate papers with personal notes and custom tags
+- **Reading status** — Track papers as To Read, Reading, or Read
+- **Saved searches** — Bookmark filter combinations and re-run them as quick-access pills
+- **Bulk operations** — Select multiple papers and save or skip them all at once
+- **BibTeX export** — Export individual papers or entire views as BibTeX
+- **Follow / Mute** — Follow an author or mute a topic directly from a paper card
+- **Thumbnails** — PDF first-page previews for visual scanning
 - **Metadata chips** — See categories, arXiv comments, DOI links, and resource badges at a glance
 - **Pagination** — Browse large result sets without slowdowns
+- **Keyboard shortcuts** — Navigate and triage papers without touching the mouse
 
 ---
 
 ## API Reference
 
+### Core
+
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | Dashboard with search, filters, and pagination |
-| `/settings` | GET/POST | Whitelist editor |
+| `/discover` | GET | Historical arXiv search by date range |
+| `/settings` | GET/POST | Whitelist and config editor |
+| `/help` | GET | In-app documentation |
+
+### Scraping
+
+| Endpoint | Method | Description |
+|---|---|---|
 | `/api/scrape` | POST | Start (or join) a background scrape job |
-| `/api/scrape/stream` | GET | SSE event stream from the active scrape |
+| `/api/scrape/status` | GET | Current scrape job status |
+| `/api/scrape/stream?job_id=...` | GET | SSE event stream from the active scrape |
+| `/api/search/historical` | POST | Trigger a historical date-range scrape |
+
+### Search
+
+| Endpoint | Method | Description |
+|---|---|---|
 | `/api/search?q=...&mode=hybrid` | GET | Hybrid search (keyword / semantic / hybrid) |
+| `/api/authors?q=...` | GET | Author name autocomplete |
+
+### Paper actions
+
+| Endpoint | Method | Description |
+|---|---|---|
 | `/api/papers/<id>/feedback` | POST | Toggle feedback action (save/skip/priority/shared) |
 | `/api/papers/<id>/explain` | GET | Get ranking explanations for a paper |
+| `/api/papers/<id>/reading-status` | POST | Set reading status (to_read/reading/read) |
+| `/api/papers/<id>/notes` | PUT | Update paper notes |
+| `/api/papers/<id>/tags` | POST/DELETE | Add or remove user tags |
+| `/api/papers/<id>/follow` | POST | Follow the paper's first author |
+| `/api/papers/<id>/mute` | POST | Mute the paper's primary topic |
+| `/api/papers/<id>/bibtex` | GET | Get BibTeX entry for a single paper |
+| `/api/papers/<id>/graph` | GET | Citation/similarity graph data |
+| `/api/papers/bulk-feedback` | POST | Batch save/skip multiple papers |
+| `/api/papers/bulk-bibtex?ids=...` | GET | BibTeX export for selected papers |
+
+### Collections
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/collections` | GET | List all collections with paper counts |
+| `/api/collections` | POST | Create a new collection |
+| `/api/collections/<id>` | PUT | Update collection name/description/color |
+| `/api/collections/<id>` | DELETE | Delete a collection |
+| `/api/collections/<id>/papers` | POST | Add paper(s) to a collection |
+| `/api/collections/<id>/papers/<pid>` | DELETE | Remove a paper from a collection |
+
+### Saved Searches
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/saved-searches` | GET/POST | List or create saved searches |
+| `/api/saved-searches/<id>` | GET/PUT/DELETE | Retrieve, update, or delete a saved search |
+| `/api/saved-searches/<id>/run` | POST | Execute a saved search and return results |
+
+### Corpus Analytics
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/corpus/clusters` | GET | Topic clusters for a time window |
+| `/api/corpus/emerging` | GET | Detect emerging topics vs. baseline |
+| `/api/corpus/neighbors` | GET | Find neighbor papers by seed papers or collection |
+
+### Export & Feed Sources
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/export` | GET | Export papers as standalone HTML report |
+| `/api/export/bibtex` | GET | Export papers as BibTeX file |
+| `/api/feed-sources` | GET/POST | List or add RSS feed sources |
+| `/api/feed-sources/<id>` | DELETE | Remove a feed source |
+| `/api/feed-sources/<id>/toggle` | POST | Enable/disable a feed source |
 
 **SSE event types:** `status`, `feed`, `progress`, `match`, `done`, `scrape_error`
 
@@ -215,29 +362,73 @@ Each paper also displays **ranking explanations** — human-readable reasons lik
 │   ├── models.py                # SQLAlchemy models
 │   ├── schema.py                # DB migrations / indexes / FTS5
 │   ├── enums.py                 # Enums (FeedbackAction, SortOption, etc.)
+│   ├── constants.py             # Shared constants
+│   ├── csrf.py                  # CSRF token management
 │   ├── scraper.py               # Backward-compatible scraping facade
-│   ├── services/
+│   ├── cli/                     # Installable CLI entry points
+│   │   ├── scrape.py            # cv-arxiv-scrape
+│   │   ├── digest.py            # cv-arxiv-digest
+│   │   ├── sync.py              # cv-arxiv-sync (historical)
+│   │   └── backfill.py          # cv-arxiv-backfill (enrichment)
+│   ├── ingest/                  # Paper ingestion pipeline
 │   │   ├── scrape_engine.py     # Core scrape + dedup logic
-│   │   ├── embeddings.py        # SPECTER2 embeddings + FAISS index
-│   │   ├── embed_backfill.py    # Backfill embeddings for existing papers
-│   │   ├── search.py            # Hybrid search (BM25 + semantic)
-│   │   ├── openalex.py          # OpenAlex enrichment
-│   │   ├── jobs.py              # Background job manager (SSE)
-│   │   ├── matching.py          # Whitelist matching engine
-│   │   ├── ranking.py           # Scoring, explanations, feedback weights
-│   │   ├── feedback.py          # User feedback handling
-│   │   ├── enrichment.py        # Metadata enrichment (DOI, categories)
+│   │   ├── orchestrator.py      # Multi-source orchestration
+│   │   └── http_client.py       # HTTP session factory
+│   ├── enrich/                  # Enrichment providers
 │   │   ├── citations.py         # Semantic Scholar citations
-│   │   ├── summary.py           # Auto-generated summaries & tags
+│   │   └── openalex.py          # OpenAlex metadata
+│   ├── search_/                 # Search & embedding layer
+│   │   ├── embeddings.py        # SPECTER2 + FAISS index
+│   │   ├── embed_backfill.py    # Backfill embeddings
+│   │   ├── text.py              # Text utilities
+│   │   └── thumbnail_generator.py
+│   ├── rank/                    # Ranking subsystem
+│   │   └── preferences.py       # User preference weights
+│   ├── web/                     # Web-layer helpers
+│   │   ├── email_digest.py      # Gmail digest build + send
+│   │   └── scheduler.py         # Scheduled scrape support
+│   ├── services/                # Business logic services
+│   │   ├── scrape_engine.py     # Legacy scrape engine
+│   │   ├── embeddings.py        # Embedding service
+│   │   ├── search.py            # Hybrid search (BM25 + semantic)
+│   │   ├── matching.py          # Whitelist matching engine
+│   │   ├── ranking.py           # Scoring, explanations, feedback
+│   │   ├── feedback.py          # User feedback handling
 │   │   ├── related.py           # Related-paper recommendations
-│   │   └── email_digest.py      # Gmail digest (build + send)
-│   ├── routes/                   # Flask blueprints
-│   └── templates/                # Jinja2 HTML templates
-├── arxiv.py                      # CLI entry point
-├── digest_cli.py                 # Email digest CLI (for cron)
-├── gmail_auth_setup.py           # One-time Gmail OAuth setup
-├── config.yaml                   # Your interests & scraper settings
-├── run.py                        # Web server entry point
+│   │   ├── corpus_analysis.py   # Topic clusters & emerging trends
+│   │   ├── saved_search.py      # Saved search execution
+│   │   ├── recommendations.py   # Follow/mute recommendations
+│   │   ├── export.py            # HTML report generation
+│   │   ├── bibtex.py            # BibTeX generation
+│   │   ├── summary.py           # Auto-generated summaries & tags
+│   │   ├── enrichment.py        # Metadata enrichment
+│   │   ├── citations.py         # Citation fetching
+│   │   ├── openalex.py          # OpenAlex enrichment
+│   │   ├── llm_client.py        # LLM integration
+│   │   ├── mendeley.py          # Mendeley sync
+│   │   ├── zotero.py            # Zotero sync
+│   │   ├── jobs.py              # Background job manager (SSE)
+│   │   ├── scheduler.py         # Cron-like scheduled scrapes
+│   │   ├── email_digest.py      # Legacy digest alias
+│   │   └── ...
+│   ├── routes/                  # Flask blueprints
+│   │   ├── dashboard.py         # Main papers view
+│   │   ├── api.py               # REST API endpoints
+│   │   ├── discover.py          # Historical search UI
+│   │   ├── settings.py          # Config editor
+│   │   └── help.py              # In-app documentation
+│   └── templates/               # Jinja2 HTML templates
+│       └── help/                # Help documentation pages
+├── run.py                       # Web server entry point
+├── scrape_cli.py                # Standalone scrape CLI
+├── digest_cli.py                # Standalone digest CLI
+├── sync_cli.py                  # Standalone sync CLI
+├── backfill_cli.py              # Standalone backfill CLI
+├── export_cli.py                # Standalone export CLI
+├── gmail_auth_setup.py          # One-time Gmail OAuth setup
+├── config.yaml                  # Your interests & scraper settings
+├── pyproject.toml               # Package config & CLI entry points
+├── requirements.txt             # Runtime dependencies
 └── tests/
 ```
 
@@ -247,8 +438,6 @@ Each paper also displays **ranking explanations** — human-readable reasons lik
 
 ```bash
 python -m pytest tests/ -v
-# or with unittest:
-python -m unittest discover -s tests -v
 ```
 
 ---

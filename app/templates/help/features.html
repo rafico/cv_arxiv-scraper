@@ -64,6 +64,30 @@
             <h3 class="text-base font-bold text-gray-900">Scheduled Scrapes</h3>
             <p class="mt-1 text-sm text-gray-600">Enable automatic daily scrapes by adding a <code>scheduler</code> section to your <code>config.yaml</code>. The app runs scrapes at your chosen time without needing cron.</p>
         </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Saved Searches</h3>
+            <p class="mt-1 text-sm text-gray-600">Bookmark your filter combinations as saved searches. Set categories, include/exclude keywords, author filters, date windows, and citation thresholds. Saved searches appear as quick-access pills on the dashboard and can be re-run at any time.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Corpus Analytics</h3>
+            <p class="mt-1 text-sm text-gray-600">Explore your paper library at a higher level. <strong>Topic clusters</strong> group recent papers by theme. <strong>Emerging topics</strong> compare recent trends against a baseline window to detect new directions. <strong>Neighbor papers</strong> find undiscovered papers similar to a collection or seed set.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">BibTeX Export</h3>
+            <p class="mt-1 text-sm text-gray-600">Click the <strong>BibTeX</strong> button on any paper card to copy a single citation entry, or use the toolbar button to export all visible papers at once. Bulk export is also available via <code>GET /api/export/bibtex</code>.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">HTML Report Export</h3>
+            <p class="mt-1 text-sm text-gray-600">Export your current paper view as a standalone HTML report for sharing or offline reading. Available via the API at <code>GET /api/export</code> or the CLI with <code>python export_cli.py</code>.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">PDF Thumbnails</h3>
+            <p class="mt-1 text-sm text-gray-600">Paper cards can display first-page PDF thumbnails for visual scanning. Thumbnails are generated automatically during scrapes and can be backfilled for existing papers with <code>cv-arxiv-backfill thumbnails</code>.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Multiple Feed Sources</h3>
+            <p class="mt-1 text-sm text-gray-600">Monitor additional arXiv categories or custom RSS feeds beyond cs.CV. Add, remove, and toggle feed sources from the <strong>Settings</strong> page or via the <code>/api/feed-sources</code> API.</p>
+        </div>
     </div>
 </section>
 
@@ -105,6 +129,25 @@
             <h3 class="text-sm font-bold text-gray-900 mb-2">Bulk Operations</h3>
             <p class="text-sm text-gray-600">Click <strong>Select</strong> in the toolbar to enter bulk mode. Select multiple papers and save or skip them all at once.</p>
         </div>
+    </div>
+
+    <h3 class="text-lg font-bold text-gray-900 mt-8 mb-3">CLI Commands</h3>
+    <p class="text-sm text-gray-600 mb-4">After installing with <code>pip install -e .</code>, these commands are available:</p>
+    <div class="overflow-x-auto rounded-xl border border-gray-200">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Command</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-scrape</code></td><td class="px-6 py-3 text-sm text-gray-600">One-shot scrape, prints matched papers to terminal</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-digest</code></td><td class="px-6 py-3 text-sm text-gray-600">Send email digest (<code>--dry-run</code>, <code>--send-only</code>)</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-sync</code></td><td class="px-6 py-3 text-sm text-gray-600">Historical sync over a date range (<code>--from</code>, <code>--to</code>, <code>--category</code>)</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-backfill</code></td><td class="px-6 py-3 text-sm text-gray-600">Enrichment backfills: <code>embeddings</code>, <code>citations</code>, <code>openalex</code>, <code>thumbnails</code>, <code>index-rebuild</code>, <code>all</code></td></tr>
+            </tbody>
+        </table>
     </div>
 </section>
 {% endblock %}

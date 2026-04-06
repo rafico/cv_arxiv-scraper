@@ -37,6 +37,26 @@
             <h3 class="text-base font-bold text-gray-900">What&rsquo;s the difference between keyword and semantic search?</h3>
             <p class="mt-2 text-sm text-gray-600"><strong>Keyword</strong> search (BM25) finds papers containing exact words you type. <strong>Semantic</strong> search uses SPECTER2 embeddings to find papers by meaning &mdash; so &ldquo;image classification&rdquo; also finds papers about &ldquo;visual recognition&rdquo;. <strong>Hybrid</strong> mode combines both approaches using Reciprocal Rank Fusion for the best of both worlds.</p>
         </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">How do I backfill old papers?</h3>
+            <p class="mt-2 text-sm text-gray-600">Use the <strong>Discover</strong> page in the web UI or the CLI command <code>cv-arxiv-sync --category cs.CV --from 2024-01-01 --to 2024-03-31</code>. Historical sync processes dates in weekly chunks with progress tracking.</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">How do I enrich papers that were added before a feature existed?</h3>
+            <p class="mt-2 text-sm text-gray-600">Use the backfill CLI: <code>cv-arxiv-backfill all</code> runs all enrichments (embeddings, citations, OpenAlex, thumbnails). You can also run individual backfills like <code>cv-arxiv-backfill citations</code>.</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">Can I export my papers?</h3>
+            <p class="mt-2 text-sm text-gray-600">Yes. You can export as <strong>BibTeX</strong> (single paper or bulk), <strong>HTML report</strong> (via the API or <code>python export_cli.py</code>), or sync to <strong>Mendeley</strong> or <strong>Zotero</strong> from Settings.</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">Can I monitor more than cs.CV?</h3>
+            <p class="mt-2 text-sm text-gray-600">Yes. Add additional feed sources in <strong>Settings</strong> or via the <code>/api/feed-sources</code> API. You can add any arXiv category RSS feed or other compatible sources.</p>
+        </div>
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-bold text-gray-900">What are collections vs. tags?</h3>
+            <p class="mt-2 text-sm text-gray-600"><strong>Collections</strong> are named folders (e.g. &ldquo;Thesis Ch. 3&rdquo;) &mdash; a paper can belong to multiple collections. <strong>Tags</strong> are free-form labels you add to individual papers. Both help you organize, but collections are better for grouping related papers while tags are better for cross-cutting categories.</p>
+        </div>
     </div>
 </section>
 {% endblock %}
