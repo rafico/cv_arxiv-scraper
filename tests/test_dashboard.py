@@ -1,5 +1,7 @@
 import re
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
 
 from app.models import Paper, db
 from app.services.feedback import apply_feedback_action
@@ -38,6 +40,9 @@ class DashboardRouteTests(FlaskDBTestCase):
             db.session.add(paper)
         db.session.commit()
 
+        static_root = Path(self._tmpdir.name) / "static"
+        static_root.mkdir(parents=True, exist_ok=True)
+        self.app.static_folder = str(static_root)
         self.client = self.app.test_client()
 
     def _csrf_token(self) -> str:
@@ -120,3 +125,52 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertIn("Citation count from OpenAlex, updated 2026-04-01", text)
         self.assertIn("https://openalex.org/W999", text)
         self.assertRegex(text, re.compile(r">\s*17\s*</a>"))
+
+    def test_dashboard_uses_app_thumbnail_route(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+
+        response = self.client.get("/")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'/papers/{paper.id}/thumbnail.png', text)
+        self.assertNotIn("cdn-thumbnails.huggingface.co", text)
+
+    def test_paper_thumbnail_route_serves_existing_thumbnail(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+        thumbnails_dir = Path(self.app.static_folder) / "thumbnails"
+        thumbnails_dir.mkdir(parents=True, exist_ok=True)
+        thumbnail_path = thumbnails_dir / f"{paper.arxiv_id}.png"
+        thumbnail_path.write_bytes(b"png-bytes")
+
+        response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "image/png")
+        self.assertEqual(response.get_data(), b"png-bytes")
+
+    def test_paper_thumbnail_route_generates_missing_thumbnail(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+
+        def _fake_generate_thumbnail(arxiv_id, pdf_link, static_root, session=None, pdf_content=None):
+            thumbnail_path = Path(static_root) / "thumbnails" / f"{arxiv_id}.png"
+            thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+            thumbnail_path.write_bytes(b"generated-png")
+            return True
+
+        with patch("app.routes.dashboard.generate_thumbnail", side_effect=_fake_generate_thumbnail) as mock_generate:
+            response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "image/png")
+        self.assertEqual(response.get_data(), b"generated-png")
+        mock_generate.assert_called_once_with(paper.arxiv_id, paper.pdf_link, Path(self.app.static_folder))
+
+    def test_paper_thumbnail_route_returns_404_when_thumbnail_cannot_be_generated(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+
+        with patch("app.routes.dashboard.generate_thumbnail", return_value=False) as mock_generate:
+            response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
+
+        self.assertEqual(response.status_code, 404)
+        mock_generate.assert_called_once_with(paper.arxiv_id, paper.pdf_link, Path(self.app.static_folder))

@@ -248,15 +248,15 @@
 {% if papers %}
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="paper-grid">
     {% for paper in papers %}
-    {% set paper_id = paper.arxiv_id or paper.link.split('/')[-1] %}
+        {% set paper_id = paper.arxiv_id or paper.link.split('/')[-1] %}
     <article class="group bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md hover:border-gray-300 transition-all duration-200 flex flex-col paper-card"
              data-paper-id="{{ paper.id }}" tabindex="0">
         <a href="{{ paper.link }}" target="_blank" class="block paper-link">
             <div class="w-full h-36 bg-gray-100 overflow-hidden">
-                <img src="{{ url_for('static', filename='thumbnails/' ~ paper_id ~ '.png') }}"
+                <img src="{{ url_for('dashboard.paper_thumbnail', paper_id=paper.id) }}"
                      alt="" loading="lazy"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                     onerror="this.onerror=function(){handleImgError(this);}; this.src='https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{{ paper_id }}.png';">
+                     onerror="handleImgError(this)">
             </div>
         </a>
         <div class="p-4 flex flex-col flex-1">

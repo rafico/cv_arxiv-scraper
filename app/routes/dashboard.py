@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 
-from flask import Blueprint, current_app, render_template, request
+from flask import Blueprint, current_app, render_template, request, send_file
 from flask_sqlalchemy.query import Query
 
 from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
@@ -14,6 +15,7 @@ from app.services.preferences import first_author_name, get_preferences
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score, generate_ranking_explanation
 from app.services.related import build_vector, top_related_papers
 from app.services.text import now_utc
+from app.services.thumbnail_generator import generate_thumbnail
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -35,6 +37,14 @@ def _parse_page(raw_value: str | None) -> int:
         return value if value > 0 else 1
     except ValueError:
         return 1
+
+
+def _thumbnail_storage_key(paper: Paper) -> str | None:
+    if paper.arxiv_id:
+        return paper.arxiv_id
+    if paper.link:
+        return paper.link.rstrip("/").split("/")[-1]
+    return None
 
 
 def _apply_timeframe(query: Query, timeframe: str) -> Query:
@@ -441,3 +451,22 @@ def index():
         saved_searches=SavedSearch.query.order_by(SavedSearch.created_at.desc()).all(),
         csrf_token=get_or_create_csrf_token(),
     )
+
+
+@dashboard_bp.route("/papers/<int:paper_id>/thumbnail.png")
+def paper_thumbnail(paper_id: int):
+    paper = Paper.query.get_or_404(paper_id)
+    storage_key = _thumbnail_storage_key(paper)
+    if not storage_key or not paper.pdf_link:
+        return ("", 404)
+
+    static_root = Path(current_app.static_folder or Path(__file__).resolve().parent.parent / "static")
+    thumbnail_path = static_root / "thumbnails" / f"{storage_key}.png"
+
+    if not thumbnail_path.exists():
+        generate_thumbnail(storage_key, paper.pdf_link, static_root)
+
+    if not thumbnail_path.exists():
+        return ("", 404)
+
+    return send_file(thumbnail_path, mimetype="image/png", conditional=True, max_age=86400)
