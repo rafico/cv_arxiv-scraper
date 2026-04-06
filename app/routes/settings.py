@@ -58,7 +58,7 @@ def _load_full_config() -> dict:
 def _llm_provider_defaults(provider: str) -> dict[str, str]:
     if provider == "ollama":
         return {
-            "model": "llama3",
+            "model": "gemma3",
             "base_url": "http://localhost:11434/v1",
         }
     return {

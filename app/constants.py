@@ -6,7 +6,7 @@ ARXIV_API_DELAY = 3
 ARXIV_API_BATCH_SIZE = 50
 
 DEFAULT_MAX_WORKERS = 8
-DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4"
+DEFAULT_LLM_MODEL = "google/gemma-3-27b-it:free"
 
 # ---------------------------------------------------------------------------
 # Human-friendly arXiv category names
