@@ -136,6 +136,28 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertIn(f'/papers/{paper.id}/thumbnail.png', text)
         self.assertNotIn("cdn-thumbnails.huggingface.co", text)
 
+    @patch("app.services.mendeley.MendeleyClient.check_connection")
+    def test_dashboard_shows_mendeley_button_when_connected(self, mock_check_connection):
+        mock_check_connection.return_value = {"status": "connected", "message": "Mendeley is connected."}
+
+        response = self.client.get("/")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Send to Mendeley", text)
+        self.assertIn("mendeley-sync-btn", text)
+
+    @patch("app.services.mendeley.MendeleyClient.check_connection")
+    def test_dashboard_hides_mendeley_button_when_not_connected(self, mock_check_connection):
+        mock_check_connection.return_value = {"status": "no_token", "message": "Mendeley not authorized."}
+
+        response = self.client.get("/")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Send to Mendeley", text)
+        self.assertNotIn("mendeley-sync-btn", text)
+
     def test_paper_thumbnail_route_serves_existing_thumbnail(self):
         paper = Paper.query.filter_by(title="Paper 0").one()
         thumbnails_dir = Path(self.app.static_folder) / "thumbnails"

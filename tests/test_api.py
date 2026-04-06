@@ -107,6 +107,43 @@ class ApiCsrfTests(FlaskDBTestCase):
         muted_topics = self.app.config["SCRAPER_CONFIG"]["preferences"]["muted"]["topics"]
         self.assertIn("Segmentation", muted_topics)
 
+    @patch("app.services.mendeley.MendeleyClient.add_document")
+    @patch("app.services.mendeley.MendeleyClient.check_connection")
+    def test_mendeley_export_endpoint_adds_single_paper(self, mock_check_connection, mock_add_document):
+        mock_check_connection.return_value = {"status": "connected", "message": "Mendeley is connected."}
+        mock_add_document.return_value = {
+            "success": True,
+            "message": "Document added to Mendeley.",
+            "document_id": "doc-123",
+        }
+
+        paper = Paper.query.first()
+        response = self.client.post(
+            f"/api/papers/{paper.id}/mendeley",
+            json={},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["document_id"], "doc-123")
+        mock_add_document.assert_called_once()
+
+    @patch("app.services.mendeley.MendeleyClient.add_document")
+    @patch("app.services.mendeley.MendeleyClient.check_connection")
+    def test_mendeley_export_endpoint_rejects_when_not_connected(self, mock_check_connection, mock_add_document):
+        mock_check_connection.return_value = {"status": "no_token", "message": "Mendeley not authorized."}
+
+        paper = Paper.query.first()
+        response = self.client.post(
+            f"/api/papers/{paper.id}/mendeley",
+            json={},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Mendeley not connected", response.get_json()["error"])
+        mock_add_document.assert_not_called()
+
 
 class CorpusApiTests(FlaskDBTestCase):
     def setUp(self):

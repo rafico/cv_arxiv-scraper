@@ -270,6 +270,8 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
 
 @dashboard_bp.route("/")
 def index():
+    from app.services.mendeley import MendeleyClient
+
     config = current_app.config["SCRAPER_CONFIG"]
     view = request.args.get("view", "inbox")
     if view not in VIEW_OPTIONS:
@@ -425,6 +427,7 @@ def index():
         .all()
     )
     _enrich_cards_with_feedback_and_related(papers, candidate_pool, config)
+    mendeley_connected = MendeleyClient().check_connection().get("status") == "connected"
 
     return render_template(
         "dashboard.html",
@@ -449,6 +452,7 @@ def index():
         dashboard_overview=_build_dashboard_overview(config),
         collections=Collection.query.order_by(Collection.name).all(),
         saved_searches=SavedSearch.query.order_by(SavedSearch.created_at.desc()).all(),
+        mendeley_connected=mendeley_connected,
         csrf_token=get_or_create_csrf_token(),
     )
 

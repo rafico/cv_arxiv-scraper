@@ -318,6 +318,31 @@ def single_paper_bibtex(paper_id: int):
     return Response(bib, mimetype="application/x-bibtex")
 
 
+@api_bp.route("/papers/<int:paper_id>/mendeley", methods=["POST"])
+def single_paper_mendeley(paper_id: int):
+    validate_csrf_token()
+    paper = db.session.get(Paper, paper_id) or abort(404)
+
+    from app.services.mendeley import MendeleyClient
+
+    client = MendeleyClient()
+    status = client.check_connection()
+    if status["status"] != "connected":
+        return jsonify({"error": f"Mendeley not connected: {status['message']}"}), 400
+
+    result = client.add_document(paper)
+    if not result["success"]:
+        return jsonify({"error": result["message"]}), 502
+
+    return jsonify(
+        {
+            "paper_id": paper.id,
+            "message": result["message"],
+            "document_id": result.get("document_id"),
+        }
+    )
+
+
 VALID_READING_STATUSES = {status.value for status in ReadingStatus}
 
 

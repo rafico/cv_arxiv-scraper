@@ -474,6 +474,19 @@
                     </div>
                 </div>
                 {% endif %}
+                {% if mendeley_connected %}
+                <button type="button"
+                        onclick="sendToMendeley({{ paper.id }}, this)"
+                        class="mendeley-sync-btn inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-rose-700 hover:bg-rose-50 hover:border-rose-300 transition-colors"
+                        title="Send to Mendeley"
+                        aria-label="Send to Mendeley">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <circle cx="12" cy="6.25" r="3.25"></circle>
+                        <circle cx="6.5" cy="15.25" r="3.25"></circle>
+                        <circle cx="17.5" cy="15.25" r="3.25"></circle>
+                    </svg>
+                </button>
+                {% endif %}
                 <a href="{{ paper.link }}" target="_blank"
                    class="flex-1 text-center px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300">
                     arXiv
@@ -913,6 +926,48 @@
     function bulkExportBibtex() {
         const ids = Array.from(selectedPapers).join(',');
         window.open(`/api/papers/bulk-bibtex?ids=${ids}`, '_blank');
+    }
+
+    /* ── Single-paper Mendeley export ── */
+    async function sendToMendeley(paperId, button) {
+        if (!button || button.dataset.state === "loading" || button.dataset.state === "done") return;
+
+        const originalMarkup = button.innerHTML;
+        button.dataset.state = "loading";
+        button.disabled = true;
+        button.style.opacity = "0.6";
+
+        try {
+            const response = await fetch(`/api/papers/${paperId}/mendeley`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCsrfToken(),
+                },
+                body: JSON.stringify({}),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to send paper to Mendeley");
+            }
+
+            button.dataset.state = "done";
+            button.classList.remove("bg-white");
+            button.classList.add("bg-rose-50");
+            button.title = data.message || "Added to Mendeley";
+            button.innerHTML = `
+                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.2 7.2a1 1 0 01-1.415 0l-3.2-3.2a1 1 0 111.414-1.42l2.493 2.494 6.493-6.494a1 1 0 011.415 0z" clip-rule="evenodd"></path>
+                </svg>
+            `;
+        } catch (error) {
+            console.error("Mendeley export failed", error);
+            button.dataset.state = "";
+            button.disabled = false;
+            button.style.opacity = "";
+            button.title = error.message || "Failed to send to Mendeley";
+            button.innerHTML = originalMarkup;
+        }
     }
 
     /* ── Keyboard shortcuts ── */
