@@ -63,9 +63,7 @@ def execute_saved_search(
         category_filters = []
         for cat in search.categories:
             escaped = f'%"{_escape_like(cat)}"%'
-            category_filters.append(
-                db.cast(Paper.categories, db.Text).ilike(escaped, escape="\\")
-            )
+            category_filters.append(db.cast(Paper.categories, db.Text).ilike(escaped, escape="\\"))
         query = query.filter(db.or_(*category_filters))
 
     # Include keywords (title or abstract must contain at least one).
