@@ -24,7 +24,7 @@
     <div class="grid gap-4 md:grid-cols-2">
         <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 class="text-sm font-bold text-gray-900 mb-2">Mendeley</h3>
-            <p class="text-sm text-gray-600">Connect your Mendeley account via OAuth in <a href="{{ url_for('settings.view_settings', section='automation') }}" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>. Once connected, use <strong>Sync Saved Papers</strong> to push your saved papers into your library.</p>
+            <p class="text-sm text-gray-600">Connect your Mendeley account via OAuth in <a href="{{ url_for('settings.view_settings', section='automation') }}" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>. Mendeley setup uses the app <strong>client ID</strong> and <strong>client secret</strong> from the developer portal, not a Google-style credentials download. Once connected, use <strong>Sync Saved Papers</strong> to push your saved papers into your library.</p>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 class="text-sm font-bold text-gray-900 mb-2">Zotero</h3>

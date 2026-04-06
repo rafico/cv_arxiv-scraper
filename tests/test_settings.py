@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -55,6 +56,7 @@ class SettingsRouteTests(FlaskDBTestCase):
             mock_creds.exists.return_value = False
             response = self.client.get("/settings")
         self.assertIn(b"gmail-callback", response.data)
+        self.assertIn(b"mendeley-callback", response.data)
 
 
 class GmailStatusTests(FlaskDBTestCase):
@@ -101,8 +103,6 @@ class UploadCredentialsTests(FlaskDBTestCase):
 
     @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
     def test_upload_saves_valid_json(self, mock_creds_path):
-        import io
-
         token = self._csrf_token()
         valid_json = b'{"web":{"client_id":"123","client_secret":"456"}}'
 
@@ -121,8 +121,6 @@ class UploadCredentialsTests(FlaskDBTestCase):
 
     @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
     def test_upload_rejects_invalid_json(self, mock_creds_path):
-        import io
-
         token = self._csrf_token()
         invalid_json = b"Not a JSON"
 
@@ -140,8 +138,6 @@ class UploadCredentialsTests(FlaskDBTestCase):
 
     @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
     def test_upload_rejects_missing_oauth_fields(self, mock_creds_path):
-        import io
-
         token = self._csrf_token()
         wrong_json = b'{"installed":{"client_id":"123"}}'
 
@@ -156,6 +152,68 @@ class UploadCredentialsTests(FlaskDBTestCase):
 
         self.assertEqual(response.status_code, 302)
         mock_creds_path.write_bytes.assert_not_called()
+
+
+class MendeleySettingsTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.app.test_client()
+
+    def _csrf_token(self) -> str:
+        self.client.get("/settings")
+        with self.client.session_transaction() as session:
+            return session["settings_csrf_token"]
+
+    @patch("app.services.mendeley.MendeleyClient._save_credentials")
+    def test_mendeley_setup_saves_direct_credentials(self, mock_save):
+        token = self._csrf_token()
+
+        response = self.client.post(
+            "/settings/mendeley-setup",
+            data={
+                "csrf_token": token,
+                "mendeley_client_id": "client-123",
+                "mendeley_client_secret": "secret-456",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/settings", response.headers["Location"])
+        mock_save.assert_called_once_with("client-123", "secret-456")
+
+    @patch("app.services.mendeley.MendeleyClient._save_credentials")
+    def test_mendeley_setup_rejects_missing_fields(self, mock_save):
+        token = self._csrf_token()
+
+        response = self.client.post(
+            "/settings/mendeley-setup",
+            data={
+                "csrf_token": token,
+                "mendeley_client_id": "client-123",
+                "mendeley_client_secret": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        mock_save.assert_not_called()
+
+    @patch("app.services.mendeley.MendeleyClient._save_credentials")
+    def test_upload_mendeley_credentials_saves_parsed_json(self, mock_save):
+        token = self._csrf_token()
+        valid_json = b'{"client_id":"123","client_secret":"456"}'
+
+        response = self.client.post(
+            "/settings/upload-mendeley-credentials",
+            data={
+                "csrf_token": token,
+                "mendeley_credentials_file": (io.BytesIO(valid_json), "mendeley_credentials.json"),
+            },
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/settings", response.headers["Location"])
+        mock_save.assert_called_once_with("123", "456")
 
 
 class GmailOAuthFlowTests(FlaskDBTestCase):

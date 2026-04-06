@@ -103,6 +103,7 @@ def view_settings():
     scrape_history = ScrapeRun.query.order_by(ScrapeRun.started_at.desc()).limit(8).all()
     digest_history = get_digest_history(limit=8)
     callback_uri = url_for("settings.gmail_callback", _external=True)
+    mendeley_callback_uri = url_for("settings.mendeley_callback", _external=True)
     gmail_setup_steps = get_setup_instructions(
         callback_uri=callback_uri,
         recipient=email_cfg.get("recipient", ""),
@@ -140,6 +141,7 @@ def view_settings():
         llm_key_mask=_LLM_MASK_VALUE,
         csrf_token=get_or_create_csrf_token(),
         callback_uri=callback_uri,
+        mendeley_callback_uri=mendeley_callback_uri,
         mendeley_status=mendeley_status,
         zotero_status=zotero_status,
         zotero_collections=zotero_collections,
@@ -451,10 +453,28 @@ def upload_mendeley_credentials():
         )
         return redirect(url_for("settings.view_settings", section="automation"))
 
-    from app.services.mendeley import DEFAULT_CREDENTIALS_PATH
+    from app.services.mendeley import MendeleyClient
 
-    DEFAULT_CREDENTIALS_PATH.write_bytes(raw)
+    MendeleyClient()._save_credentials(data["client_id"], data["client_secret"])
     flash("Mendeley credentials uploaded. You can now authorize.", "success")
+    return redirect(url_for("settings.view_settings", section="automation"))
+
+
+@settings_bp.route("/settings/mendeley-setup", methods=["POST"])
+def mendeley_setup():
+    validate_csrf_token()
+
+    from app.services.mendeley import MendeleyClient
+
+    client_id = request.form.get("mendeley_client_id", "").strip()
+    client_secret = request.form.get("mendeley_client_secret", "").strip()
+
+    if not client_id or not client_secret:
+        flash("Both Mendeley client ID and client secret are required.", "error")
+        return redirect(url_for("settings.view_settings", section="automation"))
+
+    MendeleyClient()._save_credentials(client_id, client_secret)
+    flash("Mendeley credentials saved. You can now authorize.", "success")
     return redirect(url_for("settings.view_settings", section="automation"))
 
 

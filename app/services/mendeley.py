@@ -49,6 +49,15 @@ class MendeleyClient:
             "client_secret": data["client_secret"],
         }
 
+    def _save_credentials(self, client_id: str, client_secret: str) -> None:
+        """Save client_id and client_secret with restricted permissions."""
+        data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+        self.credentials_path.write_text(json.dumps(data), encoding="utf-8")
+        os.chmod(self.credentials_path, 0o600)
+
     def _load_token(self) -> dict:
         """Load the stored OAuth token."""
         if self._token_data:
