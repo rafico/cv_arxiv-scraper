@@ -98,6 +98,7 @@ PAPER_COLUMN_DEFS = {
     "oa_status": "TEXT",
     "referenced_works_count": "INTEGER",
     "openalex_cited_by_count": "INTEGER",
+    "mendeley_doc_id": "TEXT",
 }
 
 INDEX_STATEMENTS = [

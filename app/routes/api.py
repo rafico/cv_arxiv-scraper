@@ -334,11 +334,16 @@ def single_paper_mendeley(paper_id: int):
     if not result["success"]:
         return jsonify({"error": result["message"]}), 502
 
+    doc_id = result.get("document_id")
+    if doc_id:
+        paper.mendeley_doc_id = str(doc_id)
+        db.session.commit()
+
     return jsonify(
         {
             "paper_id": paper.id,
             "message": result["message"],
-            "document_id": result.get("document_id"),
+            "document_id": doc_id,
         }
     )
 

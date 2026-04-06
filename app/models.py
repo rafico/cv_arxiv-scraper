@@ -117,6 +117,8 @@ class Paper(db.Model):
     referenced_works_count = db.Column(db.Integer, nullable=True)
     openalex_cited_by_count = db.Column(db.Integer, nullable=True)
 
+    mendeley_doc_id = db.Column(db.Text, nullable=True)
+
     # Legacy string dates are preserved for compatibility with older rows.
     publication_date = db.Column(db.Text)
     scraped_date = db.Column(db.Text, nullable=False)
