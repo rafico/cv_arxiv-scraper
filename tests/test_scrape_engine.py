@@ -160,6 +160,25 @@ class BuildResultTests(unittest.TestCase):
         self.assertNotEqual(result["summary_text"], abstract)
 
 
+class CreateLLMClientTests(FlaskDBTestCase):
+    @patch("app.services.scrape_engine.LLMClient")
+    def test_create_llm_client_uses_non_reasoning_mode_for_ollama(self, mock_llm_client):
+        from app.services.scrape_engine import _create_llm_client
+
+        self.app.config["SCRAPER_CONFIG"]["llm"] = {
+            "enabled": True,
+            "provider": "ollama",
+            "model": "gemma4:e2b",
+            "base_url": "http://localhost:11434/v1",
+            "max_concurrent": 1,
+        }
+        mock_llm_client.return_value = object()
+
+        _create_llm_client(self.app)
+
+        self.assertEqual(mock_llm_client.call_args.kwargs["reasoning_effort"], "none")
+
+
 class PreFilterCountTests(FlaskDBTestCase):
     def test_pre_filtered_papers_included_in_duplicates_skipped(self):
         """Pre-filtered (already in DB) papers should be counted in duplicates_skipped."""

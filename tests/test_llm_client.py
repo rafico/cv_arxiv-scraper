@@ -278,6 +278,18 @@ class CreateCompletionTests(unittest.TestCase):
         self.assertIn("Title", messages[1]["content"])
         self.assertIn("Abstract", messages[1]["content"])
 
+    @patch("app.services.llm_client.OpenAI")
+    def test_passes_reasoning_effort_when_configured(self, mock_openai):
+        mock_create = mock_openai.return_value.chat.completions.create
+        response = Mock()
+        response.choices = [Mock(message=Mock(content="TLDR"))]
+        mock_create.return_value = response
+
+        client = LLMClient("test-key", "model", "https://example.com", reasoning_effort="none")
+        client.generate_tldr("Title", "Abstract")
+
+        self.assertEqual(mock_create.call_args.kwargs["reasoning_effort"], "none")
+
 
 class ConcurrencySemaphoreTests(unittest.TestCase):
     @patch("app.services.llm_client.OpenAI")

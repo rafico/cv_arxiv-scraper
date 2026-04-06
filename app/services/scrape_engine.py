@@ -587,6 +587,7 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
         api_key = "ollama"
         default_base_url = "http://localhost:11434/v1"
         default_model = "llama3"
+        reasoning_effort = llm_config.get("reasoning_effort", "none")
     else:
         api_key = resolve_api_key(Path(app.config["LLM_KEY_PATH"]))
         if not api_key:
@@ -594,6 +595,7 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
             return None, ""
         default_base_url = "https://openrouter.ai/api/v1"
         default_model = DEFAULT_LLM_MODEL
+        reasoning_effort = None
 
     try:
         client = LLMClient(
@@ -601,6 +603,7 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
             model=llm_config.get("model", default_model),
             base_url=llm_config.get("base_url", default_base_url),
             max_concurrent=int(llm_config.get("max_concurrent", 4)),
+            reasoning_effort=reasoning_effort,
         )
     except Exception as exc:
         LOGGER.warning("Unable to initialize LLM client: %s", exc)

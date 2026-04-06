@@ -46,7 +46,14 @@ def write_api_key(api_key: str, key_path: Path | None = None) -> Path:
 
 
 class LLMClient:
-    def __init__(self, api_key: str, model: str, base_url: str, max_concurrent: int = 4):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str,
+        max_concurrent: int = 4,
+        reasoning_effort: str | None = None,
+    ):
         if not api_key.strip():
             raise ValueError("LLM API key is required")
         if OpenAI is None:
@@ -55,6 +62,7 @@ class LLMClient:
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
         self._semaphore = threading.Semaphore(max(1, int(max_concurrent)))
+        self.reasoning_effort = reasoning_effort
 
     def _create_completion(
         self,
@@ -64,14 +72,20 @@ class LLMClient:
         max_tokens: int,
         temperature: float,
     ):
-        return self.client.chat.completions.create(
-            model=self.model,
-            messages=[
+        request = {
+            "model": self.model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=max_tokens,
-            temperature=temperature,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if self.reasoning_effort:
+            request["reasoning_effort"] = self.reasoning_effort
+
+        return self.client.chat.completions.create(
+            **request,
         )
 
     def generate_tldr(self, title: str, abstract: str) -> str | None:
