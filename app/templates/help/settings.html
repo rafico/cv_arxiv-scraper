@@ -1,79 +1,49 @@
 {% extends "help/base.html" %}
 
 {% block doc_content %}
-<!-- Settings -->
+<!-- Settings Overview -->
 <section id="settings-guide" class="scroll-mt-6">
-    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Settings, Explained Simply</h2>
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Settings Overview</h2>
     <div class="space-y-4">
         <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-900 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Start Here</span></div>
             <div>
                 <h3 class="text-base font-bold text-gray-900">Research Setup</h3>
-                <p class="mt-1 text-sm text-gray-600">This is the most important section. Add authors, labs, and topic keywords. One item per line is enough.</p>
+                <p class="mt-1 text-sm text-gray-600">Add the authors, labs, and topic keywords you care about. One item per line. This is the only section you need to get started.</p>
             </div>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
             <div>
                 <h3 class="text-base font-bold text-gray-900">Ranking</h3>
-                <p class="mt-1 text-sm text-gray-600">Fine-tunes how strongly the app reacts to authors, labs, topics, freshness, and muted terms. Safe to ignore at first.</p>
+                <p class="mt-1 text-sm text-gray-600">Fine-tune how strongly the app reacts to authors, labs, topics, freshness, and muted terms.</p>
             </div>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
             <div>
                 <h3 class="text-base font-bold text-gray-900">Automation</h3>
-                <p class="mt-1 text-sm text-gray-600">Use this only if you want email digests, scheduled scrapes, or external sync (Mendeley, Zotero). The app works fine without it.</p>
-            </div>
-        </div>
-        <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
-            <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
-            <div>
-                <h3 class="text-base font-bold text-gray-900">Feed Sources</h3>
-                <p class="mt-1 text-sm text-gray-600">Add extra arXiv categories or custom RSS feeds to monitor beyond cs.CV. Manage feed sources to broaden your paper coverage.</p>
+                <p class="mt-1 text-sm text-gray-600">Email digests, scheduled scrapes, Mendeley/Zotero sync, and feed sources.</p>
             </div>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
             <div>
                 <h3 class="text-base font-bold text-gray-900">LLM / AI</h3>
-                <p class="mt-1 text-sm text-gray-600">Adds AI summaries and an extra relevance score. Useful, but not required to get value from the app.</p>
+                <p class="mt-1 text-sm text-gray-600">AI-powered summaries and relevance scores. See <a href="{{ url_for('help.view_page', page='cli') }}#llm-summaries" class="font-medium text-blue-600 hover:text-blue-800">CLI &rarr; AI Summaries</a> for setup details.</p>
             </div>
         </div>
     </div>
 </section>
 
-<!-- Ranking -->
-<section id="ranking" class="scroll-mt-6 pt-12">
-    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">How Ranking Works</h2>
-    <div class="help-admonition bg-gray-50 border-l-4 border-gray-400 p-4 rounded-r-lg mb-4">
-        <p class="text-sm text-gray-700">You do not need to understand the scoring formula to use the app well. If something looks out of place, use <strong>Save</strong> or <strong>Not Interested</strong> and the ranking will adjust over time.</p>
-    </div>
-    
-    <p class="text-sm text-gray-600 mb-3">In plain English, papers usually rise to the top when:</p>
-    <ul class="space-y-2 text-sm text-gray-600 pl-5 list-disc marker:text-gray-400">
-        <li class="pl-1">They match more of the authors, labs, or topics you entered.</li>
-        <li class="pl-1">They are newer.</li>
-        <li class="pl-1">You have previously saved similar papers.</li>
-        <li class="pl-1">AI scoring is enabled and the paper looks relevant.</li>
-    </ul>
-</section>
-
-<!-- Enrichment & Embeddings -->
-<section id="enrichment" class="scroll-mt-6 pt-12">
-    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Enrichment & Embeddings</h2>
-    <div class="space-y-4">
-        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h3 class="text-base font-bold text-gray-900">OpenAlex</h3>
-            <p class="mt-1 text-sm text-gray-600">Papers are automatically enriched with OpenAlex data during scrapes: topic classifications, open-access status, and citation counts. Configure in <code>config.yaml</code>:</p>
-            <pre class="mt-2 bg-gray-50 rounded-lg p-3 text-xs text-gray-700 overflow-x-auto"><code>openalex:
+<!-- OpenAlex -->
+<section id="openalex" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">OpenAlex</h2>
+    <p class="text-sm text-gray-600 mb-3">Enabled by default. Papers get topic classifications, open-access status, and citation counts from <a href="https://openalex.org" target="_blank" class="font-medium text-blue-600 hover:text-blue-800">OpenAlex</a>.</p>
+    <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <pre class="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 overflow-x-auto"><code>openalex:
   enabled: true        # set to false to disable
   email: ""            # your email for the polite pool (higher rate limits)</code></pre>
-        </div>
-        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h3 class="text-base font-bold text-gray-900">SPECTER2 Embeddings</h3>
-            <p class="mt-1 text-sm text-gray-600">SPECTER2 paper embeddings are generated automatically during scrapes and stored in a FAISS index. These power semantic search and related-paper recommendations. The model (~420MB) is downloaded on first use and cached in <code>~/.cache/huggingface/</code>. No configuration needed.</p>
-        </div>
     </div>
 </section>
 {% endblock %}

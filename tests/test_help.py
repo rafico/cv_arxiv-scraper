@@ -12,50 +12,54 @@ class HelpRouteTests(FlaskDBTestCase):
         self.assertTrue(response.location.endswith("/help/start"))
 
     def test_help_pages_load_successfully(self):
-        pages = ["start", "ui", "features", "settings", "faq"]
+        pages = ["start", "ui", "search", "organization", "features", "export", "cli", "settings", "faq"]
         for page in pages:
             response = self.client.get(f"/help/{page}")
             self.assertEqual(response.status_code, 200, f"Page /help/{page} failed to load")
 
-    def test_help_content_not_lost_in_split(self):
-        # Concatenate text from all pages to ensure no content was lost during the refactor
-        pages = ["start", "ui", "features", "settings", "faq"]
+    def test_help_unknown_page_returns_404(self):
+        response = self.client.get("/help/nonexistent")
+        self.assertEqual(response.status_code, 404)
+
+    def test_help_content_across_pages(self):
+        pages = ["start", "ui", "search", "organization", "features", "export", "cli", "settings", "faq"]
         full_text = ""
         for page in pages:
             response = self.client.get(f"/help/{page}")
             full_text += response.get_data(as_text=True)
 
+        # Core navigation and setup
         self.assertIn("Start Here", full_text)
-        self.assertIn("Settings, Explained Simply", full_text)
         self.assertIn("Not Interested", full_text)
         self.assertIn("/settings?section=interests", full_text)
 
-        # New section headings
+        # Section headings across pages
         for section in [
-            "Paper Organization",
+            "Collections",
             "Reference Manager Sync",
-            "Smart Features",
-            "Power User Tips",
+            "How Ranking Works",
+            "Keyboard Shortcuts",
+            "Enrichment Backfills",
+            "AI Summaries",
+            "Email Digest",
         ]:
             self.assertIn(section, full_text, f"Missing help section: {section}")
 
-        # Key feature keywords
+        # Key features across all pages
         for feature in [
-            "Collections",
-            "User Tags",
-            "Reading Status",
             "BibTeX",
             "Mendeley",
             "Zotero",
-            "Citation Counts",
-            "Follow Author",
-            "Mute Topic",
+            "Citations",
+            "Follow",
+            "Mute",
             "Duplicate Detection",
-            "Historical Search",
             "Scheduled Scrapes",
-            "Keyboard Shortcuts",
-            "Advanced Filters",
             "Saved Searches",
-            "Bulk Operations",
+            "Bulk",
+            "OpenAlex",
+            "SPECTER2",
+            "Reading Status",
+            "Tags",
         ]:
             self.assertIn(feature, full_text, f"Missing feature in help: {feature}")

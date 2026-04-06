@@ -12,7 +12,7 @@ def view_help():
 @help_bp.route("/help/<page>")
 def view_page(page: str):
     try:
-        if page not in ["start", "ui", "features", "settings", "faq"]:
+        if page not in ["start", "ui", "search", "organization", "features", "export", "cli", "settings", "faq"]:
             abort(404)
         return render_template(f"help/{page}.html", active_page=page)
     except TemplateNotFound:

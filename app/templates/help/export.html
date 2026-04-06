@@ -1,0 +1,91 @@
+{% extends "help/base.html" %}
+
+{% block doc_content %}
+<!-- BibTeX -->
+<section id="bibtex" class="scroll-mt-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">BibTeX Export</h2>
+    <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Single paper</h3>
+            <p class="text-sm text-gray-600">Click <strong>BibTeX</strong> on any paper card to copy the citation entry to your clipboard.</p>
+        </div>
+        <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Bulk export</h3>
+            <p class="text-sm text-gray-600">Use the toolbar <strong>BibTeX</strong> button to download all visible papers as a <code>.bib</code> file. Also available in bulk-select mode.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Reference Managers -->
+<section id="reference-managers" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Reference Manager Sync</h2>
+    <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Mendeley</h3>
+            <p class="text-sm text-gray-600">Connect your Mendeley account via OAuth in <a href="/settings?section=automation" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>. Once connected, use <strong>Sync Saved Papers</strong> to push your library.</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Zotero</h3>
+            <p class="text-sm text-gray-600">Enter your Zotero API key and user ID in <a href="/settings?section=automation" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>. You can sync to a specific Zotero collection.</p>
+        </div>
+    </div>
+</section>
+
+<!-- HTML Export -->
+<section id="html-export" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">HTML Report</h2>
+    <p class="text-sm text-gray-600">Export your current paper view as a standalone HTML file for sharing or offline reading.</p>
+    <ul class="mt-2 space-y-1 text-sm text-gray-600 pl-5 list-disc marker:text-gray-400">
+        <li class="pl-1">Via the API: <code>GET /api/export?timeframe=daily</code></li>
+        <li class="pl-1">Via CLI: <code>python export_cli.py --timeframe weekly</code></li>
+    </ul>
+</section>
+
+<!-- Email Digest -->
+<section id="email-digest" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Daily Email Digest</h2>
+    <p class="text-sm text-gray-600 mb-4">Get matched papers delivered to your inbox every morning &mdash; no need to open the dashboard.</p>
+
+    <h3 class="text-lg font-bold text-gray-900 mb-3">Setup</h3>
+    <div class="space-y-4 mb-6">
+        <div class="flex gap-4">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">1</div>
+            <div>
+                <h4 class="text-sm font-semibold text-gray-900">Create Gmail credentials</h4>
+                <p class="mt-1 text-sm text-gray-600">In <a href="https://console.cloud.google.com/" target="_blank" class="font-medium text-blue-600 hover:text-blue-800">Google Cloud Console</a>, create a project, enable the <strong>Gmail API</strong>, and create an OAuth 2.0 Client ID. Download the JSON file.</p>
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">2</div>
+            <div>
+                <h4 class="text-sm font-semibold text-gray-900">Upload credentials</h4>
+                <p class="mt-1 text-sm text-gray-600">Upload the JSON in <a href="/settings?section=automation" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation</a>, or save it as <code>credentials.json</code> in the project root.</p>
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">3</div>
+            <div>
+                <h4 class="text-sm font-semibold text-gray-900">Authorize</h4>
+                <p class="mt-1 text-sm text-gray-600">Complete the OAuth flow in Settings, or run <code>python gmail_auth_setup.py</code> for headless environments.</p>
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">4</div>
+            <div>
+                <h4 class="text-sm font-semibold text-gray-900">Set recipient & test</h4>
+                <p class="mt-1 text-sm text-gray-600">Set <code>email.recipient</code> in <code>config.yaml</code>, then run <code>cv-arxiv-digest --dry-run</code> to preview.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="help-admonition bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg">
+        <div class="flex items-start">
+            <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <div>
+                <h4 class="text-sm font-bold text-blue-900">Security</h4>
+                <p class="mt-1 text-sm text-blue-800">Only the <code>gmail.send</code> scope is requested &mdash; the app <strong>cannot</strong> read, list, or delete your emails. Tokens are stored locally with restricted permissions.</p>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

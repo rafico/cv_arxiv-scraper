@@ -1,0 +1,138 @@
+{% extends "help/base.html" %}
+
+{% block doc_content %}
+<!-- CLI Commands -->
+<section id="cli" class="scroll-mt-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">CLI Commands</h2>
+    <p class="text-sm text-gray-600 mb-4">After installing with <code>pip install -e .</code>, these commands are available globally:</p>
+    <div class="overflow-x-auto rounded-xl border border-gray-200">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Command</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                    <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-scrape</code></td>
+                    <td class="px-6 py-3 text-sm text-gray-600">One-shot scrape, prints matched papers to terminal</td>
+                </tr>
+                <tr>
+                    <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-digest</code></td>
+                    <td class="px-6 py-3 text-sm text-gray-600">Send email digest. Flags: <code>--dry-run</code>, <code>--send-only</code></td>
+                </tr>
+                <tr>
+                    <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-sync</code></td>
+                    <td class="px-6 py-3 text-sm text-gray-600">Historical sync. Flags: <code>--from</code>, <code>--to</code>, <code>--category</code>, <code>--chunk-days</code></td>
+                </tr>
+                <tr>
+                    <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-backfill</code></td>
+                    <td class="px-6 py-3 text-sm text-gray-600">Enrichment backfills (see below)</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-sm text-gray-500 mt-3">Standalone scripts (<code>python scrape_cli.py</code>, <code>python export_cli.py</code>, etc.) also work without installing.</p>
+</section>
+
+<!-- Backfills -->
+<section id="backfills" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Enrichment Backfills</h2>
+    <p class="text-sm text-gray-600 mb-4">Enrich papers that were added before a feature existed:</p>
+    <div class="overflow-x-auto rounded-xl border border-gray-200">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subcommand</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">What it does</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>embeddings</code></td><td class="px-6 py-3 text-sm text-gray-600">Backfill missing SPECTER2 embeddings</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>index-rebuild</code></td><td class="px-6 py-3 text-sm text-gray-600">Rebuild the full FAISS index from the database</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>citations</code></td><td class="px-6 py-3 text-sm text-gray-600">Fetch citation counts from Semantic Scholar</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>openalex</code></td><td class="px-6 py-3 text-sm text-gray-600">Fetch OpenAlex metadata (topics, OA status)</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>thumbnails</code></td><td class="px-6 py-3 text-sm text-gray-600">Generate PDF first-page thumbnails</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><code>all</code></td><td class="px-6 py-3 text-sm text-gray-600">Run all of the above</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-sm text-gray-500 mt-3">All subcommands accept <code>--batch-size N</code> and <code>--delay SECONDS</code>.</p>
+</section>
+
+<!-- Scheduled Scrapes -->
+<section id="scheduled-scrapes" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Scheduled Scrapes</h2>
+    <p class="text-sm text-gray-600 mb-4">The app can scrape automatically at a set time each day, without needing cron.</p>
+    <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <p class="text-sm text-gray-600">Add a <code>scheduler</code> section to your <code>config.yaml</code>:</p>
+        <pre class="mt-2 bg-gray-50 rounded-lg p-3 text-xs text-gray-700 overflow-x-auto"><code>scheduler:
+  enabled: true
+  scrape_time: "08:00"   # 24-hour format, local time</code></pre>
+    </div>
+    <p class="text-sm text-gray-600 mt-4">Alternatively, use cron:</p>
+    <pre class="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 overflow-x-auto mt-2"><code>0 8 * * * cd /path/to/cv_arxiv-scraper && ~/venv/bin/python -m app.cli.scrape</code></pre>
+</section>
+
+<!-- Feed Sources -->
+<section id="feed-sources" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Multiple Feed Sources</h2>
+    <p class="text-sm text-gray-600">Monitor additional arXiv categories or custom RSS feeds beyond cs.CV. Add, remove, and toggle feed sources from <a href="/settings" class="font-medium text-blue-600 hover:text-blue-800">Settings</a> or via the <code>/api/feed-sources</code> API.</p>
+</section>
+
+<!-- LLM Summaries -->
+<section id="llm-summaries" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">AI Summaries (LLM)</h2>
+    <div class="help-admonition bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg mb-4">
+        <div class="flex items-start">
+            <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <div>
+                <h4 class="text-sm font-bold text-blue-900">Optional feature</h4>
+                <p class="mt-1 text-sm text-blue-800">The app works fine without AI. Summaries and topic tags are generated extractively by default. Enabling LLM adds richer summaries and an AI relevance score.</p>
+            </div>
+        </div>
+    </div>
+
+    <p class="text-sm text-gray-600 mb-4">When enabled, the LLM reads each paper&rsquo;s title and abstract to produce:</p>
+    <ul class="space-y-1 text-sm text-gray-600 pl-5 list-disc marker:text-gray-400 mb-6">
+        <li class="pl-1">A plain-language summary describing what the paper does and why it matters</li>
+        <li class="pl-1">A relevance score (0&ndash;10) relative to your research interests</li>
+    </ul>
+
+    <h3 class="text-lg font-bold text-gray-900 mb-3">Setup</h3>
+    <div class="space-y-4">
+        <div class="flex gap-4">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">1</div>
+            <div>
+                <h4 class="text-sm font-semibold text-gray-900">Enable in Settings</h4>
+                <p class="mt-1 text-sm text-gray-600">Go to <a href="/settings?section=llm" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; LLM / AI</a> and toggle LLM on.</p>
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">2</div>
+            <div>
+                <h4 class="text-sm font-semibold text-gray-900">Choose a provider</h4>
+                <p class="mt-1 text-sm text-gray-600">Supported providers: <strong>OpenRouter</strong> (cloud, default) and <strong>Ollama</strong> (local). Set your API key or Ollama URL.</p>
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-900 text-sm font-bold text-white">3</div>
+            <div>
+                <h4 class="text-sm font-semibold text-gray-900">Run a scrape</h4>
+                <p class="mt-1 text-sm text-gray-600">AI summaries and relevance scores are generated during the scrape. Papers already in the database are not re-processed.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm mt-6">
+        <h4 class="text-sm font-bold text-gray-900 mb-2">config.yaml example</h4>
+        <pre class="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 overflow-x-auto"><code>llm:
+  enabled: true
+  provider: openrouter         # or "ollama"
+  model: google/gemma-3-27b-it:free
+  # base_url: http://localhost:11434/v1   # for Ollama
+  max_concurrent: 4</code></pre>
+    </div>
+</section>
+{% endblock %}

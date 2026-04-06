@@ -1,0 +1,69 @@
+{% extends "help/base.html" %}
+
+{% block doc_content %}
+<!-- Hybrid Search -->
+<section id="hybrid-search" class="scroll-mt-6">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Search</h2>
+    <p class="text-sm text-gray-600 mb-6">Use the search bar at the top of the dashboard to find papers. Toggle between three modes using the dropdown next to the search box.</p>
+
+    <div class="grid gap-4 md:grid-cols-3 mb-6">
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Keyword</h3>
+            <p class="text-sm text-gray-600">Finds papers containing the exact words you type. Uses BM25 full-text search under the hood.</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Semantic</h3>
+            <p class="text-sm text-gray-600">Finds papers by meaning. &ldquo;image classification&rdquo; also matches &ldquo;visual recognition&rdquo;. Powered by SPECTER2 embeddings.</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Hybrid</h3>
+            <p class="text-sm text-gray-600">Combines keyword and semantic results for the best of both. This is the default mode.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Filters -->
+<section id="filters" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Filters & Sorting</h2>
+    <div class="grid gap-6 md:grid-cols-2">
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Match type filter</h3>
+            <p class="mt-1 text-sm text-gray-600">Show only Author, Affiliation, or Title matches using the pills below the search bar.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Advanced Filters</h3>
+            <p class="mt-1 text-sm text-gray-600">Click <strong>Advanced Filters</strong> to filter by arXiv category, resource availability, reading status, or to show hidden papers.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Sort options</h3>
+            <p class="mt-1 text-sm text-gray-600">Sort by score (trending), date (newest), recommendations, or citation count.</p>
+        </div>
+        <div>
+            <h3 class="text-base font-bold text-gray-900">Time windows</h3>
+            <p class="mt-1 text-sm text-gray-600">Switch between daily, weekly, monthly, or all-time views.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Saved Searches -->
+<section id="saved-searches" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Saved Searches</h2>
+    <p class="text-sm text-gray-600 mb-4">Bookmark a filter combination so you can re-run it with one click.</p>
+    <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Creating</h3>
+            <p class="text-sm text-gray-600">Set up your filters, then click <strong>Save search</strong>. Give it a name and optional criteria like categories, date windows, or citation thresholds.</p>
+        </div>
+        <div class="rounded-xl bg-gray-50 p-5 border border-gray-100">
+            <h3 class="text-sm font-bold text-gray-900 mb-2">Using</h3>
+            <p class="text-sm text-gray-600">Saved searches appear as quick-access pills on the dashboard. Click one to instantly apply its filters.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Discover -->
+<section id="discover" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Discover (Historical Search)</h2>
+    <p class="text-sm text-gray-600">Use the <strong>Discover</strong> page in the top nav to search arXiv by date range and category. This lets you backfill papers from the past &mdash; not just today&rsquo;s feed. Matched papers are added to your inbox like any other scrape.</p>
+</section>
+{% endblock %}

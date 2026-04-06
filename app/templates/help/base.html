@@ -9,11 +9,20 @@
         <div class="sticky top-6 overflow-y-auto max-h-[calc(100vh-3rem)] rounded-xl border border-gray-200 bg-gray-50 p-4">
             <h3 class="text-sm font-bold text-gray-900 mb-3 uppercase tracking-wider">Contents</h3>
             <nav class="space-y-1.5 text-sm" id="toc-nav">
-                <a href="{{ url_for('help.view_page', page='start') }}" class="block transition-colors {% if active_page == 'start' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Quick Start</a>
-                <a href="{{ url_for('help.view_page', page='ui') }}" class="block transition-colors {% if active_page == 'ui' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">UI Guide & Main Buttons</a>
-                <a href="{{ url_for('help.view_page', page='features') }}" class="block transition-colors {% if active_page == 'features' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Smart Features & Power Tips</a>
-                <a href="{{ url_for('help.view_page', page='settings') }}" class="block transition-colors {% if active_page == 'settings' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Settings & Ranking</a>
-                <a href="{{ url_for('help.view_page', page='faq') }}" class="block transition-colors {% if active_page == 'faq' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Common Questions</a>
+                <p class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1 mt-2">Getting Started</p>
+                <a href="{{ url_for('help.view_page', page='start') }}" class="block pl-2 transition-colors {% if active_page == 'start' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Quick Start</a>
+                <a href="{{ url_for('help.view_page', page='ui') }}" class="block pl-2 transition-colors {% if active_page == 'ui' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">UI Guide</a>
+
+                <p class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1 mt-3">Using the App</p>
+                <a href="{{ url_for('help.view_page', page='search') }}" class="block pl-2 transition-colors {% if active_page == 'search' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Search & Discovery</a>
+                <a href="{{ url_for('help.view_page', page='organization') }}" class="block pl-2 transition-colors {% if active_page == 'organization' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Organization</a>
+                <a href="{{ url_for('help.view_page', page='features') }}" class="block pl-2 transition-colors {% if active_page == 'features' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Ranking & Enrichment</a>
+                <a href="{{ url_for('help.view_page', page='export') }}" class="block pl-2 transition-colors {% if active_page == 'export' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Export & Sync</a>
+
+                <p class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1 mt-3">Advanced</p>
+                <a href="{{ url_for('help.view_page', page='cli') }}" class="block pl-2 transition-colors {% if active_page == 'cli' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">CLI & Automation</a>
+                <a href="{{ url_for('help.view_page', page='settings') }}" class="block pl-2 transition-colors {% if active_page == 'settings' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">Settings</a>
+                <a href="{{ url_for('help.view_page', page='faq') }}" class="block pl-2 transition-colors {% if active_page == 'faq' %}text-gray-900 font-bold{% else %}text-gray-600 hover:text-gray-900{% endif %}">FAQ</a>
             </nav>
         </div>
     </aside>
