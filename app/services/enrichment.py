@@ -29,6 +29,10 @@ _HEADER_END_RE = re.compile(
 _URL_RE = re.compile(r"https?://[^\s<>)\]\"']+")
 
 _ARXIV_API_URL = "https://export.arxiv.org/api/query"
+_ARXIV_API_TIMEOUT = 45
+_ARXIV_API_ATTEMPTS = 4
+_ARXIV_API_BASE_DELAY = 2.0
+_ARXIV_METADATA_BATCH_SIZE = min(_ARXIV_API_BATCH_SIZE, 20)
 
 _ATOM_NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -94,6 +98,19 @@ def query_arxiv_api(categories: list[str], start_dt: date, end_dt: date, max_res
     ]
 
 
+def _request_arxiv_api(params: dict[str, str | int], session: requests.Session | None = None) -> requests.Response:
+    return request_with_backoff(
+        "GET",
+        _ARXIV_API_URL,
+        params=params,
+        timeout=_ARXIV_API_TIMEOUT,
+        attempts=_ARXIV_API_ATTEMPTS,
+        base_delay=_ARXIV_API_BASE_DELAY,
+        rate_limit_profile="bulk",
+        session=session,
+    )
+
+
 def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | None = None) -> list[dict]:
     category = _extract_category_from_feed_url(feed_url)
     if not category or days <= 0:
@@ -128,15 +145,7 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
             "start": start,
             "max_results": batch_size,
         }
-        response = request_with_backoff(
-            "GET",
-            _ARXIV_API_URL,
-            params=params,
-            timeout=30,
-            attempts=3,
-            base_delay=1.5,
-            session=session,
-        )
+        response = _request_arxiv_api(params, session=session)
         root = ET.fromstring(response.text)
         batch_entries = [_parse_atom_entry(entry) for entry in root.findall("atom:entry", _ATOM_NS)]
         if not batch_entries:
@@ -213,68 +222,92 @@ def extract_resource_links(*texts: str | None) -> list[dict[str, str]]:
     return links
 
 
+def _merge_api_metadata(root: ET.Element, metadata: dict[str, dict]) -> None:
+    for entry in root.findall("atom:entry", _ATOM_NS):
+        id_el = entry.find("atom:id", _ATOM_NS)
+        if id_el is None or not id_el.text:
+            continue
+
+        id_match = re.search(r"abs/(.+?)(?:v\d+)?$", id_el.text)
+        if not id_match:
+            continue
+
+        arxiv_id = id_match.group(1)
+
+        affiliations: list[str] = []
+        for author in entry.findall("atom:author", _ATOM_NS):
+            for affil in author.findall("arxiv:affiliation", _ATOM_NS):
+                if affil.text and affil.text.strip():
+                    affiliations.append(affil.text.strip())
+
+        categories = [
+            cat.get("term", "").strip()
+            for cat in entry.findall("atom:category", _ATOM_NS)
+            if cat.get("term", "").strip()
+        ]
+
+        comment_el = entry.find("arxiv:comment", _ATOM_NS)
+        doi_el = entry.find("arxiv:doi", _ATOM_NS)
+
+        metadata[arxiv_id] = {
+            "api_affiliations": "\n".join(dict.fromkeys(affiliations)),
+            "categories": list(dict.fromkeys(categories)),
+            "comment": comment_el.text.strip() if comment_el is not None and comment_el.text else "",
+            "doi": doi_el.text.strip() if doi_el is not None and doi_el.text else "",
+        }
+
+
+def _fetch_api_metadata_batch(
+    arxiv_ids: list[str],
+    metadata: dict[str, dict],
+    *,
+    session: requests.Session | None = None,
+) -> None:
+    if not arxiv_ids:
+        return
+
+    params = {"id_list": ",".join(arxiv_ids), "max_results": len(arxiv_ids)}
+    try:
+        response = _request_arxiv_api(params, session=session)
+    except Exception as exc:
+        if len(arxiv_ids) == 1:
+            LOGGER.warning("arXiv API metadata request failed for %s: %s", arxiv_ids[0], exc)
+            return
+
+        midpoint = len(arxiv_ids) // 2
+        LOGGER.warning(
+            "arXiv API metadata batch request failed for %d papers; retrying in smaller chunks: %s",
+            len(arxiv_ids),
+            exc,
+        )
+        time.sleep(_ARXIV_API_DELAY)
+        _fetch_api_metadata_batch(arxiv_ids[:midpoint], metadata, session=session)
+        time.sleep(_ARXIV_API_DELAY)
+        _fetch_api_metadata_batch(arxiv_ids[midpoint:], metadata, session=session)
+        return
+
+    try:
+        root = ET.fromstring(response.text)
+    except ET.ParseError as exc:
+        LOGGER.warning("arXiv API XML parse error: %s", exc)
+        return
+
+    _merge_api_metadata(root, metadata)
+
+
 def _fetch_api_metadata(arxiv_ids: list[str], session: requests.Session | None = None) -> dict[str, dict]:
     metadata: dict[str, dict] = {}
+    deduped_ids = list(dict.fromkeys(arxiv_ids))
+    if not deduped_ids:
+        return metadata
 
-    for index in range(0, len(arxiv_ids), _ARXIV_API_BATCH_SIZE):
+    time.sleep(_ARXIV_API_DELAY)
+
+    for index in range(0, len(deduped_ids), _ARXIV_METADATA_BATCH_SIZE):
         if index > 0:
             time.sleep(_ARXIV_API_DELAY)
-
-        batch = arxiv_ids[index : index + _ARXIV_API_BATCH_SIZE]
-        params = {"id_list": ",".join(batch), "max_results": len(batch)}
-
-        try:
-            response = request_with_backoff(
-                "GET",
-                _ARXIV_API_URL,
-                params=params,
-                timeout=30,
-                attempts=3,
-                base_delay=1.5,
-                session=session,
-            )
-        except Exception as exc:
-            LOGGER.warning("arXiv API batch request failed: %s", exc)
-            continue
-
-        try:
-            root = ET.fromstring(response.text)
-        except ET.ParseError as exc:
-            LOGGER.warning("arXiv API XML parse error: %s", exc)
-            continue
-
-        for entry in root.findall("atom:entry", _ATOM_NS):
-            id_el = entry.find("atom:id", _ATOM_NS)
-            if id_el is None or not id_el.text:
-                continue
-
-            id_match = re.search(r"abs/(.+?)(?:v\d+)?$", id_el.text)
-            if not id_match:
-                continue
-
-            arxiv_id = id_match.group(1)
-
-            affiliations: list[str] = []
-            for author in entry.findall("atom:author", _ATOM_NS):
-                for affil in author.findall("arxiv:affiliation", _ATOM_NS):
-                    if affil.text and affil.text.strip():
-                        affiliations.append(affil.text.strip())
-
-            categories = [
-                cat.get("term", "").strip()
-                for cat in entry.findall("atom:category", _ATOM_NS)
-                if cat.get("term", "").strip()
-            ]
-
-            comment_el = entry.find("arxiv:comment", _ATOM_NS)
-            doi_el = entry.find("arxiv:doi", _ATOM_NS)
-
-            metadata[arxiv_id] = {
-                "api_affiliations": "\n".join(dict.fromkeys(affiliations)),
-                "categories": list(dict.fromkeys(categories)),
-                "comment": comment_el.text.strip() if comment_el is not None and comment_el.text else "",
-                "doi": doi_el.text.strip() if doi_el is not None and doi_el.text else "",
-            }
+        batch = deduped_ids[index : index + _ARXIV_METADATA_BATCH_SIZE]
+        _fetch_api_metadata_batch(batch, metadata, session=session)
 
     return metadata
 

@@ -13,7 +13,17 @@ import numpy as np
 LOGGER = logging.getLogger(__name__)
 
 DIMENSION = 768
-SPECTER2_MODEL = "allenai/specter2"
+EMBEDDING_MODEL_CANDIDATES = tuple(
+    dict.fromkeys(
+        model
+        for model in (
+            os.environ.get("CV_ARXIV_EMBEDDING_MODEL"),
+            "allenai/specter2_base",
+            "allenai/specter",
+        )
+        if model
+    )
+)
 
 _service_instance: EmbeddingService | None = None
 _service_lock = threading.Lock()
@@ -58,9 +68,18 @@ class EmbeddingService:
             return
         from sentence_transformers import SentenceTransformer
 
-        LOGGER.info("Loading SPECTER2 model (first call may download ~420MB)...")
-        self._model = SentenceTransformer(SPECTER2_MODEL)
-        LOGGER.info("SPECTER2 model loaded")
+        last_exc: Exception | None = None
+        for model_name in EMBEDDING_MODEL_CANDIDATES:
+            try:
+                LOGGER.info("Loading embedding model %s (first call may download model weights)...", model_name)
+                self._model = SentenceTransformer(model_name)
+                LOGGER.info("Embedding model loaded: %s", model_name)
+                return
+            except Exception as exc:
+                last_exc = exc
+                LOGGER.warning("Failed to load embedding model %s: %s", model_name, exc)
+
+        raise RuntimeError("Unable to load any embedding model") from last_exc
 
     def encode(self, texts: list[str]) -> np.ndarray:
         """Encode texts into L2-normalized embeddings."""

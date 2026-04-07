@@ -14,6 +14,45 @@ from app.services.http_client import request_with_backoff
 LOGGER = logging.getLogger(__name__)
 
 
+def _looks_like_pdf(content: bytes | None) -> bool:
+    if not content:
+        return False
+    return content.lstrip().startswith(b"%PDF-")
+
+
+def _download_pdf(pdf_link: str, session: requests.Session | None = None) -> bytes:
+    response = request_with_backoff(
+        "GET",
+        pdf_link,
+        timeout=45,
+        attempts=3,
+        base_delay=1.5,
+        headers={"Accept": "application/pdf"},
+        session=session,
+    )
+    content = response.content
+    if not _looks_like_pdf(content):
+        content_type = (response.headers.get("Content-Type") or "").split(";", 1)[0] or "unknown"
+        raise ValueError(f"Response was not a PDF (content-type: {content_type})")
+    return content
+
+
+def _render_thumbnail(pdf_content: bytes, out_path: Path) -> None:
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+        tmp.write(pdf_content)
+        tmp.flush()
+
+        with pdfplumber.open(tmp.name) as pdf:
+            if not pdf.pages:
+                raise ValueError("PDF had no pages")
+            first_page = pdf.pages[0]
+            im = first_page.to_image(resolution=72)
+            im.save(str(out_path), format="PNG")
+
+            if hasattr(im.original, "close"):
+                im.original.close()
+
+
 def generate_thumbnail(
     arxiv_id: str,
     pdf_link: str,
@@ -30,34 +69,18 @@ def generate_thumbnail(
         return True
 
     try:
-        content_to_use = pdf_content
-        if content_to_use is None:
-            response = request_with_backoff(
-                "GET",
-                pdf_link,
-                timeout=30,
-                attempts=2,
-                base_delay=1.0,
-                session=session,
-            )
-            content_to_use = response.content
+        if pdf_content is not None:
+            try:
+                if not _looks_like_pdf(pdf_content):
+                    raise ValueError("Provided PDF bytes were not a valid PDF")
+                _render_thumbnail(pdf_content, out_path)
+                LOGGER.info("Successfully generated thumbnail for %s", arxiv_id)
+                return True
+            except Exception as exc:
+                LOGGER.debug("Retrying thumbnail generation for %s with a fresh PDF download: %s", arxiv_id, exc)
 
-        with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-            tmp.write(content_to_use)
-            tmp.flush()
-
-            with pdfplumber.open(tmp.name) as pdf:
-                if not pdf.pages:
-                    return False
-                first_page = pdf.pages[0]
-                # Render to image using resolution 72 (default is fine for small thumbnails)
-                im = first_page.to_image(resolution=72)
-                im.save(str(out_path), format="PNG")
-
-                # Cleanup resources
-                if hasattr(im.original, "close"):
-                    im.original.close()
-
+        content_to_use = _download_pdf(pdf_link, session=session)
+        _render_thumbnail(content_to_use, out_path)
         LOGGER.info("Successfully generated thumbnail for %s", arxiv_id)
         return True
     except Exception as exc:

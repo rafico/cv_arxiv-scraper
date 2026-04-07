@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -112,3 +112,24 @@ class TestEmbeddingService:
     def test_add_empty_list(self, index_dir):
         service = _make_service(index_dir)
         assert service.add_papers([], []) == 0
+
+    def test_load_model_falls_back_to_next_candidate(self, index_dir, monkeypatch):
+        service = EmbeddingService(index_dir)
+        monkeypatch.setattr(
+            "app.services.embeddings.EMBEDDING_MODEL_CANDIDATES",
+            ("broken-model", "working-model"),
+        )
+
+        loaded_models = []
+
+        def fake_loader(model_name):
+            loaded_models.append(model_name)
+            if model_name == "broken-model":
+                raise RuntimeError("bad model")
+            return MagicMock()
+
+        with patch("sentence_transformers.SentenceTransformer", side_effect=fake_loader):
+            service._load_model()
+
+        assert loaded_models == ["broken-model", "working-model"]
+        assert service._model is not None

@@ -87,6 +87,41 @@ class HttpClientTests(unittest.TestCase):
     def test_resolve_user_agent_falls_back_to_default(self):
         self.assertTrue(resolve_user_agent({}).startswith("cv-arxiv-scraper/"))
 
+    def test_request_with_backoff_reconfigures_session_for_bulk_profile(self):
+        session = create_session(
+            scraper_config={
+                "ingest": {
+                    "rate_limit": {
+                        "requests_per_second": 5.0,
+                        "burst": 4,
+                    }
+                }
+            },
+            rate_limit_profile="interactive",
+        )
+        self.addCleanup(session.close)
+
+        response = Mock(spec=requests.Response)
+        response.raise_for_status.return_value = None
+        session.request = Mock(return_value=response)
+
+        request_with_backoff(
+            "GET",
+            "https://example.invalid/data",
+            session=session,
+            scraper_config={
+                "ingest": {
+                    "rate_limit": {
+                        "requests_per_second": 5.0,
+                        "burst": 4,
+                    }
+                }
+            },
+            rate_limit_profile="bulk",
+        )
+
+        self.assertEqual(getattr(session, "_cv_arxiv_rate_limit_settings").profile, "bulk")
+
 
 if __name__ == "__main__":
     unittest.main()

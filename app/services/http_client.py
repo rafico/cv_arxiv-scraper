@@ -68,10 +68,18 @@ def request_with_backoff(
 ) -> requests.Response:
     """Run an HTTP request with bounded retries and exponential backoff."""
     last_exc: Exception | None = None
+    requested_settings = resolve_rate_limit_settings(scraper_config, profile=rate_limit_profile)
+    requested_user_agent = user_agent or resolve_user_agent(scraper_config)
     if session is not None:
         limiter = getattr(session, _SESSION_LIMITER_ATTR, None)
+        session_settings = getattr(session, _SESSION_RATE_LIMIT_ATTR, None)
         effective_user_agent = getattr(session, _SESSION_USER_AGENT_ATTR, None)
-        if limiter is None or effective_user_agent is None:
+        if (
+            limiter is None
+            or effective_user_agent is None
+            or session_settings != requested_settings
+            or effective_user_agent != requested_user_agent
+        ):
             limiter, effective_user_agent = _configure_session(
                 session,
                 scraper_config=scraper_config,
@@ -83,8 +91,8 @@ def request_with_backoff(
         if request_headers is not None:
             kwargs["headers"] = _headers_with_user_agent(request_headers, user_agent=effective_user_agent)
     else:
-        effective_user_agent = user_agent or resolve_user_agent(scraper_config)
-        limiter = get_shared_rate_limiter(resolve_rate_limit_settings(scraper_config, profile=rate_limit_profile))
+        effective_user_agent = requested_user_agent
+        limiter = get_shared_rate_limiter(requested_settings)
         kwargs["headers"] = _headers_with_user_agent(kwargs.get("headers"), user_agent=effective_user_agent)
         do_request = requests.request
 

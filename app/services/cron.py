@@ -6,7 +6,6 @@ import logging
 import re
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ def _project_dir() -> Path:
 
 
 def _python_bin() -> str:
-    return sys.executable
+    return str(Path.home() / "venv" / "bin" / "python")
 
 
 def _build_cron_line(hour: int, minute: int, mode: str) -> str:
