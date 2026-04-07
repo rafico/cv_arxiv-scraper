@@ -50,6 +50,11 @@ app = [
   "static/**/*",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "e2e: End-to-end browser tests (require Playwright)",
+]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"
