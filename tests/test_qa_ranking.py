@@ -19,13 +19,9 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
 
-from app.models import Paper, RankingConfig, db
+from app.models import Paper, db
 from app.services.ranking import (
     FEEDBACK_BOOST,
-    FEEDBACK_WEIGHTS,
-    HALF_LIFE_DAYS,
-    LLM_RELEVANCE_WEIGHT,
-    MATCH_TYPE_WEIGHTS,
     RESOURCE_SIGNAL_WEIGHT,
     TERM_MATCH_WEIGHT,
     combined_rank_score,
