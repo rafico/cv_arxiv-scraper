@@ -162,19 +162,24 @@ class FollowMuteFromPaperTests(FlaskDBTestCase):
             return session["settings_csrf_token"]
 
     def test_follow_adds_author_to_whitelist(self):
+        # Use an author NOT already in TEST_SCRAPER_CONFIG whitelists
+        new_paper = _make_paper(1, authors="New Author, Someone Else")
+        db.session.add(new_paper)
+        db.session.commit()
+
         token = self._csrf_token()
         response = self.client.post(
-            f"/api/papers/{self.paper.id}/follow",
+            f"/api/papers/{new_paper.id}/follow",
             headers={"X-CSRF-Token": token},
         )
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
-        self.assertEqual(data["term"], "Jane Doe")
+        self.assertEqual(data["term"], "New Author")
         self.assertTrue(data["added"])
 
         # Verify config updated
         config = self.app.config["SCRAPER_CONFIG"]
-        self.assertIn("Jane Doe", config["whitelists"]["authors"])
+        self.assertIn("New Author", config["whitelists"]["authors"])
 
     def test_mute_adds_topic_to_mute_list(self):
         token = self._csrf_token()
@@ -264,8 +269,8 @@ class BulkFeedbackTests(FlaskDBTestCase):
             json={"paper_ids": [], "action": "save"},
             headers={"X-CSRF-Token": token},
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["processed"], 0)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.get_json())
 
 
 if __name__ == "__main__":

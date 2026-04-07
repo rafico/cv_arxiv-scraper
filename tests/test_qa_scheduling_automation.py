@@ -8,7 +8,7 @@ from unittest.mock import patch
 import yaml
 
 from app import create_app
-from tests.helpers import FlaskDBTestCase, TEST_SCRAPER_CONFIG
+from tests.helpers import TEST_SCRAPER_CONFIG, FlaskDBTestCase
 
 
 class SchedulingAutomationQaTests(FlaskDBTestCase):

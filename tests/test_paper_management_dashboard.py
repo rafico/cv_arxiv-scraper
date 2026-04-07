@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from app.models import db
 from tests.helpers import FlaskDBTestCase
 from tests.test_new_features import _make_paper
-from app.models import db
 
 
 class PaperManagementDashboardTests(FlaskDBTestCase):

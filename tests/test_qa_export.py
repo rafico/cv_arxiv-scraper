@@ -139,7 +139,6 @@ class HtmlReportTests(FlaskDBTestCase):
 
     def setUp(self):
         super().setUp()
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
         today = date.today()
 
         db.session.add(_make_paper(0, title="Recent Paper"))
@@ -178,7 +177,6 @@ class HtmlReportTests(FlaskDBTestCase):
         self.assertIn("Recent Paper", html)
 
     def test_output_path_writes_file(self):
-        import tempfile
         from pathlib import Path
 
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:

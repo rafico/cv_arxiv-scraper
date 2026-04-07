@@ -7,18 +7,12 @@ digest endpoints, Zotero sync, and post-scrape enrichment pipeline.
 
 from __future__ import annotations
 
-import copy
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
-from types import SimpleNamespace
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from app.models import (
-    Collection,
     FeedSource,
     Paper,
-    PaperCollection,
-    PaperFeedback,
     db,
 )
 from tests.helpers import FlaskDBTestCase
