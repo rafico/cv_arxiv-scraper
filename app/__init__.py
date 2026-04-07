@@ -220,7 +220,13 @@ def _ensure_secret_key(instance_path: Path) -> str:
 
 
 def create_app(config_overrides: dict | None = None) -> Flask:
-    app = Flask(__name__, instance_relative_config=True)
+    overrides = dict(config_overrides or {})
+    instance_path_override = overrides.pop("INSTANCE_PATH", None)
+    flask_kwargs = {"instance_relative_config": True}
+    if instance_path_override is not None:
+        flask_kwargs["instance_path"] = str(Path(instance_path_override).expanduser().resolve())
+
+    app = Flask(__name__, **flask_kwargs)
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     app.config.update(
         SQLALCHEMY_DATABASE_URI=DEFAULT_DATABASE_URI,
@@ -228,8 +234,8 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         SECRET_KEY=_ensure_secret_key(Path(app.instance_path)),
     )
 
-    if config_overrides:
-        app.config.update(config_overrides)
+    if overrides:
+        app.config.update(overrides)
 
     # instance_path already created above before _ensure_secret_key call
     app.config.setdefault("FAISS_INDEX_DIR", str(Path(app.instance_path) / "faiss_index"))

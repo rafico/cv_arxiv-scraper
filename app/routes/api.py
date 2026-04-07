@@ -433,12 +433,23 @@ def paper_feedback(paper_id: int):
 @api_bp.route("/papers/<int:paper_id>/explain", methods=["GET"])
 def paper_explain(paper_id: int):
     """Return ranking explanations for a paper."""
-    from app.services.ranking import generate_ranking_explanation
+    from app.services.ranking import explain_score, generate_ranking_explanation
 
     paper = db.session.get(Paper, paper_id) or abort(404)
     config = current_app.config["SCRAPER_CONFIG"]
+    match_types = [part.strip() for part in (paper.match_type or "").split("+") if part.strip()]
+    breakdown = explain_score(
+        match_types=match_types,
+        matched_terms_count=len(paper.matched_terms_list),
+        publication_dt=paper.publication_dt,
+        resource_count=len(paper.resource_links_list),
+        llm_relevance_score=paper.llm_relevance_score,
+        citation_count=paper.citation_count,
+        feedback_score=int(paper.feedback_score or 0),
+        config=config,
+    )
     explanations = generate_ranking_explanation(paper, config=config)
-    return jsonify({"paper_id": paper.id, "explanations": explanations})
+    return jsonify({"paper_id": paper.id, **breakdown, "explanations": explanations})
 
 
 @api_bp.route("/papers/<int:paper_id>/follow", methods=["POST"])

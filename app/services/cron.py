@@ -80,7 +80,7 @@ def install_cron_job(hour: int, minute: int, mode: str) -> dict:
 
     try:
         _set_crontab(new_crontab)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+    except Exception as exc:
         LOGGER.exception("Failed to install cron job")
         return {"success": False, "message": f"Failed to install cron job: {exc}"}
 
@@ -97,7 +97,7 @@ def remove_cron_job() -> dict:
     cleaned = _remove_our_lines(existing)
     try:
         _set_crontab(cleaned)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+    except Exception as exc:
         LOGGER.exception("Failed to remove cron job")
         return {"success": False, "message": f"Failed to remove cron job: {exc}"}
 
