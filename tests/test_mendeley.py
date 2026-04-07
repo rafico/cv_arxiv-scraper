@@ -41,9 +41,12 @@ class MendeleyClientTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _write_token(self, token="test-access-token"):
+    def _write_token(self, token="test-access-token", refresh_token=None):
+        token_data = {"access_token": token}
+        if refresh_token is not None:
+            token_data["refresh_token"] = refresh_token
         self.token_path.write_text(
-            json.dumps({"access_token": token}),
+            json.dumps(token_data),
             encoding="utf-8",
         )
 
@@ -140,6 +143,62 @@ class MendeleyClientTests(unittest.TestCase):
         result = client.check_connection()
 
         self.assertEqual(result["status"], "expired")
+
+    @patch("app.services.mendeley.requests.post")
+    @patch("app.services.mendeley.requests.get")
+    def test_check_connection_refreshes_expired_token(self, mock_get, mock_post):
+        self._write_creds()
+        self._write_token(token="expired-token", refresh_token="refresh-123")
+        mock_get.side_effect = [
+            Mock(status_code=401),
+            Mock(status_code=200),
+        ]
+        mock_post.return_value = Mock(status_code=200)
+        mock_post.return_value.raise_for_status = Mock()
+        mock_post.return_value.json.return_value = {
+            "access_token": "fresh-token",
+            "refresh_token": "refresh-123",
+        }
+
+        client = self._client()
+        result = client.check_connection()
+
+        self.assertEqual(result["status"], "connected")
+        saved = json.loads(self.token_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["access_token"], "fresh-token")
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch("app.services.mendeley.requests.post")
+    def test_add_document_retries_after_refresh(self, mock_post):
+        self._write_creds()
+        self._write_token(token="expired-token", refresh_token="refresh-123")
+
+        unauthorized = Mock(status_code=401)
+        unauthorized.raise_for_status.side_effect = None
+
+        refresh_response = Mock(status_code=200)
+        refresh_response.raise_for_status = Mock()
+        refresh_response.json.return_value = {
+            "access_token": "fresh-token",
+            "refresh_token": "refresh-123",
+        }
+
+        create_response = Mock(status_code=201)
+        create_response.raise_for_status = Mock()
+        create_response.json.return_value = {"id": "doc-789"}
+
+        mock_post.side_effect = [
+            unauthorized,
+            refresh_response,
+            create_response,
+        ]
+
+        client = self._client()
+        result = client.add_document(_make_paper())
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["document_id"], "doc-789")
+        self.assertEqual(mock_post.call_count, 3)
 
     def test_check_connection_no_credentials(self):
         client = self._client()

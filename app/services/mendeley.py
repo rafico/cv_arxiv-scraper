@@ -72,13 +72,41 @@ class MendeleyClient:
         os.chmod(self.token_path, 0o600)
         self._token_data = token_data
 
+    def _headers_for_access_token(self, access_token: str) -> dict:
+        return {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/vnd.mendeley-document.1+json",
+        }
+
     def _get_headers(self) -> dict:
         """Get authorization headers using the stored token."""
         token = self._load_token()
-        return {
-            "Authorization": f"Bearer {token['access_token']}",
-            "Content-Type": "application/vnd.mendeley-document.1+json",
-        }
+        return self._headers_for_access_token(token["access_token"])
+
+    def _refresh_access_token(self) -> dict:
+        """Refresh the stored OAuth token using the refresh token."""
+        token = self._load_token()
+        refresh_token = token.get("refresh_token")
+        if not refresh_token:
+            raise RuntimeError("Mendeley token expired and cannot be refreshed automatically.")
+
+        creds = self._load_credentials()
+        resp = requests.post(
+            MENDELEY_TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": creds["client_id"],
+                "client_secret": creds["client_secret"],
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        refreshed = resp.json()
+        if not refreshed.get("refresh_token"):
+            refreshed["refresh_token"] = refresh_token
+        self._save_token(refreshed)
+        return refreshed
 
     def check_connection(self) -> dict:
         """Verify token validity and return status dict.
@@ -111,6 +139,19 @@ class MendeleyClient:
                 headers={"Authorization": f"Bearer {token['access_token']}"},
                 timeout=10,
             )
+            if resp.status_code == 401:
+                try:
+                    refreshed = self._refresh_access_token()
+                except Exception:
+                    return {
+                        "status": "expired",
+                        "message": "Mendeley token expired. Re-authorize to reconnect.",
+                    }
+                resp = requests.get(
+                    f"{MENDELEY_API_BASE}/profiles/me",
+                    headers={"Authorization": f"Bearer {refreshed['access_token']}"},
+                    timeout=10,
+                )
             if resp.status_code == 200:
                 return {
                     "status": "connected",
@@ -246,6 +287,14 @@ class MendeleyClient:
                 json=doc,
                 timeout=30,
             )
+            if resp.status_code == 401:
+                self._refresh_access_token()
+                resp = requests.post(
+                    f"{MENDELEY_API_BASE}/documents",
+                    headers=self._get_headers(),
+                    json=doc,
+                    timeout=30,
+                )
             resp.raise_for_status()
             result = resp.json()
             return {

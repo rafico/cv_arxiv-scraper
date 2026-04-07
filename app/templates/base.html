@@ -8,6 +8,64 @@
     {% endif %}
     <title>{% block title %}ArXiv CV Scraper{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script>
+        (() => {
+            try {
+                const storedTheme = localStorage.getItem("cv-arxiv-theme");
+                const preferredTheme = storedTheme || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+                if (preferredTheme === "dark") {
+                    document.documentElement.dataset.theme = "dark";
+                }
+            } catch (_error) {
+                // Ignore storage and media-query failures; the app will stay in light mode.
+            }
+        })();
+    </script>
+    <style>
+        html[data-theme="dark"] {
+            color-scheme: dark;
+            background-color: #0f172a;
+        }
+        html[data-theme="dark"] body,
+        html[data-theme="dark"] .bg-white {
+            background-color: #0f172a !important;
+        }
+        html[data-theme="dark"] .bg-gray-50,
+        html[data-theme="dark"] .bg-gray-50\/60,
+        html[data-theme="dark"] .from-gray-50,
+        html[data-theme="dark"] .to-gray-100 {
+            background-color: #111827 !important;
+        }
+        html[data-theme="dark"] .bg-gray-100 {
+            background-color: #1f2937 !important;
+        }
+        html[data-theme="dark"] .border-gray-100,
+        html[data-theme="dark"] .border-gray-200 {
+            border-color: #334155 !important;
+        }
+        html[data-theme="dark"] .text-gray-900 {
+            color: #f8fafc !important;
+        }
+        html[data-theme="dark"] .text-gray-800,
+        html[data-theme="dark"] .text-gray-700,
+        html[data-theme="dark"] .text-gray-600 {
+            color: #cbd5e1 !important;
+        }
+        html[data-theme="dark"] .text-gray-500,
+        html[data-theme="dark"] .text-gray-400,
+        html[data-theme="dark"] .text-gray-300 {
+            color: #94a3b8 !important;
+        }
+        html[data-theme="dark"] .bg-gray-900 {
+            background-color: #e2e8f0 !important;
+            color: #0f172a !important;
+        }
+        html[data-theme="dark"] .hover\:bg-gray-50:hover,
+        html[data-theme="dark"] .hover\:bg-gray-100:hover,
+        html[data-theme="dark"] .hover\:bg-gray-200:hover {
+            background-color: #1e293b !important;
+        }
+    </style>
 </head>
 <body class="h-full">
     <nav class="bg-white border-b border-gray-100">
@@ -44,6 +102,13 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button id="theme-toggle" type="button" onclick="toggleTheme()"
+                            class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                            aria-label="Toggle dark mode"
+                            title="Toggle dark mode">
+                        <span id="theme-toggle-icon" aria-hidden="true">◐</span>
+                        <span id="theme-toggle-label" class="hidden sm:inline">Theme</span>
+                    </button>
                     <button id="mobile-menu-btn" onclick="toggleMobileMenu()"
                             class="sm:hidden p-1.5 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-50">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -188,6 +253,53 @@
     </div>
 
     <script>
+        const THEME_STORAGE_KEY = "cv-arxiv-theme";
+
+        function applyTheme(theme) {
+            const root = document.documentElement;
+            const normalizedTheme = theme === "dark" ? "dark" : "light";
+            if (normalizedTheme === "dark") {
+                root.dataset.theme = "dark";
+            } else {
+                delete root.dataset.theme;
+            }
+
+            const button = document.getElementById("theme-toggle");
+            const label = document.getElementById("theme-toggle-label");
+            const icon = document.getElementById("theme-toggle-icon");
+            if (!button || !label || !icon) {
+                return;
+            }
+            const nextTheme = normalizedTheme === "dark" ? "light" : "dark";
+            button.setAttribute("aria-label", `Switch to ${nextTheme} mode`);
+            button.setAttribute("title", `Switch to ${nextTheme} mode`);
+            label.textContent = normalizedTheme === "dark" ? "Dark" : "Light";
+            icon.textContent = normalizedTheme === "dark" ? "☀" : "◐";
+        }
+
+        function getPreferredTheme() {
+            try {
+                const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+                if (storedTheme === "dark" || storedTheme === "light") {
+                    return storedTheme;
+                }
+            } catch (_error) {
+                // Ignore storage failures and fall back to the system preference.
+            }
+            return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+            const nextTheme = currentTheme === "dark" ? "light" : "dark";
+            try {
+                localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+            } catch (_error) {
+                // Ignore storage failures; the current page state will still update.
+            }
+            applyTheme(nextTheme);
+        }
+
         function toggleShortcutHelp() {
             document.getElementById("shortcut-overlay").classList.toggle("hidden");
         }
@@ -464,6 +576,8 @@
         function closeScrapeAndReload() {
             window.location.href = "/";
         }
+
+        applyTheme(getPreferredTheme());
     </script>
     {% block scripts %}{% endblock %}
 </body>

@@ -496,6 +496,13 @@ def mendeley_auth():
     return redirect(result["auth_url"])
 
 
+@settings_bp.route("/settings/mendeley-status", methods=["GET"])
+def mendeley_status():
+    from app.services.mendeley import MendeleyClient
+
+    return jsonify(MendeleyClient().check_connection())
+
+
 @settings_bp.route("/settings/mendeley-callback", methods=["GET"])
 def mendeley_callback():
     from app.services.mendeley import MendeleyClient
@@ -541,15 +548,38 @@ def mendeley_sync():
             PaperFeedback.paper_id == Paper.id,
             PaperFeedback.action == "save",
         ),
-    ).all()
+    ).distinct().all()
+
+    papers_to_sync = [paper for paper in saved_papers if not paper.mendeley_doc_id]
+    skipped_count = len(saved_papers) - len(papers_to_sync)
 
     success_count = 0
-    for paper in saved_papers:
+    failure_count = 0
+    for paper in papers_to_sync:
         result = client.add_document(paper)
         if result["success"]:
+            doc_id = result.get("document_id")
+            if doc_id:
+                paper.mendeley_doc_id = str(doc_id)
             success_count += 1
+        else:
+            failure_count += 1
 
-    flash(f"Synced {success_count}/{len(saved_papers)} papers to Mendeley.", "success")
+    if success_count:
+        db.session.commit()
+
+    message = f"Synced {success_count} new papers to Mendeley"
+    if skipped_count:
+        message += f" ({skipped_count} already linked"
+        if failure_count:
+            message += f", {failure_count} failed"
+        message += ")."
+    elif failure_count:
+        message += f" ({failure_count} failed)."
+    else:
+        message += "."
+
+    flash(message, "success" if failure_count == 0 else "error")
     return redirect(url_for("settings.view_settings", section="automation"))
 
 
