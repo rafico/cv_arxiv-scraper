@@ -133,7 +133,7 @@ class DashboardRouteTests(FlaskDBTestCase):
         text = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(f'/papers/{paper.id}/thumbnail.png', text)
+        self.assertIn(f"/papers/{paper.id}/thumbnail.png", text)
         self.assertNotIn("cdn-thumbnails.huggingface.co", text)
 
     @patch("app.services.mendeley.MendeleyClient.check_connection")

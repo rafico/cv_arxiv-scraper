@@ -110,7 +110,9 @@ class GetCronStatusTests(unittest.TestCase):
 
     @patch("app.services.cron._get_current_crontab")
     def test_digest_mode_detected(self, mock_crontab):
-        mock_crontab.return_value = f"15 10 * * * cd /proj && python digest_cli.py --send-only >> /proj/cron.log 2>&1 {CRON_TAG}\n"
+        mock_crontab.return_value = (
+            f"15 10 * * * cd /proj && python digest_cli.py --send-only >> /proj/cron.log 2>&1 {CRON_TAG}\n"
+        )
         status = get_cron_status()
         self.assertTrue(status["installed"])
         self.assertEqual(status["mode"], "digest")
