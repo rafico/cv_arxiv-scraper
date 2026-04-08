@@ -55,7 +55,9 @@ class CsrfSessionQaTests(FlaskDBTestCase):
 class CredentialPermissionQaTests(FlaskDBTestCase):
     def test_mendeley_credentials_written_with_restricted_permissions(self):
         credentials_path = Path(self._tmpdir.name) / "mendeley_credentials.json"
-        client = MendeleyClient(credentials_path=credentials_path, token_path=Path(self._tmpdir.name) / ".mendeley_token")
+        client = MendeleyClient(
+            credentials_path=credentials_path, token_path=Path(self._tmpdir.name) / ".mendeley_token"
+        )
 
         client._save_credentials("client-id", "client-secret")
 

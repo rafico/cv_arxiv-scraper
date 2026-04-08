@@ -542,13 +542,17 @@ def mendeley_sync():
         flash(f"Mendeley not connected: {status['message']}", "error")
         return redirect(url_for("settings.view_settings", section="automation"))
 
-    saved_papers = Paper.query.join(
-        PaperFeedback,
-        db.and_(
-            PaperFeedback.paper_id == Paper.id,
-            PaperFeedback.action == "save",
-        ),
-    ).distinct().all()
+    saved_papers = (
+        Paper.query.join(
+            PaperFeedback,
+            db.and_(
+                PaperFeedback.paper_id == Paper.id,
+                PaperFeedback.action == "save",
+            ),
+        )
+        .distinct()
+        .all()
+    )
 
     papers_to_sync = [paper for paper in saved_papers if not paper.mendeley_doc_id]
     skipped_count = len(saved_papers) - len(papers_to_sync)

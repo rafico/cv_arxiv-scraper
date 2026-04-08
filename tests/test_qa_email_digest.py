@@ -57,7 +57,9 @@ class GmailOAuthQaTests(unittest.TestCase):
             credentials_path.write_text("{}", encoding="utf-8")
             token_path.write_text("{}", encoding="utf-8")
 
-            with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", side_effect=ValueError("bad")):
+            with patch(
+                "google.oauth2.credentials.Credentials.from_authorized_user_file", side_effect=ValueError("bad")
+            ):
                 status = check_gmail_auth_status(credentials_path=credentials_path, token_path=token_path)
 
         self.assertEqual(status["status"], "invalid")
@@ -252,7 +254,9 @@ class DigestCliQaTests(unittest.TestCase):
     @patch("app.cli.digest.send_digest")
     @patch("app.cli.digest.run_scrape")
     @patch("app.cli.digest.create_app")
-    def test_cli_send_only_dry_run_skips_scrape_and_prepares_digest(self, mock_create_app, mock_run_scrape, mock_send_digest):
+    def test_cli_send_only_dry_run_skips_scrape_and_prepares_digest(
+        self, mock_create_app, mock_run_scrape, mock_send_digest
+    ):
         fake_app = MagicMock()
         mock_create_app.return_value = fake_app
         mock_send_digest.return_value = {"papers_count": 1, "sent": False, "recipient": "digest@example.com"}
