@@ -299,8 +299,23 @@
                 {% for author in paper.authors.split(', ') %}{% if not loop.first %}, {% endif %}<a href="{{ url_for('dashboard.index', author=author.strip(), timeframe='all') }}" class="hover:text-blue-600 hover:underline" onclick="event.stopPropagation()">{{ author.strip() }}</a>{% endfor %}
             </p>
 
-            {# ── Summary ── #}
-            <p class="text-xs text-gray-600 leading-relaxed mb-3" style="-webkit-line-clamp: {{ preferences.display.summary_lines }}; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;">{{ paper.summary_text }}</p>
+            {# ── Summary (click to expand full abstract) ── #}
+            <div class="cursor-pointer group/summary mb-3" onclick="toggleSummary(this)">
+                <p class="summary-short text-xs text-gray-600 leading-relaxed mb-1"
+                   style="-webkit-line-clamp: {{ preferences.display.summary_lines }}; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;">
+                    {{ paper.summary_text }}
+                </p>
+                <div class="summary-full hidden">
+                    <p class="text-xs text-gray-600 leading-relaxed mb-1">{{ paper.summary_text }}</p>
+                    {% if paper.abstract_text and paper.abstract_text != paper.summary_text %}
+                    <p class="text-xs text-gray-500 leading-relaxed mt-2 pt-2 border-t border-gray-100">
+                        <span class="font-medium text-gray-400 text-[11px]">Abstract:</span><br>
+                        {{ paper.abstract_text }}
+                    </p>
+                    {% endif %}
+                </div>
+                <span class="summary-toggle-hint text-[11px] text-gray-300 group-hover/summary:text-gray-400 transition-colors">&#9656; full abstract</span>
+            </div>
 
             {# ── Feedback buttons + reading status (always visible for quick triage) ── #}
             <div class="flex items-center gap-2 mb-3 flex-wrap">
@@ -638,6 +653,16 @@
         const icon = document.getElementById("advanced-filter-icon");
         panel.classList.toggle("hidden");
         icon.classList.toggle("rotate-180");
+    }
+
+    function toggleSummary(container) {
+        const short = container.querySelector('.summary-short');
+        const full = container.querySelector('.summary-full');
+        const hint = container.querySelector('.summary-toggle-hint');
+        const isExpanded = !full.classList.contains('hidden');
+        short.classList.toggle('hidden');
+        full.classList.toggle('hidden');
+        if (hint) hint.textContent = isExpanded ? '\u25B8 full abstract' : '\u25BE collapse';
     }
 
     function toggleCardDetails(button) {
