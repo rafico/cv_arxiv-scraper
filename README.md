@@ -8,6 +8,8 @@ Stop drowning in the arXiv firehose. This tool matches papers against authors, l
 ![Flask](https://img.shields.io/badge/flask-3.1-green)
 ![License](https://img.shields.io/badge/license-MIT-gray)
 
+![Papers dashboard](app/static/help/papers_dashboard.png)
+
 ---
 
 ## Quick Start
