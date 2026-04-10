@@ -18,7 +18,7 @@ from flask import (
 )
 
 from app import _validate_config
-from app.constants import DEFAULT_LLM_MODEL
+from app.constants import DEFAULT_LLM_MODEL, GEMMA_MODELS
 from app.csrf import get_or_create_csrf_token, validate_csrf_token
 from app.models import Paper, db
 from app.services.llm_client import has_api_key, write_api_key
@@ -58,7 +58,7 @@ def _load_full_config() -> dict:
 def _llm_provider_defaults(provider: str) -> dict[str, str]:
     if provider == "ollama":
         return {
-            "model": "gemma3",
+            "model": "gemma4:e2b",
             "base_url": "http://localhost:11434/v1",
         }
     return {
@@ -137,6 +137,7 @@ def view_settings():
         digest_history=digest_history,
         scrape_history=scrape_history,
         llm_config=_build_llm_view_model(config),
+        gemma_models=GEMMA_MODELS,
         llm_key_configured=has_api_key(llm_key_path),
         llm_key_mask=_LLM_MASK_VALUE,
         csrf_token=get_or_create_csrf_token(),

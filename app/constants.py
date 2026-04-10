@@ -6,7 +6,24 @@ ARXIV_API_DELAY = 3
 ARXIV_API_BATCH_SIZE = 50
 
 DEFAULT_MAX_WORKERS = 8
-DEFAULT_LLM_MODEL = "google/gemma-3-27b-it:free"
+DEFAULT_LLM_MODEL = "google/gemma-4-31b-it:free"
+
+# ---------------------------------------------------------------------------
+# Supported Gemma models per provider — (model_id, label, vram_gb | None)
+# vram_gb is approximate VRAM for default Ollama quantisation; None for cloud.
+# ---------------------------------------------------------------------------
+GEMMA_MODELS: dict[str, list[tuple[str, str, int | None]]] = {
+    "ollama": [
+        ("gemma4:e2b", "Gemma 4 E2B", 7),
+        ("gemma4:e4b", "Gemma 4 E4B", 10),
+        ("gemma4:26b", "Gemma 4 26B MoE", 18),
+        ("gemma4:31b", "Gemma 4 31B", 20),
+    ],
+    "openrouter": [
+        ("google/gemma-4-31b-it:free", "Gemma 4 31B", None),
+        ("google/gemma-4-26b-a4b-it:free", "Gemma 4 26B MoE", None),
+    ],
+}
 
 # ---------------------------------------------------------------------------
 # Human-friendly arXiv category names

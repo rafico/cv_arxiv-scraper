@@ -471,7 +471,7 @@ class LLMSettingsTests(FlaskDBTestCase):
 
         config_path = Path(self.app.config["CONFIG_PATH"])
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        self.assertEqual(saved["llm"]["model"], "gemma3")
+        self.assertEqual(saved["llm"]["model"], "gemma4:e2b")
         self.assertEqual(saved["llm"]["base_url"], "http://localhost:11434/v1")
 
     def test_settings_page_shows_provider_select(self):
@@ -491,5 +491,5 @@ class LLMSettingsTests(FlaskDBTestCase):
 
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        self.assertIn('value="gemma3"', html)
+        self.assertIn("gemma4:e2b", html)
         self.assertIn('value="http://localhost:11434/v1"', html)

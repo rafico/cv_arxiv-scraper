@@ -731,8 +731,20 @@
 
                     <div>
                         <label for="llm_model" class="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                        <input type="text" name="llm_model" id="llm_model" value="{{ llm_config.model }}"
-                               class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                        <select name="llm_model" id="llm_model"
+                                class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                            {% for provider_key, models in gemma_models.items() %}
+                            {% for model_id, label, vram_gb in models %}
+                            <option value="{{ model_id }}" data-provider="{{ provider_key }}"
+                                    {% if llm_config.model == model_id %}selected{% endif %}>
+                                {{ label }}{% if vram_gb %} (~{{ vram_gb }} GB VRAM){% endif %}
+                            </option>
+                            {% endfor %}
+                            {% endfor %}
+                            <option value="__custom__" data-provider="all">Custom...</option>
+                        </select>
+                        <input type="text" id="llm_model_custom" placeholder="Enter custom model identifier"
+                               class="w-full mt-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900 hidden">
                     </div>
 
                     <div>
@@ -888,14 +900,50 @@
         var providerSelect = document.getElementById("llm_provider");
         var apiKeyGroup = document.getElementById("llm-api-key-group");
         var ollamaHint = document.getElementById("ollama-hint");
-        var modelInput = document.getElementById("llm_model");
+        var modelSelect = document.getElementById("llm_model");
+        var customInput = document.getElementById("llm_model_custom");
         var baseUrlInput = document.getElementById("llm_base_url");
-        if (!providerSelect || !apiKeyGroup || !ollamaHint || !modelInput || !baseUrlInput) return;
+        if (!providerSelect || !apiKeyGroup || !ollamaHint || !modelSelect || !baseUrlInput) return;
 
         var defaults = {
-            openrouter: { model: "google/gemma-3-27b-it:free", base_url: "https://openrouter.ai/api/v1" },
-            ollama: { model: "gemma3", base_url: "http://localhost:11434/v1" }
+            openrouter: { model: "google/gemma-4-31b-it:free", base_url: "https://openrouter.ai/api/v1" },
+            ollama: { model: "gemma4:e2b", base_url: "http://localhost:11434/v1" }
         };
+
+        var currentModel = "{{ llm_config.model }}";
+
+        function filterModelOptions() {
+            var provider = providerSelect.value;
+            var options = modelSelect.querySelectorAll("option");
+            var hasSelected = false;
+            options.forEach(function(opt) {
+                var optProvider = opt.getAttribute("data-provider");
+                var visible = optProvider === provider || optProvider === "all";
+                opt.style.display = visible ? "" : "none";
+                opt.disabled = !visible;
+                if (visible && opt.value === currentModel) {
+                    opt.selected = true;
+                    hasSelected = true;
+                }
+            });
+            /* If the saved model is not in the known list, select Custom */
+            if (!hasSelected) {
+                var customOpt = modelSelect.querySelector('option[value="__custom__"]');
+                if (customOpt) customOpt.selected = true;
+                if (customInput) {
+                    customInput.value = currentModel;
+                    customInput.classList.remove("hidden");
+                }
+            }
+            updateCustomVisibility();
+        }
+
+        function updateCustomVisibility() {
+            if (!customInput) return;
+            var isCustom = modelSelect.value === "__custom__";
+            customInput.classList.toggle("hidden", !isCustom);
+            if (isCustom) customInput.focus();
+        }
 
         function updateProviderState() {
             var isOllama = providerSelect.value === "ollama";
@@ -903,15 +951,42 @@
             ollamaHint.style.display = isOllama ? "" : "none";
         }
 
+        /* Override form submit to inject custom model value */
+        var llmForm = document.getElementById("llm-form");
+        if (llmForm) {
+            llmForm.addEventListener("submit", function() {
+                if (modelSelect.value === "__custom__" && customInput) {
+                    /* Create a hidden input with the real model value */
+                    var hidden = document.createElement("input");
+                    hidden.type = "hidden";
+                    hidden.name = "llm_model";
+                    hidden.value = customInput.value;
+                    llmForm.appendChild(hidden);
+                    modelSelect.name = "";
+                }
+            });
+        }
+
+        modelSelect.addEventListener("change", function() {
+            if (modelSelect.value !== "__custom__") currentModel = modelSelect.value;
+            updateCustomVisibility();
+        });
+
         providerSelect.addEventListener("change", function () {
-            var previous = providerSelect.value === "ollama" ? "openrouter" : "ollama";
             var nextDefaults = defaults[providerSelect.value];
-            if (modelInput.value === defaults[previous].model || !modelInput.value) modelInput.value = nextDefaults.model;
-            if (baseUrlInput.value === defaults[previous].base_url || !baseUrlInput.value) baseUrlInput.value = nextDefaults.base_url;
+            var prevDefaults = defaults[providerSelect.value === "ollama" ? "openrouter" : "ollama"];
+            if (baseUrlInput.value === prevDefaults.base_url || !baseUrlInput.value) baseUrlInput.value = nextDefaults.base_url;
             updateProviderState();
+            filterModelOptions();
+            /* Auto-select first visible option if current selection is hidden */
+            if (modelSelect.querySelector("option:checked") && modelSelect.querySelector("option:checked").disabled) {
+                var first = modelSelect.querySelector("option:not([disabled])");
+                if (first) first.selected = true;
+            }
         });
 
         updateProviderState();
+        filterModelOptions();
     })();
 
     function copyCallbackUri() {
