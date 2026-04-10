@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from pathlib import Path
 from secrets import token_urlsafe
 
@@ -39,20 +40,24 @@ def _normalize_multiline(value: str) -> list[str]:
 def _save_config_key(key: str, value) -> None:
     """Update a top-level key in config.yaml and in-memory config."""
     config_path = Path(current_app.config["CONFIG_PATH"])
-
-    with config_path.open("r", encoding="utf-8") as handle:
-        full_config = yaml.safe_load(handle)
-
+    full_config = _load_full_config()
     full_config[key] = value
 
     save_config(config_path, full_config)
-    current_app.config["SCRAPER_CONFIG"] = full_config
+    _activate_saved_config(full_config)
 
 
 def _load_full_config() -> dict:
     config_path = Path(current_app.config["CONFIG_PATH"])
-    with config_path.open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
+    if config_path.is_file():
+        with config_path.open("r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle)
+    return deepcopy(current_app.config["SCRAPER_CONFIG"])
+
+
+def _activate_saved_config(full_config: dict) -> None:
+    current_app.config["SCRAPER_CONFIG"] = full_config
+    current_app.config["USING_DEFAULT_CONFIG"] = False
 
 
 def _llm_provider_defaults(provider: str) -> dict[str, str]:
@@ -119,6 +124,11 @@ def view_settings():
     zotero_status = zotero_client.check_connection()
     zotero_collections = zotero_client.list_collections() if zotero_status["status"] == "connected" else []
     cron_config = get_cron_status()
+    config_save_path = Path(current_app.config["CONFIG_PATH"])
+    try:
+        config_save_path_label = str(config_save_path.relative_to(Path.cwd()))
+    except ValueError:
+        config_save_path_label = str(config_save_path)
 
     return render_template(
         "settings.html",
@@ -147,6 +157,8 @@ def view_settings():
         zotero_status=zotero_status,
         zotero_collections=zotero_collections,
         cron_config=cron_config,
+        using_default_config=bool(current_app.config.get("USING_DEFAULT_CONFIG", False)),
+        config_save_path_label=config_save_path_label,
     )
 
 
@@ -160,10 +172,7 @@ def save_settings():
         "affiliations": _normalize_multiline(request.form.get("affiliations", "")),
         "authors": _normalize_multiline(request.form.get("authors", "")),
     }
-
-    with config_path.open("r", encoding="utf-8") as handle:
-        full_config = yaml.safe_load(handle)
-
+    full_config = _load_full_config()
     full_config["whitelists"] = new_whitelists
 
     try:
@@ -173,7 +182,7 @@ def save_settings():
         return redirect(url_for("settings.view_settings", section="interests"))
 
     save_config(config_path, full_config)
-    current_app.config["SCRAPER_CONFIG"] = full_config
+    _activate_saved_config(full_config)
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Settings saved successfully.", "success")
     return redirect(url_for("settings.view_settings", section="interests"))
@@ -192,7 +201,7 @@ def save_preferences():
         return redirect(url_for("settings.view_settings", section="controls"))
 
     save_config(config_path, full_config)
-    current_app.config["SCRAPER_CONFIG"] = full_config
+    _activate_saved_config(full_config)
     recompute_all_paper_scores(current_app._get_current_object())
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Ranking and mute preferences saved.", "success")
@@ -295,9 +304,7 @@ def save_llm_settings():
         flash("LLM max concurrent requests must be a positive integer.", "error")
         return redirect(url_for("settings.view_settings", section="ai"))
 
-    with config_path.open("r", encoding="utf-8") as handle:
-        full_config = yaml.safe_load(handle)
-
+    full_config = _load_full_config()
     full_config["llm"] = {
         "enabled": enabled,
         "provider": provider,
@@ -316,7 +323,7 @@ def save_llm_settings():
         return redirect(url_for("settings.view_settings", section="ai"))
 
     save_config(config_path, full_config)
-    current_app.config["SCRAPER_CONFIG"] = full_config
+    _activate_saved_config(full_config)
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("LLM settings saved.", "success")
     return redirect(url_for("settings.view_settings", section="ai"))

@@ -107,6 +107,7 @@ def update_preferences_from_form(config: dict, form) -> dict:
 def save_config(config_path: Path, full_config: dict) -> dict:
     """Atomically write config to disk using write-to-temp + rename."""
     with _CONFIG_LOCK:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".yaml")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -79,4 +80,37 @@ class FlaskDBTestCase(unittest.TestCase):
         db.session.remove()
         db.drop_all()
         self.ctx.pop()
+        self._tmpdir.cleanup()
+
+
+class DefaultConfigFlaskDBTestCase(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmpdir.name)
+        self.default_config = copy.deepcopy(TEST_SCRAPER_CONFIG)
+        (self.root / "config.example.yaml").write_text(yaml.safe_dump(self.default_config), encoding="utf-8")
+
+        db_path = self.root / "test.db"
+        self._original_cwd = Path.cwd()
+        os.chdir(self.root)
+        self.app = create_app(
+            {
+                "TESTING": True,
+                "SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}",
+                "INSTANCE_PATH": str(self.root / "instance"),
+                "LLM_KEY_PATH": str(self.root / ".llm_api_key"),
+            }
+        )
+        self.config_path = Path(self.app.config["CONFIG_PATH"])
+
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+        db.drop_all()
+        db.create_all()
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
+        self.ctx.pop()
+        os.chdir(self._original_cwd)
         self._tmpdir.cleanup()

@@ -77,16 +77,15 @@ def _resolve_config_template_path(config_path: Path | None = None) -> Path | Non
     return None
 
 
-def _bootstrap_config_path(config_path: Path) -> None:
+def _load_effective_config(config_path: Path) -> tuple[dict, bool]:
     if config_path.is_file():
-        return
-
+        return _load_config(config_path), False
     template_path = _resolve_config_template_path(config_path)
     if template_path is None:
-        return
-
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
+        raise FileNotFoundError(
+            f"No config found at '{config_path}' and no '{DEFAULT_CONFIG_TEMPLATE_FILENAME}' template was found."
+        )
+    return _load_config(template_path), True
 
 
 def _llm_api_key_available(config_path: Path | None = None) -> bool:
@@ -286,9 +285,10 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     app.config["CONFIG_PATH"] = str(config_path)
     app.config["LLM_KEY_PATH"] = str(Path(app.config.get("LLM_KEY_PATH", _resolve_llm_key_path(config_path))).resolve())
 
+    using_default_config = False
     if "SCRAPER_CONFIG" not in app.config:
-        _bootstrap_config_path(config_path)
-        app.config["SCRAPER_CONFIG"] = _load_config(config_path)
+        app.config["SCRAPER_CONFIG"], using_default_config = _load_effective_config(config_path)
+    app.config.setdefault("USING_DEFAULT_CONFIG", using_default_config)
 
     _validate_config(app.config["SCRAPER_CONFIG"], config_path=config_path)
 

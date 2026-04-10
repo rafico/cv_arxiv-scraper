@@ -25,7 +25,7 @@ python run.py --debug
 
 Open **http://127.0.0.1:5000**, click **Run Scrape**, and you're done.
 
-If you skip the copy step, the app will create a starter config at `instance/config.yaml` on first launch.
+If you skip the copy step, the app will run from `config.example.yaml` defaults and create `instance/config.yaml` only after your first saved change.
 
 ---
 

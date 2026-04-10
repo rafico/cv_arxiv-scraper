@@ -67,6 +67,12 @@
         </div>
     </div>
 
+    {% if using_default_config %}
+    <div class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Using the built-in defaults from <code>config.example.yaml</code>. No saved config file exists yet; saving settings will create <code>{{ config_save_path_label }}</code>.
+    </div>
+    {% endif %}
+
     <section id="interests" data-section="interests" class="mb-10 {{ '' if section == 'interests' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>

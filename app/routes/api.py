@@ -19,6 +19,11 @@ from app.services.preferences import (
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+def _activate_saved_config(full_config: dict) -> None:
+    current_app.config["SCRAPER_CONFIG"] = full_config
+    current_app.config["USING_DEFAULT_CONFIG"] = False
+
+
 def _parse_int_query_arg(
     name: str,
     *,
@@ -465,7 +470,7 @@ def follow_recommendation(paper_id: int):
     full_config, added = append_whitelist_term(current_app.config["SCRAPER_CONFIG"], "authors", term)
     _validate_config(full_config, config_path=config_path)
     save_config(config_path, full_config)
-    current_app.config["SCRAPER_CONFIG"] = full_config
+    _activate_saved_config(full_config)
     return jsonify({"term": term, "added": added, "message": f"Following {term}."})
 
 
@@ -482,7 +487,7 @@ def mute_recommendation(paper_id: int):
     full_config, added = append_muted_term(current_app.config["SCRAPER_CONFIG"], "topics", term)
     _validate_config(full_config, config_path=config_path)
     save_config(config_path, full_config)
-    current_app.config["SCRAPER_CONFIG"] = full_config
+    _activate_saved_config(full_config)
     return jsonify({"term": term, "added": added, "message": f"Muted topic {term}."})
 
 

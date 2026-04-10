@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import yaml
 
-from tests.helpers import FlaskDBTestCase
+from tests.helpers import DefaultConfigFlaskDBTestCase, FlaskDBTestCase
 
 
 class SettingsRouteTests(FlaskDBTestCase):
@@ -493,3 +493,109 @@ class LLMSettingsTests(FlaskDBTestCase):
         html = response.get_data(as_text=True)
         self.assertIn("gemma4:e2b", html)
         self.assertIn('value="http://localhost:11434/v1"', html)
+
+
+class DefaultConfigSettingsTests(DefaultConfigFlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.app.test_client()
+
+    def _csrf_token(self) -> str:
+        self.client.get("/settings")
+        with self.client.session_transaction() as session:
+            return session["settings_csrf_token"]
+
+    def test_settings_page_shows_default_config_notice(self):
+        self.assertFalse(self.config_path.exists())
+
+        response = self.client.get("/settings")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("No saved config file exists yet", html)
+        self.assertIn("instance/config.yaml", html)
+
+    def test_first_settings_save_creates_config_file(self):
+        token = self._csrf_token()
+
+        response = self.client.post(
+            "/settings",
+            data={
+                "csrf_token": token,
+                "titles": "Vision\nSegmentation",
+                "authors": "Jane Doe\nJohn Smith",
+                "affiliations": "MIT\nStanford",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.config_path.exists())
+        self.assertFalse(self.app.config["USING_DEFAULT_CONFIG"])
+
+        saved = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["whitelists"]["authors"], ["Jane Doe", "John Smith"])
+        self.assertEqual(saved["whitelists"]["affiliations"], ["MIT", "Stanford"])
+
+    def test_first_preferences_save_creates_config_file(self):
+        token = self._csrf_token()
+
+        response = self.client.post(
+            "/settings/preferences",
+            data={
+                "csrf_token": token,
+                "pref_author_weight": "60",
+                "pref_affiliation_weight": "20",
+                "pref_title_weight": "10",
+                "pref_ai_weight": "4",
+                "pref_freshness_half_life_days": "7",
+                "muted_topics": "Tracking\nDetection",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.config_path.exists())
+
+        saved = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["preferences"]["ranking"]["author_weight"], 60.0)
+        self.assertEqual(saved["preferences"]["muted"]["topics"], ["Tracking", "Detection"])
+
+    def test_first_email_save_creates_config_file(self):
+        token = self._csrf_token()
+
+        response = self.client.post(
+            "/settings/email",
+            data={
+                "csrf_token": token,
+                "email_recipient": "test@example.com",
+                "email_subject_prefix": "My Digest",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.config_path.exists())
+
+        saved = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["email"]["recipient"], "test@example.com")
+        self.assertEqual(saved["email"]["subject_prefix"], "My Digest")
+
+    def test_first_llm_save_creates_config_file(self):
+        token = self._csrf_token()
+
+        response = self.client.post(
+            "/settings/llm",
+            data={
+                "csrf_token": token,
+                "llm_enabled": "on",
+                "llm_provider": "ollama",
+                "llm_model": "mistral",
+                "llm_base_url": "http://localhost:11434/v1",
+                "llm_max_concurrent": "2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.config_path.exists())
+
+        saved = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["llm"]["provider"], "ollama")
+        self.assertEqual(saved["llm"]["model"], "mistral")

@@ -4,8 +4,10 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import yaml
+
 from app.models import Collection, Paper, PaperCollection, db
-from tests.helpers import FlaskDBTestCase
+from tests.helpers import DefaultConfigFlaskDBTestCase, FlaskDBTestCase
 
 
 class ApiCsrfTests(FlaskDBTestCase):
@@ -211,3 +213,64 @@ class CorpusApiTests(FlaskDBTestCase):
         self.assertEqual(mock_neighbors.call_args.kwargs["limit"], 7)
         self.assertEqual(mock_neighbors.call_args.kwargs["tracked_authors"], ["Tracked Author"])
         self.assertFalse(mock_neighbors.call_args.kwargs["exclude_tracked_authors"])
+
+
+class ApiDefaultConfigPersistenceTests(DefaultConfigFlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.app.test_client()
+        db.session.add(
+            Paper(
+                arxiv_id="2603.0001",
+                title="API Paper",
+                authors="Author A, Author B",
+                link="https://arxiv.org/abs/2603.0001",
+                pdf_link="https://arxiv.org/pdf/2603.0001",
+                topic_tags=["Segmentation"],
+                match_type="Title",
+                matched_terms=["Vision"],
+                paper_score=1.0,
+                publication_date="2026-03-19",
+                scraped_date="2026-03-19",
+            )
+        )
+        db.session.commit()
+
+    def _csrf_token(self) -> str:
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            return session["settings_csrf_token"]
+
+    def test_follow_endpoint_creates_config_file_on_first_save(self):
+        self.assertFalse(self.config_path.exists())
+        paper = Paper.query.first()
+
+        response = self.client.post(
+            f"/api/papers/{paper.id}/follow",
+            json={},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.config_path.exists())
+        self.assertFalse(self.app.config["USING_DEFAULT_CONFIG"])
+
+        saved = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        self.assertIn("Author A", saved["whitelists"]["authors"])
+
+    def test_mute_endpoint_creates_config_file_on_first_save(self):
+        self.assertFalse(self.config_path.exists())
+        paper = Paper.query.first()
+
+        response = self.client.post(
+            f"/api/papers/{paper.id}/mute",
+            json={},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.config_path.exists())
+        self.assertFalse(self.app.config["USING_DEFAULT_CONFIG"])
+
+        saved = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        self.assertIn("Segmentation", saved["preferences"]["muted"]["topics"])
