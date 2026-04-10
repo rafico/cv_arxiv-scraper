@@ -22,6 +22,9 @@ DEFAULT_PREFERENCES = {
         "citation_weight": 0.05,
         "freshness_half_life_days": 14.0,
     },
+    "display": {
+        "summary_lines": 3,
+    },
     "muted": {
         "authors": [],
         "affiliations": [],
@@ -54,6 +57,16 @@ def get_preferences(config: dict | None) -> dict:
             except (TypeError, ValueError):
                 merged["ranking"][key] = float(default_value)
 
+    display = raw.get("display", {})
+    if isinstance(display, dict):
+        for key, default_value in merged["display"].items():
+            value = display.get(key)
+            try:
+                if value is not None:
+                    merged["display"][key] = max(1, min(10, int(value)))
+            except (TypeError, ValueError):
+                merged["display"][key] = int(default_value)
+
     muted = raw.get("muted", {})
     if isinstance(muted, dict):
         for key in merged["muted"]:
@@ -72,6 +85,15 @@ def update_preferences_from_form(config: dict, form) -> dict:
         if not raw:
             continue
         ranking[key] = float(raw)
+
+    display = preferences["display"]
+    for key in display:
+        raw = form.get(f"display_{key}", "").strip()
+        if raw:
+            try:
+                display[key] = max(1, min(10, int(raw)))
+            except (TypeError, ValueError):
+                pass
 
     muted = preferences["muted"]
     for key in muted:

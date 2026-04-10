@@ -300,7 +300,7 @@
             </p>
 
             {# ── Summary ── #}
-            <p class="text-xs text-gray-600 leading-relaxed mb-3 line-clamp-3">{{ paper.summary_text }}</p>
+            <p class="text-xs text-gray-600 leading-relaxed mb-3" style="-webkit-line-clamp: {{ preferences.display.summary_lines }}; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;">{{ paper.summary_text }}</p>
 
             {# ── Feedback buttons + reading status (always visible for quick triage) ── #}
             <div class="flex items-center gap-2 mb-3 flex-wrap">

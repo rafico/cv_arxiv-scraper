@@ -61,6 +61,12 @@ whitelists:
 - Ranking explanations show *why* each paper was surfaced
 - AI relevance scoring (optional, requires LLM setup)
 
+**TL;DR summaries**
+- Every paper card shows a short summary below the title and authors
+- Without LLM: extractive summary from the abstract (no API needed)
+- With LLM enabled: AI-generated plain-language TL;DR describing what the paper does and why it matters
+- Configurable number of visible lines via Settings (default: 3)
+
 **Organization**
 - Save, skip, prioritize, or share papers to train future rankings
 - Collections, custom tags, notes, and reading status tracking

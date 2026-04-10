@@ -7,9 +7,13 @@
     <p class="text-sm text-gray-600 mb-6">The Papers view is where you spend most of your time. Think of it as a triage queue: review new matches in the inbox, then keep the important ones in Saved.</p>
 
     <figure class="mb-8 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <img src="{{ url_for('static', filename='help/paper_cards.webp') }}" alt="Paper cards with action buttons" class="w-full rounded-lg border border-gray-100" onerror="handleImgError(this)">
-        <figcaption class="mt-3 text-center text-sm text-gray-600">Paper cards display metadata, matching tags, and actionable buttons.</figcaption>
+        <img src="{{ url_for('static', filename='help/dashboard_summary.webp') }}" alt="Paper cards showing TL;DR summaries" class="w-full rounded-lg border border-gray-100" onerror="handleImgError(this)">
+        <figcaption class="mt-3 text-center text-sm text-gray-600">Each paper card shows a TL;DR summary below the authors, followed by action buttons and topic tags.</figcaption>
     </figure>
+
+    <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 mb-8">
+        <p class="text-sm text-gray-700"><strong>TL;DR summaries:</strong> The gray text below the authors is a short summary of the paper. Without LLM enabled, this is extracted from the abstract. With <a href="{{ url_for('settings.view_settings', section='ai') }}" class="font-medium text-blue-600 hover:text-blue-800">LLM enabled</a>, it becomes an AI-generated plain-language description. Adjust the number of visible lines in <strong>Settings &rarr; Ranking &rarr; Summary lines</strong> (default: 3).</p>
+    </div>
 
     <h3 class="text-lg font-bold text-gray-900 mb-3">Navigation</h3>
     <div class="grid gap-4 md:grid-cols-3 mb-8">

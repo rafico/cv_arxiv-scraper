@@ -454,6 +454,7 @@ def index():
         saved_searches=SavedSearch.query.order_by(SavedSearch.created_at.desc()).all(),
         mendeley_connected=mendeley_connected,
         csrf_token=get_or_create_csrf_token(),
+        preferences=get_preferences(config),
     )
 
 
