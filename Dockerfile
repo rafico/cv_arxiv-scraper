@@ -26,6 +26,7 @@ FROM python:3.12-slim AS runtime
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    CV_ARXIV_CONFIG=/app/config.yaml \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}"
 
@@ -38,7 +39,7 @@ RUN apt-get update \
 
 COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 COPY --chown=appuser:appuser app ./app
-COPY --chown=appuser:appuser digest_cli.py export_cli.py gmail_auth_setup.py run.py scrape_cli.py ./
+COPY --chown=appuser:appuser config.example.yaml digest_cli.py export_cli.py gmail_auth_setup.py run.py scrape_cli.py wsgi.py ./
 COPY --chown=appuser:appuser requirements.txt ./
 
 RUN install -d -o appuser -g appuser /app/instance
@@ -49,4 +50,4 @@ VOLUME ["/app/instance"]
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "2", "--worker-class", "gthread", "run:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "2", "--worker-class", "gthread", "wsgi:app"]

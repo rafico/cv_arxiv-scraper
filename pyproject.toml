@@ -8,6 +8,15 @@ version = "0.1.0"
 description = "arXiv CV scraping, enrichment, ranking, and digest tooling."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   "flask==3.1.3",
   "flask-sqlalchemy==3.1.1",
@@ -15,7 +24,7 @@ dependencies = [
   "feedparser==6.0.11",
   "defusedxml>=0.7.1",
   "pdfplumber>=0.10.0",
-  "requests==2.32.4",
+  "requests==2.33.1",
   "tqdm==4.67.1",
   "openai>=1.0.0",
   "google-auth>=2.29.0",
@@ -23,13 +32,17 @@ dependencies = [
   "google-api-python-client>=2.127.0",
   "requests-oauthlib>=1.3.0",
   "gunicorn>=22.0.0",
-  "arxiv>=2.1.3",
   "numpy>=1.24.0",
   "faiss-cpu>=1.7.4",
   "sentence-transformers>=2.2.0",
   "Pillow>=9.0.0",
   "peft>=0.10.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/rafico/cv_arxiv-scraper"
+Repository = "https://github.com/rafico/cv_arxiv-scraper"
+Issues = "https://github.com/rafico/cv_arxiv-scraper/issues"
 
 [project.scripts]
 cv-arxiv-scrape = "app.cli.scrape:main"

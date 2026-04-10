@@ -125,7 +125,7 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
     entries: list[dict] = []
 
     try:
-        LOGGER.info("Running arxiv.py shadow mode query for %s", category)
+        LOGGER.info("Running arXiv API shadow mode query for %s", category)
         shadow_entries = query_arxiv_api([category], start_date, end_date, max_results=2000)
         shadow_ids = {e["arxiv_id"] for e in shadow_entries if e.get("arxiv_id")}
     except Exception as exc:
@@ -172,7 +172,7 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
 
     if missing_in_shadow:
         LOGGER.warning(
-            "Shadow mode mismatch: arxiv.py missed %d papers. Sample: %s",
+            "Shadow mode mismatch: backend query missed %d papers. Sample: %s",
             len(missing_in_shadow),
             list(missing_in_shadow)[:5],
         )
@@ -183,7 +183,7 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
             list(missing_in_legacy)[:5],
         )
     if not missing_in_shadow and not missing_in_legacy and fetched_ids:
-        LOGGER.info("Shadow mode success: arxiv.py results match legacy results perfectly.")
+        LOGGER.info("Shadow mode success: backend results match legacy results perfectly.")
 
     LOGGER.info("Fetched %d rolling-window entries for %s", len(entries), category)
     return entries

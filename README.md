@@ -13,19 +13,25 @@ Stop drowning in the arXiv firehose. This tool matches papers against authors, l
 ## Quick Start
 
 ```bash
-git clone https://github.com/<your-username>/cv_arxiv-scraper.git
+git clone https://github.com/rafico/cv_arxiv-scraper.git
 cd cv_arxiv-scraper
-pip install -e .
-python run.py
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+cp config.example.yaml config.yaml
+python run.py --debug
 ```
 
 Open **http://127.0.0.1:5000**, click **Run Scrape**, and you're done.
+
+If you skip the copy step, the app will create a starter config at `instance/config.yaml` on first launch.
 
 ---
 
 ## Tell it what you care about
 
-Go to **Settings > Research Setup** in the web UI, or edit `config.yaml`:
+Copy `config.example.yaml` to `config.yaml`, then go to **Settings > Research Setup** in the web UI or edit the file directly:
 
 ```yaml
 whitelists:
@@ -85,7 +91,7 @@ After `pip install -e .`:
 | `cv-arxiv-sync` | Historical sync (`--from`, `--to`, `--category`) |
 | `cv-arxiv-backfill` | Enrichment backfills (`embeddings`, `citations`, `openalex`, `thumbnails`, `all`) |
 
-Standalone scripts (`python scrape_cli.py`, `python export_cli.py`, etc.) also work without installing.
+Standalone scripts (`python scrape_cli.py`, `python export_cli.py`, etc.) also work without installing once the environment is active.
 
 ---
 
@@ -130,4 +136,4 @@ python -m pytest tests/ -v
 
 ## License
 
-MIT
+[MIT](LICENSE)

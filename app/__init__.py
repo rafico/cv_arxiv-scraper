@@ -14,9 +14,11 @@ from app.schema import ensure_schema
 
 DEFAULT_DATABASE_URI = "sqlite:///arxiv_papers.db"
 DEFAULT_CONFIG_FILENAME = "config.yaml"
+DEFAULT_CONFIG_TEMPLATE_FILENAME = "config.example.yaml"
 DEFAULT_LLM_KEY_FILENAME = ".llm_api_key"
 _CONFIG_PATH_ENV_VAR = "CV_ARXIV_CONFIG"
 _SECRET_KEY_FILENAME = ".flask_secret"
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _load_config(path: Path) -> dict:
@@ -24,7 +26,11 @@ def _load_config(path: Path) -> dict:
         return yaml.safe_load(config_file)
 
 
-def _resolve_config_path(config_path: str | os.PathLike[str] | None = None) -> Path:
+def _resolve_config_path(
+    config_path: str | os.PathLike[str] | None = None,
+    *,
+    instance_path: str | os.PathLike[str] | None = None,
+) -> Path:
     if config_path is not None:
         return Path(config_path).expanduser().resolve()
 
@@ -36,16 +42,51 @@ def _resolve_config_path(config_path: str | os.PathLike[str] | None = None) -> P
     if cwd_candidate.is_file():
         return cwd_candidate
 
-    repo_candidate = (Path(__file__).resolve().parent.parent / DEFAULT_CONFIG_FILENAME).resolve()
+    repo_candidate = (_PROJECT_ROOT / DEFAULT_CONFIG_FILENAME).resolve()
     if repo_candidate.is_file():
         return repo_candidate
+
+    if instance_path is not None:
+        instance_candidate = (Path(instance_path).expanduser().resolve() / DEFAULT_CONFIG_FILENAME).resolve()
+        if instance_candidate.is_file():
+            return instance_candidate
+        return instance_candidate
 
     return cwd_candidate
 
 
 def _resolve_llm_key_path(config_path: Path | None = None) -> Path:
-    base_dir = config_path.parent if config_path is not None else Path(__file__).resolve().parent.parent
+    base_dir = config_path.parent if config_path is not None else _PROJECT_ROOT
     return base_dir / DEFAULT_LLM_KEY_FILENAME
+
+
+def _resolve_config_template_path(config_path: Path | None = None) -> Path | None:
+    candidates: list[Path] = []
+    if config_path is not None:
+        candidates.append(config_path.with_name(DEFAULT_CONFIG_TEMPLATE_FILENAME).resolve())
+    candidates.append((Path.cwd() / DEFAULT_CONFIG_TEMPLATE_FILENAME).resolve())
+    candidates.append((_PROJECT_ROOT / DEFAULT_CONFIG_TEMPLATE_FILENAME).resolve())
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _bootstrap_config_path(config_path: Path) -> None:
+    if config_path.is_file():
+        return
+
+    template_path = _resolve_config_template_path(config_path)
+    if template_path is None:
+        return
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _llm_api_key_available(config_path: Path | None = None) -> bool:
@@ -227,24 +268,26 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         flask_kwargs["instance_path"] = str(Path(instance_path_override).expanduser().resolve())
 
     app = Flask(__name__, **flask_kwargs)
-    Path(app.instance_path).mkdir(parents=True, exist_ok=True)
+    instance_path = Path(app.instance_path)
+    instance_path.mkdir(parents=True, exist_ok=True)
     app.config.update(
         SQLALCHEMY_DATABASE_URI=DEFAULT_DATABASE_URI,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        SECRET_KEY=_ensure_secret_key(Path(app.instance_path)),
+        SECRET_KEY=_ensure_secret_key(instance_path),
     )
 
     if overrides:
         app.config.update(overrides)
 
     # instance_path already created above before _ensure_secret_key call
-    app.config.setdefault("FAISS_INDEX_DIR", str(Path(app.instance_path) / "faiss_index"))
+    app.config.setdefault("FAISS_INDEX_DIR", str(instance_path / "faiss_index"))
 
-    config_path = _resolve_config_path(app.config.get("CONFIG_PATH"))
+    config_path = _resolve_config_path(app.config.get("CONFIG_PATH"), instance_path=instance_path)
     app.config["CONFIG_PATH"] = str(config_path)
     app.config["LLM_KEY_PATH"] = str(Path(app.config.get("LLM_KEY_PATH", _resolve_llm_key_path(config_path))).resolve())
 
     if "SCRAPER_CONFIG" not in app.config:
+        _bootstrap_config_path(config_path)
         app.config["SCRAPER_CONFIG"] = _load_config(config_path)
 
     _validate_config(app.config["SCRAPER_CONFIG"], config_path=config_path)

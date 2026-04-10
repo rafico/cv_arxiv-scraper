@@ -1,0 +1,40 @@
+email:
+  recipient: ""
+  subject_prefix: ArXiv Digest
+scraper:
+  feed_url: https://rss.arxiv.org/rss/cs.CV
+  rolling_window_days: 2
+  max_workers: 8
+  pdf_attempts: 2
+  pdf_lines_start: 2
+  pdf_max_header_lines: 50
+  pdf_smart_header: true
+ingest:
+  backends:
+    - rss
+    - arxiv_api
+llm:
+  enabled: false
+  provider: ollama
+  model: gemma4:e2b
+  base_url: http://localhost:11434/v1
+  max_concurrent: 1
+openalex:
+  enabled: true
+  email: ""
+preferences:
+  ranking:
+    author_weight: 44.0
+    affiliation_weight: 26.0
+    title_weight: 14.0
+    ai_weight: 5.0
+    citation_weight: 0.05
+    freshness_half_life_days: 14.0
+  muted:
+    authors: []
+    affiliations: []
+    topics: []
+whitelists:
+  titles: []
+  affiliations: []
+  authors: []

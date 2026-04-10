@@ -80,3 +80,15 @@ class ConfigPathResolutionTests(unittest.TestCase):
                 os.chdir(original_cwd)
 
             self.assertEqual(resolved, config_path.resolve())
+
+    def test_instance_config_is_default_when_no_repo_config_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(tmpdir)
+                with patch.dict(os.environ, {"CV_ARXIV_CONFIG": ""}, clear=False):
+                    resolved = _resolve_config_path(instance_path=Path(tmpdir) / "instance")
+            finally:
+                os.chdir(original_cwd)
+
+            self.assertEqual(resolved, (Path(tmpdir) / "instance" / "config.yaml").resolve())

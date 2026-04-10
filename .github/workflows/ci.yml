@@ -44,6 +44,9 @@ jobs:
       - name: Ruff format check
         run: python -m ruff format --check .
 
+      - name: Verify WSGI entrypoint
+        run: python -m gunicorn --check-config wsgi:app
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -113,5 +116,4 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Audit requirements
-        # CVE-2026-25645: requests 2.32.x advisory; pinned to 2.32.4 due to arxiv lib incompatibility with 2.33+
-        run: python -m pip_audit -r requirements.txt --ignore-vuln CVE-2026-25645
+        run: python -m pip_audit -r requirements.txt

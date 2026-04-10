@@ -6,6 +6,7 @@ dist/
 build/
 *.egg
 .env
+config.yaml
 .venv
 env/
 venv/

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -105,6 +106,29 @@ class CreateAppInitializationTests(unittest.TestCase):
                 stored = Paper.query.one()
                 self.assertEqual(stored.title, "Persistent Paper")
                 self.assertEqual(stored.arxiv_id, "2604.00001")
+
+    def test_create_app_bootstraps_missing_config_from_template_into_instance_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path = root / "config.example.yaml"
+            template_path.write_text(yaml.safe_dump(TEST_SCRAPER_CONFIG), encoding="utf-8")
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                app = create_app(
+                    {
+                        "TESTING": True,
+                        "INSTANCE_PATH": str(root / "instance"),
+                        "LLM_KEY_PATH": str(root / ".llm_api_key"),
+                    }
+                )
+            finally:
+                os.chdir(original_cwd)
+
+            config_path = Path(app.config["CONFIG_PATH"])
+            self.assertEqual(config_path, (root / "instance" / "config.yaml").resolve())
+            self.assertTrue(config_path.exists())
+            self.assertEqual(yaml.safe_load(config_path.read_text(encoding="utf-8")), TEST_SCRAPER_CONFIG)
 
 
 if __name__ == "__main__":
