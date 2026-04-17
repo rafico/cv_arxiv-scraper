@@ -29,6 +29,8 @@ Open **http://127.0.0.1:5000**, click **Run Scrape**, and you're done.
 
 If you skip the copy step, the app will run from `config.example.yaml` defaults and create `instance/config.yaml` only after your first saved change.
 
+> **Note:** this app has **no authentication** and is designed for single-user localhost use. It refuses to bind to a non-loopback address unless you pass `--expose`, which should only be used behind a reverse-proxy that adds its own auth.
+
 ---
 
 ## Tell it what you care about

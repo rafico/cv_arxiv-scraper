@@ -1,0 +1,27 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: block-credential-filenames
+        name: Block staging of credential files
+        entry: >-
+          bash -c 'for f in "$@"; do
+            case "$f" in
+              mendeley_credentials.json|.mendeley_token|.llm_api_key|credentials.json|token.json|.zotero_credentials|.mcp.json|.flask_secret)
+                echo "refusing to stage credential file: $f" >&2
+                exit 1
+                ;;
+            esac
+          done' --
+        language: system
+        pass_filenames: true

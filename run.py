@@ -1,4 +1,5 @@
 import argparse
+import ipaddress
 import os
 import socket
 import sys
@@ -8,6 +9,14 @@ from threading import Timer
 from app import create_app
 
 DEFAULT_PORT = int(os.environ.get("PORT", 5000))
+
+
+def _host_is_loopback(host: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return host in {"localhost", ""}
+    return addr.is_loopback
 
 
 def _find_free_port(start, attempts=10):
@@ -26,6 +35,11 @@ def build_parser(default_port=DEFAULT_PORT):
     parser.add_argument("--workers", type=int, default=2, help="Number of gunicorn workers")
     parser.add_argument("--threads", type=int, default=2, help="Number of threads per worker")
     parser.add_argument("--no-browser", action="store_true", help="Don't open browser on start")
+    parser.add_argument(
+        "--expose",
+        action="store_true",
+        help="Acknowledge that the app has no authentication and bind to a non-loopback host anyway",
+    )
     return parser
 
 
@@ -57,9 +71,23 @@ def main(argv=None, *, app_factory=create_app, timer_factory=Timer, browser_open
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    out = stdout or sys.stdout
+    if not _host_is_loopback(args.host) and not args.expose:
+        print(
+            f"refusing to bind to non-loopback host {args.host!r}: this app has no authentication. "
+            "Pass --expose to override.",
+            file=sys.stderr,
+        )
+        return 2
+    if not _host_is_loopback(args.host) and args.expose:
+        print(
+            f"\033[31mWARNING: binding to {args.host} with no authentication — anyone on the network can access the app.\033[0m",
+            file=sys.stderr,
+        )
+
     port = _find_free_port(args.port)
     if port != args.port:
-        print(f"Port {args.port} in use, falling back to {port}", file=stdout or sys.stdout)
+        print(f"Port {args.port} in use, falling back to {port}", file=out)
 
     app = app_factory()
 
