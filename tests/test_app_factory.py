@@ -131,6 +131,27 @@ class CreateAppInitializationTests(unittest.TestCase):
             self.assertTrue(app.config["USING_DEFAULT_CONFIG"])
             self.assertEqual(app.config["SCRAPER_CONFIG"], TEST_SCRAPER_CONFIG)
 
+    def test_session_cookie_and_content_length_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            app = self._create_app(root)
+
+            self.assertTrue(app.config["SESSION_COOKIE_HTTPONLY"])
+            self.assertEqual(app.config["SESSION_COOKIE_SAMESITE"], "Lax")
+            self.assertEqual(app.config["MAX_CONTENT_LENGTH"], 2 * 1024 * 1024)
+
+    def test_responses_include_security_headers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            app = self._create_app(root)
+            client = app.test_client()
+
+            response = client.get("/")
+
+            self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
+            self.assertEqual(response.headers.get("X-Frame-Options"), "DENY")
+            self.assertEqual(response.headers.get("Referrer-Policy"), "same-origin")
+
 
 if __name__ == "__main__":
     unittest.main()
