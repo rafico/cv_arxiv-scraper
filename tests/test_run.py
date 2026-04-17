@@ -13,7 +13,7 @@ class RunEntryPointTests(unittest.TestCase):
         fake_app = Mock()
 
         exit_code = run.main(
-            ["--debug", "--host", "0.0.0.0", "--port", "5123", "--no-browser"],
+            ["--debug", "--host", "0.0.0.0", "--port", "5123", "--no-browser", "--expose"],
             app_factory=lambda: fake_app,
         )
 
@@ -26,7 +26,7 @@ class RunEntryPointTests(unittest.TestCase):
 
         with patch("run._create_gunicorn_application", return_value=fake_runner) as mock_create_runner:
             exit_code = run.main(
-                ["--host", "0.0.0.0", "--port", "6123", "--workers", "4", "--threads", "8", "--no-browser"],
+                ["--host", "0.0.0.0", "--port", "6123", "--workers", "4", "--threads", "8", "--no-browser", "--expose"],
                 app_factory=lambda: fake_app,
             )
 
@@ -81,6 +81,31 @@ class RunEntryPointTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Port 5125 in use, falling back to 5126", stdout.getvalue())
         fake_app.run.assert_called_once_with(host="127.0.0.1", port=5126, debug=True)
+
+    def test_non_loopback_host_without_expose_aborts(self):
+        fake_app = Mock()
+        exit_code = run.main(
+            ["--host", "0.0.0.0", "--port", "5123", "--no-browser"],
+            app_factory=lambda: fake_app,
+        )
+        self.assertEqual(exit_code, 2)
+        fake_app.run.assert_not_called()
+
+    def test_loopback_host_does_not_require_expose(self):
+        fake_app = Mock()
+        exit_code = run.main(
+            ["--debug", "--host", "127.0.0.1", "--port", "5123", "--no-browser"],
+            app_factory=lambda: fake_app,
+        )
+        self.assertEqual(exit_code, 0)
+
+    def test_localhost_name_treated_as_loopback(self):
+        fake_app = Mock()
+        exit_code = run.main(
+            ["--debug", "--host", "localhost", "--port", "5123", "--no-browser"],
+            app_factory=lambda: fake_app,
+        )
+        self.assertEqual(exit_code, 0)
 
 
 if __name__ == "__main__":

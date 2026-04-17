@@ -196,3 +196,99 @@ class DashboardRouteTests(FlaskDBTestCase):
 
         self.assertEqual(response.status_code, 404)
         mock_generate.assert_called_once_with(paper.arxiv_id, paper.pdf_link, Path(self.app.static_folder))
+
+    def test_paper_thumbnail_route_rejects_traversal_arxiv_id(self):
+        paper = Paper(
+            arxiv_id="../../etc/passwd",
+            title="Evil",
+            authors="A",
+            link="https://arxiv.org/abs/evil",
+            pdf_link="https://arxiv.org/pdf/evil",
+            abstract_text="x",
+            summary_text="x",
+            topic_tags=[],
+            categories=["cs.CV"],
+            resource_links=[],
+            match_type="Title",
+            matched_terms=[],
+            paper_score=1.0,
+            feedback_score=0,
+            is_hidden=False,
+            publication_date=date.today().isoformat(),
+            publication_dt=date.today(),
+            scraped_date=date.today().isoformat(),
+            scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db.session.add(paper)
+        db.session.commit()
+
+        with patch("app.routes.dashboard.generate_thumbnail") as mock_generate:
+            response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
+
+        self.assertEqual(response.status_code, 404)
+        mock_generate.assert_not_called()
+
+    def test_paper_thumbnail_route_rejects_absolute_path_arxiv_id(self):
+        paper = Paper(
+            arxiv_id="/etc/passwd",
+            title="Evil Abs",
+            authors="A",
+            link="https://arxiv.org/abs/abs",
+            pdf_link="https://arxiv.org/pdf/abs",
+            abstract_text="x",
+            summary_text="x",
+            topic_tags=[],
+            categories=["cs.CV"],
+            resource_links=[],
+            match_type="Title",
+            matched_terms=[],
+            paper_score=1.0,
+            feedback_score=0,
+            is_hidden=False,
+            publication_date=date.today().isoformat(),
+            publication_dt=date.today(),
+            scraped_date=date.today().isoformat(),
+            scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db.session.add(paper)
+        db.session.commit()
+
+        with patch("app.routes.dashboard.generate_thumbnail") as mock_generate:
+            response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
+
+        self.assertEqual(response.status_code, 404)
+        mock_generate.assert_not_called()
+
+    def test_paper_thumbnail_route_accepts_legacy_arxiv_id_with_slash(self):
+        paper = Paper(
+            arxiv_id="cs.CV/9912345",
+            title="Legacy",
+            authors="A",
+            link="https://arxiv.org/abs/cs.CV/9912345",
+            pdf_link="https://arxiv.org/pdf/cs.CV/9912345",
+            abstract_text="x",
+            summary_text="x",
+            topic_tags=[],
+            categories=["cs.CV"],
+            resource_links=[],
+            match_type="Title",
+            matched_terms=[],
+            paper_score=1.0,
+            feedback_score=0,
+            is_hidden=False,
+            publication_date=date.today().isoformat(),
+            publication_dt=date.today(),
+            scraped_date=date.today().isoformat(),
+            scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db.session.add(paper)
+        db.session.commit()
+
+        thumbnails_dir = Path(self.app.static_folder) / "thumbnails" / "cs.CV"
+        thumbnails_dir.mkdir(parents=True, exist_ok=True)
+        (thumbnails_dir / "9912345.png").write_bytes(b"legacy-png")
+
+        response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(), b"legacy-png")

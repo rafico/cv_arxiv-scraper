@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -39,11 +40,17 @@ def _parse_page(raw_value: str | None) -> int:
         return 1
 
 
+_STORAGE_KEY_RE = re.compile(r"^[A-Za-z0-9._\-]+(?:/[A-Za-z0-9._\-]+)?$")
+
+
 def _thumbnail_storage_key(paper: Paper) -> str | None:
+    candidate: str | None = None
     if paper.arxiv_id:
-        return paper.arxiv_id
-    if paper.link:
-        return paper.link.rstrip("/").split("/")[-1]
+        candidate = paper.arxiv_id
+    elif paper.link:
+        candidate = paper.link.rstrip("/").split("/")[-1]
+    if candidate and _STORAGE_KEY_RE.fullmatch(candidate):
+        return candidate
     return None
 
 
@@ -466,7 +473,10 @@ def paper_thumbnail(paper_id: int):
         return ("", 404)
 
     static_root = Path(current_app.static_folder or Path(__file__).resolve().parent.parent / "static")
-    thumbnail_path = static_root / "thumbnails" / f"{storage_key}.png"
+    thumbnail_root = (static_root / "thumbnails").resolve()
+    thumbnail_path = (thumbnail_root / f"{storage_key}.png").resolve()
+    if not thumbnail_path.is_relative_to(thumbnail_root):
+        return ("", 404)
 
     if not thumbnail_path.exists():
         generate_thumbnail(storage_key, paper.pdf_link, static_root)
