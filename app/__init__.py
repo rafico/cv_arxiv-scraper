@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import yaml
@@ -19,6 +20,16 @@ DEFAULT_LLM_KEY_FILENAME = ".llm_api_key"
 _CONFIG_PATH_ENV_VAR = "CV_ARXIV_CONFIG"
 _SECRET_KEY_FILENAME = ".flask_secret"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# 2 MiB. Big enough for credential/config JSON uploads, small enough that the default
+# Flask request parser won't buffer multi-megabyte junk into memory.
+DEFAULT_MAX_CONTENT_LENGTH = 2 * 1024 * 1024
+
+_SECURITY_HEADERS: dict[str, str] = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+}
 
 
 def _load_config(path: Path) -> dict:
@@ -273,6 +284,10 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         SQLALCHEMY_DATABASE_URI=DEFAULT_DATABASE_URI,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SECRET_KEY=_ensure_secret_key(instance_path),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+        MAX_CONTENT_LENGTH=DEFAULT_MAX_CONTENT_LENGTH,
     )
 
     if overrides:
@@ -298,6 +313,12 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         ensure_schema()
 
     _register_blueprints(app)
+
+    @app.after_request
+    def _apply_security_headers(response):
+        for header, value in _SECURITY_HEADERS.items():
+            response.headers.setdefault(header, value)
+        return response
 
     from app.constants import ARXIV_CATEGORY_NAMES
 
