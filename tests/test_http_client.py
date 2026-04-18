@@ -120,7 +120,7 @@ class HttpClientTests(unittest.TestCase):
             rate_limit_profile="bulk",
         )
 
-        self.assertEqual(getattr(session, "_cv_arxiv_rate_limit_settings").profile, "bulk")
+        self.assertEqual(session._cv_arxiv_rate_limit_settings.profile, "bulk")
 
 
 if __name__ == "__main__":

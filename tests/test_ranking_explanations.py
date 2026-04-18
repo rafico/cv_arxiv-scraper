@@ -14,10 +14,10 @@ def _make_paper(**kwargs):
     paper.id = kwargs.get("id", 1)
     paper.match_type = kwargs.get("match_type", "Author")
     paper.matched_terms_list = kwargs.get("matched_terms_list", ["Kaiming He"])
-    paper.citation_count = kwargs.get("citation_count", None)
+    paper.citation_count = kwargs.get("citation_count")
     paper.publication_dt = kwargs.get("publication_dt", date.today())
     paper.resource_links_list = kwargs.get("resource_links_list", [])
-    paper.llm_relevance_score = kwargs.get("llm_relevance_score", None)
+    paper.llm_relevance_score = kwargs.get("llm_relevance_score")
     paper.abstract_text = kwargs.get("abstract_text", "A paper about neural networks.")
     paper.title = kwargs.get("title", "Test Paper Title")
     return paper

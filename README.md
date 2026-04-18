@@ -137,6 +137,7 @@ See the in-app help at `/help` for full documentation.
 ## Testing
 
 ```bash
+python -m pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
