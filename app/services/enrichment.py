@@ -33,6 +33,7 @@ _ARXIV_API_TIMEOUT = 45
 _ARXIV_API_ATTEMPTS = 4
 _ARXIV_API_BASE_DELAY = 2.0
 _ARXIV_METADATA_BATCH_SIZE = min(_ARXIV_API_BATCH_SIZE, 20)
+_ARXIV_ROLLING_WINDOW_MAX_PAGES = 100
 
 _ATOM_NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -133,8 +134,9 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
         shadow_ids = set()
 
     start = 0
+    pages_fetched = 0
 
-    while True:
+    while pages_fetched < _ARXIV_ROLLING_WINDOW_MAX_PAGES:
         if start > 0:
             time.sleep(_ARXIV_API_DELAY)
 
@@ -152,9 +154,16 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
             break
 
         entries.extend(batch_entries)
+        pages_fetched += 1
         if len(batch_entries) < batch_size:
             break
         start += batch_size
+    else:
+        LOGGER.warning(
+            "arXiv rolling-window pagination cap hit at %d pages for %s; truncating results",
+            _ARXIV_ROLLING_WINDOW_MAX_PAGES,
+            category,
+        )
 
     # Deduplication
     unique_entries = []

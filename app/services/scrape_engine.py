@@ -384,15 +384,24 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 new_count += len(papers_to_insert)
             except IntegrityError:
                 db.session.rollback()
-                # Fallback to row-by-row insertion in case of a collision
+                # Fallback to row-by-row insertion so one bad row does not drop the whole batch.
                 for paper in papers_to_insert:
                     db.session.add(paper)
                     try:
                         db.session.commit()
                         new_count += 1
-                    except IntegrityError:
+                    except IntegrityError as exc:
                         db.session.rollback()
                         skipped += 1
+                        msg = str(exc.orig) if exc.orig is not None else str(exc)
+                        if "UNIQUE" in msg.upper() or "unique constraint" in msg.lower():
+                            LOGGER.debug("Skipping paper on unique conflict: %s (%s)", paper.link, msg)
+                        else:
+                            LOGGER.warning(
+                                "Non-unique IntegrityError inserting paper %s: %s",
+                                paper.link,
+                                msg,
+                            )
 
     return new_count, skipped
 
