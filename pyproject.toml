@@ -36,7 +36,6 @@ dependencies = [
   "faiss-cpu>=1.7.4",
   "sentence-transformers>=2.2.0,<4",
   "Pillow>=9.0.0",
-  "peft>=0.10.0,<1",
 ]
 
 [project.optional-dependencies]
@@ -46,10 +45,11 @@ dev = [
   "pytest-playwright>=0.4.0",
   "playwright>=1.40.0",
   "fpdf2>=2.7.0",
-  "ruff>=0.11.0",
+  "ruff==0.15.8",
   "pip-audit>=2.9.0",
   "pre-commit>=3.7.0",
   "mypy>=1.10.0",
+  "pip-tools>=7.4.0",
 ]
 
 [project.urls]
@@ -95,26 +95,21 @@ show_missing = true
 skip_covered = false
 
 [tool.mypy]
+# Type checking is currently advisory (continue-on-error in CI) because the
+# codebase has not been annotated end-to-end. The disabled error codes below
+# are *legacy backlog* — they should shrink over time, not grow. Prefer a
+# targeted `# type: ignore[code]` comment over adding to this list.
 python_version = "3.10"
 packages = ["app"]
 ignore_missing_imports = true
-warn_unused_ignores = false
+warn_unused_ignores = true
 warn_redundant_casts = true
 strict_optional = false
 follow_imports = "silent"
 disable_error_code = [
-  "attr-defined",
-  "name-defined",
-  "call-overload",
-  "misc",
-  "arg-type",
-  "assignment",
-  "operator",
-  "index",
-  "union-attr",
-  "override",
-  "return-value",
-  "import-untyped",
+  "attr-defined",     # legacy backlog: dynamic model attributes (SQLAlchemy, Flask-SQLAlchemy)
+  "import-untyped",   # legacy backlog: some deps lack py.typed markers
+  "misc",             # legacy backlog: Flask/Jinja decorator plumbing
 ]
 
 [tool.ruff]
@@ -126,7 +121,6 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "S"]
 ignore = [
   "E501",
   "S101",   # use of assert — common in tests
-  "S105",   # false positives on filename/URL constants
   "S110",   # try/except/pass — intentional best-effort cleanup paths
   "S311",   # pseudo-random — not used for crypto
   "S603",   # subprocess.run with fixed argv — no shell, no untrusted input

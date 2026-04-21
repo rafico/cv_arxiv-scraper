@@ -17,7 +17,7 @@ DEFAULT_CONFIG_FILENAME = "config.yaml"
 DEFAULT_CONFIG_TEMPLATE_FILENAME = "config.example.yaml"
 DEFAULT_LLM_KEY_FILENAME = ".llm_api_key"
 _CONFIG_PATH_ENV_VAR = "CV_ARXIV_CONFIG"
-_SECRET_KEY_FILENAME = ".flask_secret"
+_SECRET_KEY_FILENAME = ".flask_secret"  # noqa: S105 — filename constant, not a secret value
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 

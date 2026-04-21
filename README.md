@@ -138,6 +138,7 @@ See the in-app help at `/help` for full documentation.
 
 ```bash
 python -m pip install -e ".[dev]"
+pre-commit install          # enable lint/format/credential hooks on commit
 python -m pytest tests/ -v
 ```
 

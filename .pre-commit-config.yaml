@@ -25,4 +25,8 @@ repos:
         entry: scripts/block_credential_files.py
         language: script
         pass_filenames: true
+        # Filename-pattern match only — pair with detect-secrets or gitleaks
+        # if you need content-level scanning. A file renamed to `my_key.json`
+        # bypasses this hook; that's intentional scope.
+        files: '(^|/)(credentials\.json|token\.json|mendeley_credentials\.json|\.llm_api_key|\.mendeley_token|\.zotero_credentials|\.env|\.mcp\.json|\.flask_secret)$'
         description: "Refuse to stage credential or secret filenames."
