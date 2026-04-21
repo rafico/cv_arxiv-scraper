@@ -26,17 +26,30 @@ dependencies = [
   "pdfplumber>=0.10.0",
   "requests==2.33.1",
   "tqdm==4.67.1",
-  "openai>=1.0.0",
+  "openai>=1.0.0,<3",
   "google-auth>=2.29.0",
   "google-auth-oauthlib>=1.2.0",
   "google-api-python-client>=2.127.0",
   "requests-oauthlib>=1.3.0",
   "gunicorn>=22.0.0",
-  "numpy>=1.24.0",
+  "numpy>=1.24.0,<3",
   "faiss-cpu>=1.7.4",
-  "sentence-transformers>=2.2.0",
+  "sentence-transformers>=2.2.0,<4",
   "Pillow>=9.0.0",
-  "peft>=0.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.0.0",
+  "pytest-cov>=6.0.0",
+  "pytest-playwright>=0.4.0",
+  "playwright>=1.40.0",
+  "fpdf2>=2.7.0",
+  "ruff==0.15.8",
+  "pip-audit>=2.9.0",
+  "pre-commit>=3.7.0",
+  "mypy>=1.10.0",
+  "pip-tools>=7.4.0",
 ]
 
 [project.urls]
@@ -64,8 +77,39 @@ app = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers -ra"
 markers = [
-    "e2e: End-to-end browser tests (require Playwright)",
+    "unit: Fast unit tests (no I/O, no network, no DB).",
+    "integration: Tests that touch the DB, filesystem, or in-process services.",
+    "e2e: End-to-end browser tests (require Playwright).",
+    "slow: Tests that take more than a couple seconds to run.",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.mypy]
+# Type checking is currently advisory (continue-on-error in CI) because the
+# codebase has not been annotated end-to-end. The disabled error codes below
+# are *legacy backlog* — they should shrink over time, not grow. Prefer a
+# targeted `# type: ignore[code]` comment over adding to this list.
+python_version = "3.10"
+packages = ["app"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+strict_optional = false
+follow_imports = "silent"
+disable_error_code = [
+  "attr-defined",     # legacy backlog: dynamic model attributes (SQLAlchemy, Flask-SQLAlchemy)
+  "import-untyped",   # legacy backlog: some deps lack py.typed markers
+  "misc",             # legacy backlog: Flask/Jinja decorator plumbing
 ]
 
 [tool.ruff]
@@ -73,7 +117,25 @@ line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP"]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "S"]
 ignore = [
   "E501",
+  "S101",   # use of assert — common in tests
+  "S110",   # try/except/pass — intentional best-effort cleanup paths
+  "S311",   # pseudo-random — not used for crypto
+  "S603",   # subprocess.run with fixed argv — no shell, no untrusted input
+  "S607",   # partial executable paths — fine for local subprocess helpers
+  "B007",   # legacy backlog: unused loop control variables
+  "B008",   # Flask/SQLAlchemy default-arg idioms
+  "B023",   # legacy backlog: loop-variable-in-closure
+  "B905",   # legacy backlog: zip() without strict=
+  "C408",   # stylistic backlog: dict() with keyword args
+  "SIM102", # legacy backlog: collapsible nested if
+  "SIM103", # legacy backlog: return-the-condition
+  "SIM105", # legacy backlog: contextlib.suppress rewrites
+  "SIM108", # ternary rewrites often hurt clarity here
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S", "B011", "SIM117"]
+"scripts/**/*.py" = ["S"]

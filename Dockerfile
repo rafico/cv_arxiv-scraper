@@ -17,9 +17,17 @@ RUN apt-get update \
     && "${VIRTUAL_ENV}/bin/python" -m pip install --upgrade pip setuptools wheel \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
+# Dep-layer cache: pinned transitive graph lives in requirements.lock and only
+# changes when deps are refreshed. Installing deps before copying the source
+# keeps the (expensive) torch/faiss/sentence-transformers wheels cached across
+# ordinary app-code edits.
+COPY requirements.lock ./
+RUN "${VIRTUAL_ENV}/bin/pip" install -r requirements.lock
 
-RUN "${VIRTUAL_ENV}/bin/pip" install -r requirements.txt
+# App-install layer: fast (metadata-only) because all deps are already present.
+COPY pyproject.toml README.md LICENSE ./
+COPY app ./app
+RUN "${VIRTUAL_ENV}/bin/pip" install --no-deps .
 
 FROM python:3.12-slim AS runtime
 
@@ -33,21 +41,22 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libgomp1 \
+    && apt-get install --yes --no-install-recommends libgomp1 curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --home-dir /home/appuser --shell /bin/bash appuser
+    && useradd --create-home --home-dir /home/appuser --shell /bin/bash appuser \
+    && install -d -o appuser -g appuser /app/instance
 
 COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 COPY --chown=appuser:appuser app ./app
-COPY --chown=appuser:appuser config.example.yaml digest_cli.py export_cli.py gmail_auth_setup.py run.py scrape_cli.py wsgi.py ./
-COPY --chown=appuser:appuser requirements.txt ./
-
-RUN install -d -o appuser -g appuser /app/instance
+COPY --chown=appuser:appuser config.example.yaml run.py wsgi.py ./
 
 USER appuser
 
 VOLUME ["/app/instance"]
 
 EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:5000/help/start || exit 1
 
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "2", "--worker-class", "gthread", "wsgi:app"]

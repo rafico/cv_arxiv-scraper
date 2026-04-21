@@ -25,7 +25,7 @@ DEFAULT_CREDENTIALS_PATH = _PROJECT_ROOT / "mendeley_credentials.json"
 DEFAULT_TOKEN_PATH = _PROJECT_ROOT / ".mendeley_token"
 
 MENDELEY_AUTH_URL = "https://api.mendeley.com/oauth/authorize"
-MENDELEY_TOKEN_URL = "https://api.mendeley.com/oauth/token"
+MENDELEY_TOKEN_URL = "https://api.mendeley.com/oauth/token"  # noqa: S105 — OAuth endpoint URL, not a secret
 MENDELEY_API_BASE = "https://api.mendeley.com"
 
 

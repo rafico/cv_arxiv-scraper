@@ -237,10 +237,10 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             paper.id,
             {"counts": {a.value: 0 for a in FeedbackAction}, "active_actions": []},
         )
-        paper.feedback_counts = feedback["counts"]  # type: ignore[attr-defined]
-        paper.active_actions = feedback["active_actions"]  # type: ignore[attr-defined]
-        paper.rank_score_value = combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0))  # type: ignore[attr-defined]
-        paper.score_breakdown = explain_score(  # type: ignore[attr-defined]
+        paper.feedback_counts = feedback["counts"]
+        paper.active_actions = feedback["active_actions"]
+        paper.rank_score_value = combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0))
+        paper.score_breakdown = explain_score(
             match_types=[part.strip() for part in (paper.match_type or "").split("+") if part.strip()],
             matched_terms_count=len(paper.matched_terms_list),
             publication_dt=paper.publication_dt,
@@ -251,11 +251,11 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
         )
         primary_author = first_author_name(paper.authors)
         primary_topic = next((topic for topic in paper.topic_tags_list if topic), "")
-        paper.follow_recommendation = {  # type: ignore[attr-defined]
+        paper.follow_recommendation = {
             "label": primary_author,
             "available": bool(primary_author) and primary_author not in followed_authors,
         }
-        paper.mute_recommendation = {  # type: ignore[attr-defined]
+        paper.mute_recommendation = {
             "label": primary_topic,
             "available": bool(primary_topic) and primary_topic not in muted_topics,
         }
@@ -263,9 +263,9 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
         related_ids = top_related_papers(paper.id, vectors_by_id, top_k=3)
         paper.related_papers = [
             candidate_by_id[related_id] for related_id in related_ids if related_id in candidate_by_id
-        ]  # type: ignore[attr-defined]
+        ]
 
-        paper.ranking_explanations = generate_ranking_explanation(paper, config=config)  # type: ignore[attr-defined]
+        paper.ranking_explanations = generate_ranking_explanation(paper, config=config)
 
 
 @dashboard_bp.route("/")
@@ -415,9 +415,9 @@ def index():
         .first()
     )
     type_counts = {
-        "Author": int(type_counts_row.author_count or 0),  # type: ignore[union-attr]
-        "Affiliation": int(type_counts_row.affiliation_count or 0),  # type: ignore[union-attr]
-        "Title": int(type_counts_row.title_count or 0),  # type: ignore[union-attr]
+        "Author": int(type_counts_row.author_count or 0),
+        "Affiliation": int(type_counts_row.affiliation_count or 0),
+        "Title": int(type_counts_row.title_count or 0),
     }
 
     candidate_pool = (
