@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from collections.abc import Callable, Sequence
 from datetime import date
@@ -16,8 +15,6 @@ from app.constants import ARXIV_API_DELAY as _ARXIV_API_DELAY
 from app.services.http_client import request_with_backoff
 from app.services.ingest.base import PaperCandidate, clean_abstract, extract_arxiv_id, parse_publication_dt
 from app.services.text import clean_whitespace
-
-LOGGER = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[int, PaperCandidate], None]
 
@@ -111,57 +108,54 @@ class ArxivApiBackend:
         resume_page = ((start // self.page_size) + 1) if resume_after_arxiv_id else None
         resume_consumed = resume_after_arxiv_id is None
 
-        try:
-            while len(results) < max_results:
-                if start > max(0, int(offset)) and self.delay_seconds > 0:
-                    time.sleep(self.delay_seconds)
+        while len(results) < max_results:
+            if start > max(0, int(offset)) and self.delay_seconds > 0:
+                time.sleep(self.delay_seconds)
 
-                batch_limit = min(self.page_size, max_results - len(results))
-                response = request_with_backoff(
-                    "GET",
-                    _ARXIV_API_URL,
-                    params={
-                        "search_query": query_str,
-                        "sortBy": "submittedDate",
-                        "sortOrder": "descending",
-                        "start": start,
-                        "max_results": batch_limit,
-                    },
-                    timeout=_ARXIV_API_TIMEOUT,
-                    attempts=_ARXIV_API_ATTEMPTS,
-                    base_delay=_ARXIV_API_BASE_DELAY,
-                    rate_limit_profile="bulk",
-                    session=session,
-                    user_agent=user_agent,
-                )
-                root = ET.fromstring(response.text)
-                entries = root.findall("atom:entry", _ATOM_NS)
-                if not entries:
+            batch_limit = min(self.page_size, max_results - len(results))
+            response = request_with_backoff(
+                "GET",
+                _ARXIV_API_URL,
+                params={
+                    "search_query": query_str,
+                    "sortBy": "submittedDate",
+                    "sortOrder": "descending",
+                    "start": start,
+                    "max_results": batch_limit,
+                },
+                timeout=_ARXIV_API_TIMEOUT,
+                attempts=_ARXIV_API_ATTEMPTS,
+                base_delay=_ARXIV_API_BASE_DELAY,
+                rate_limit_profile="bulk",
+                session=session,
+                user_agent=user_agent,
+            )
+            root = ET.fromstring(response.text)
+            entries = root.findall("atom:entry", _ATOM_NS)
+            if not entries:
+                break
+
+            for batch_index, entry in enumerate(entries):
+                candidate = _parse_atom_candidate(entry)
+                current_page = ((start + batch_index) // self.page_size) + 1
+
+                if not resume_consumed and resume_page is not None:
+                    if current_page > resume_page:
+                        resume_consumed = True
+                    elif candidate.arxiv_id == resume_after_arxiv_id:
+                        resume_consumed = True
+                        continue
+                    else:
+                        continue
+
+                results.append(candidate)
+                if progress_callback is not None:
+                    progress_callback(current_page, candidate)
+                if len(results) >= max_results:
                     break
 
-                for batch_index, entry in enumerate(entries):
-                    candidate = _parse_atom_candidate(entry)
-                    current_page = ((start + batch_index) // self.page_size) + 1
-
-                    if not resume_consumed and resume_page is not None:
-                        if current_page > resume_page:
-                            resume_consumed = True
-                        elif candidate.arxiv_id == resume_after_arxiv_id:
-                            resume_consumed = True
-                            continue
-                        else:
-                            continue
-
-                    results.append(candidate)
-                    if progress_callback is not None:
-                        progress_callback(current_page, candidate)
-                    if len(results) >= max_results:
-                        break
-
-                if len(entries) < batch_limit:
-                    break
-                start += batch_limit
-        except Exception as exc:
-            LOGGER.error("Direct arXiv API query failed: %s", exc)
+            if len(entries) < batch_limit:
+                break
+            start += batch_limit
 
         return results

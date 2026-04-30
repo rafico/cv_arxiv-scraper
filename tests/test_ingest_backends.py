@@ -147,6 +147,20 @@ class ArxivApiBackendTests(TestCase):
         self.assertEqual(mock_request.call_args.kwargs["params"]["max_results"], 25)
         self.assertEqual(mock_request.call_args.kwargs["params"]["start"], 0)
 
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff", side_effect=RuntimeError("network down"))
+    def test_fetch_propagates_request_errors(self, mock_request):
+        backend = ArxivApiBackend()
+
+        with self.assertRaisesRegex(RuntimeError, "network down"):
+            backend.fetch(
+                categories=["cs.CV"],
+                start_dt=date(2026, 4, 1),
+                end_dt=date(2026, 4, 2),
+                max_results=25,
+            )
+
+        mock_request.assert_called_once()
+
     @patch("app.services.ingest.arxiv_api_backend.ArxivApiBackend.fetch")
     def test_query_arxiv_api_preserves_legacy_dict_shape(self, mock_fetch):
         mock_fetch.return_value = [
