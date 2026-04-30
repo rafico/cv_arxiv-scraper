@@ -696,15 +696,18 @@
 
     const FEEDBACK_STYLES = {
         save:   { active: ["bg-emerald-50", "text-emerald-700", "border-emerald-200"] },
+        priority: { active: ["bg-amber-50", "text-amber-700", "border-amber-200"] },
         skip:   { active: ["bg-rose-50", "text-rose-700", "border-rose-200"] },
+        shared: { active: ["bg-blue-50", "text-blue-700", "border-blue-200"] },
     };
+    const DEFAULT_ACTIVE_STYLE = ["bg-gray-100", "text-gray-700", "border-gray-300"];
     const INACTIVE_STYLES = ["bg-white", "text-gray-600", "border-gray-200", "hover:bg-gray-50"];
 
     function updateFeedbackButton(button, isActive, action, count) {
         const countEl = button.querySelector(".count");
         if (countEl) countEl.textContent = String(count);
 
-        const styles = FEEDBACK_STYLES[action];
+        const styles = FEEDBACK_STYLES[action] || { active: DEFAULT_ACTIVE_STYLE };
         button.className = "feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border transition-opacity";
         button.classList.add(...(isActive ? styles.active : INACTIVE_STYLES));
     }
