@@ -570,6 +570,23 @@ class PostScrapePipelineTests(FlaskDBTestCase):
 
         self.assertEqual(mock_gen.call_count, 2)
 
+    def test_generate_thumbnails_preserves_pdf_content_for_later_pipeline_steps(self):
+        from app.services.scrape_engine import _generate_thumbnails
+
+        pdf_content = b"%PDF-1.4 cached bytes"
+        results = [
+            {
+                "arxiv_id": "2607.0001",
+                "pdf_link": "https://arxiv.org/pdf/2607.0001",
+                "pdf_content": pdf_content,
+            },
+        ]
+
+        with patch("app.services.thumbnail_generator.generate_thumbnail"):
+            _generate_thumbnails(self.app, results, MagicMock())
+
+        self.assertEqual(results[0]["pdf_content"], pdf_content)
+
     def test_generate_embeddings_adds_new_papers_to_index(self):
         from app.services.scrape_engine import _generate_embeddings
 

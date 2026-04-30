@@ -417,7 +417,7 @@ def _generate_thumbnails(app, results: list[dict], session: requests.Session) ->
     def worker(res):
         arxiv_id = res.get("arxiv_id") or (res.get("link") or "").split("/")[-1]
         pdf_link = res.get("pdf_link")
-        pdf_content = res.pop("pdf_content", None)
+        pdf_content = res.get("pdf_content")
         if arxiv_id and pdf_link:
             generate_thumbnail(arxiv_id, pdf_link, static_folder, session=session, pdf_content=pdf_content)
 
