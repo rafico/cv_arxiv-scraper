@@ -31,6 +31,10 @@ If you skip the copy step, the app will run from `config.example.yaml` defaults 
 
 > **Note:** this app has **no authentication** and is designed for single-user localhost use. It refuses to bind to a non-loopback address unless you pass `--expose`, which should only be used behind a reverse-proxy that adds its own auth.
 
+Docker Compose follows the same local-only default by publishing the container as
+`127.0.0.1:5000:5000`. If you intentionally publish it on a network interface,
+put it behind an authenticated reverse proxy first.
+
 ---
 
 ## Tell it what you care about

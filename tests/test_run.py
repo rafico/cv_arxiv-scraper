@@ -99,6 +99,11 @@ class RunEntryPointTests(unittest.TestCase):
         )
         self.assertEqual(exit_code, 0)
 
+    def test_default_worker_count_is_one_for_in_process_scrape_jobs(self):
+        args = run.build_parser(default_port=5123, default_workers=1).parse_args([])
+
+        self.assertEqual(args.workers, 1)
+
     def test_localhost_name_treated_as_loopback(self):
         fake_app = Mock()
         exit_code = run.main(

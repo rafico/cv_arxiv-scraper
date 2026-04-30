@@ -9,6 +9,7 @@ from threading import Timer
 from app import create_app
 
 DEFAULT_PORT = int(os.environ.get("PORT", 5000))
+DEFAULT_WORKERS = int(os.environ.get("WEB_CONCURRENCY", 1))
 
 
 def _host_is_loopback(host: str) -> bool:
@@ -27,12 +28,20 @@ def _find_free_port(start, attempts=10):
     raise RuntimeError(f"No free port found in range {start}-{start + attempts - 1}")
 
 
-def build_parser(default_port=DEFAULT_PORT):
+def build_parser(default_port=DEFAULT_PORT, default_workers=DEFAULT_WORKERS):
     parser = argparse.ArgumentParser(description="Run the CV arXiv scraper server")
     parser.add_argument("--debug", action="store_true", help="Run in debug mode with Flask dev server")
     parser.add_argument("--port", type=int, default=default_port, help=f"Port to listen on (default: {default_port})")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
-    parser.add_argument("--workers", type=int, default=2, help="Number of gunicorn workers")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=default_workers,
+        help=(
+            "Number of gunicorn workers. Defaults to 1 because scrape progress "
+            "events are stored in process memory."
+        ),
+    )
     parser.add_argument("--threads", type=int, default=2, help="Number of threads per worker")
     parser.add_argument("--no-browser", action="store_true", help="Don't open browser on start")
     parser.add_argument(
@@ -82,6 +91,12 @@ def main(argv=None, *, app_factory=create_app, timer_factory=Timer, browser_open
     if not _host_is_loopback(args.host) and args.expose:
         print(
             f"\033[31mWARNING: binding to {args.host} with no authentication — anyone on the network can access the app.\033[0m",
+            file=sys.stderr,
+        )
+    if args.workers != 1:
+        print(
+            "WARNING: scrape progress streaming uses in-process state; multiple workers can make /api/scrape/stream "
+            "miss jobs started by another worker.",
             file=sys.stderr,
         )
 
