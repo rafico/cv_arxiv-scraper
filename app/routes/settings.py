@@ -244,6 +244,7 @@ def upload_credentials():
     from app.services.email_digest import DEFAULT_CREDENTIALS_PATH, validate_credentials_redirect_uris
 
     DEFAULT_CREDENTIALS_PATH.write_bytes(raw)
+    DEFAULT_CREDENTIALS_PATH.chmod(0o600)
 
     callback_uri = url_for("settings.gmail_callback", _external=True)
     uri_check = validate_credentials_redirect_uris(callback_uri)

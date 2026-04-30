@@ -363,7 +363,7 @@
             <div class="flex flex-wrap gap-1 mb-2 user-tags-container" data-paper-id="{{ paper.id }}">
                 {% for tag in paper.user_tags_list %}
                 <span class="user-tag inline-flex items-center gap-0.5 text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded cursor-pointer hover:bg-indigo-100"
-                      onclick="removeTag({{ paper.id }}, '{{ tag }}', this)">{{ tag }} &times;</span>
+                      data-tag="{{ tag }}" onclick="removeTag({{ paper.id }}, this.dataset.tag, this)">{{ tag }} &times;</span>
                 {% endfor %}
                 <button type="button" onclick="promptAddTag({{ paper.id }}, this)"
                         class="text-[11px] text-indigo-400 hover:text-indigo-600 px-1 py-0.5">+ tag</button>
@@ -848,6 +848,7 @@
             data.user_tags.forEach(t => {
                 const span = document.createElement('span');
                 span.className = 'user-tag inline-flex items-center gap-0.5 text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded cursor-pointer hover:bg-indigo-100';
+                span.dataset.tag = t;
                 span.textContent = t + ' \u00d7';
                 span.onclick = () => removeTag(paperId, t, span);
                 container.insertBefore(span, button);

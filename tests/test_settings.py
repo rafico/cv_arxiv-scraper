@@ -118,6 +118,7 @@ class UploadCredentialsTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/settings", response.headers["Location"])
         mock_creds_path.write_bytes.assert_called_once_with(valid_json)
+        mock_creds_path.chmod.assert_called_once_with(0o600)
 
     @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
     def test_upload_rejects_invalid_json(self, mock_creds_path):

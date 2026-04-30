@@ -79,6 +79,18 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertTrue(data["active"])
         self.assertEqual(data["counts"]["save"], 1)
 
+    def test_user_tag_with_quote_is_not_injected_into_inline_js_string(self):
+        paper = Paper.query.first()
+        paper.user_tags = ['bad";alert(1)//']
+        db.session.commit()
+
+        response = self.client.get("/")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-tag="bad&#34;;alert(1)//"', text)
+        self.assertNotIn(f"removeTag({paper.id}, 'bad", text)
+
     def test_saved_view_lists_only_saved_papers(self):
         saved_paper = Paper.query.filter_by(title="Paper 0").first()
         apply_feedback_action(saved_paper.id, "save")
