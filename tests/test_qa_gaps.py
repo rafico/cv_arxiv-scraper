@@ -8,6 +8,8 @@ digest endpoints, Zotero sync, and post-scrape enrichment pipeline.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from pathlib import Path
+from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from app.models import (
@@ -622,3 +624,33 @@ class PostScrapePipelineTests(FlaskDBTestCase):
             _generate_embeddings(self.app, results)
 
         mock_service.add_papers.assert_not_called()
+
+
+class SaveConfigTests(TestCase):
+    def test_falls_back_to_in_place_write_when_rename_fails(self):
+        import os
+        import tempfile
+
+        import yaml
+
+        from app.services.preferences import save_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text("old: 1\n", encoding="utf-8")
+
+            real_replace = os.replace
+
+            def fake_replace(src, dst, *args, **kwargs):
+                # Simulate a single-file bind mount: rename over the destination
+                # fails, but writing through it directly still works.
+                if str(dst) == str(config_path):
+                    raise OSError(16, "Device or resource busy")
+                return real_replace(src, dst, *args, **kwargs)
+
+            with patch("app.services.preferences.os.replace", side_effect=fake_replace):
+                save_config(config_path, {"new": 2})
+
+            self.assertEqual(yaml.safe_load(config_path.read_text(encoding="utf-8")), {"new": 2})
+            # The temp file must not be left behind.
+            self.assertEqual(list(Path(tmpdir).glob("*.yaml")), [config_path])

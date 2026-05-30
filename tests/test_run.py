@@ -100,9 +100,11 @@ class RunEntryPointTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
 
     def test_default_worker_count_is_one_for_in_process_scrape_jobs(self):
-        args = run.build_parser(default_port=5123, default_workers=1).parse_args([])
-
-        self.assertEqual(args.workers, 1)
+        # The shipped default must be a single worker (in-process scrape state),
+        # and build_parser() must wire that module default through — exercise the
+        # real default rather than passing one in.
+        self.assertEqual(run.DEFAULT_WORKERS, 1)
+        self.assertEqual(run.build_parser().parse_args([]).workers, run.DEFAULT_WORKERS)
 
     def test_localhost_name_treated_as_loopback(self):
         fake_app = Mock()

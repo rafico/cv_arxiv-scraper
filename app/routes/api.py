@@ -129,7 +129,13 @@ def search_historical():
         return jsonify({"error": "Dates must be in YYYY-MM-DD format"}), 400
 
     app = current_app._get_current_object()
-    summary = execute_historical_scrape(app, categories, start_dt, end_dt)
+    try:
+        summary = execute_historical_scrape(app, categories, start_dt, end_dt)
+    except Exception:
+        current_app.logger.exception("Historical scrape failed")
+        return jsonify(
+            {"error": "Historical search failed. The arXiv API may be temporarily unavailable; please try again."}
+        ), 502
     return jsonify(summary)
 
 

@@ -100,6 +100,24 @@ class ScrapeApiQaTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("required", response.get_json()["error"])
 
+    @patch(
+        "app.services.scrape_engine.execute_historical_scrape",
+        side_effect=RuntimeError("arXiv API unavailable"),
+    )
+    def test_search_historical_returns_502_when_fetch_fails(self, mock_historical):
+        response = self.client.post(
+            "/api/search/historical",
+            json={
+                "categories": ["cs.CV"],
+                "start_date": "2026-04-01",
+                "end_date": "2026-04-03",
+            },
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("arXiv", response.get_json()["error"])
+
 
 class ScrapeRunQaTests(FlaskDBTestCase):
     def test_execute_scrape_records_forced_successful_run(self):

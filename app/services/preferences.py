@@ -105,20 +105,31 @@ def update_preferences_from_form(config: dict, form) -> dict:
 
 
 def save_config(config_path: Path, full_config: dict) -> dict:
-    """Atomically write config to disk using write-to-temp + rename."""
+    """Write config to disk atomically (write-to-temp + rename).
+
+    Falls back to an in-place write when the destination cannot be replaced by
+    rename — e.g. a Docker single-file bind mount, where renaming over the mount
+    point fails with EBUSY/EINVAL. Atomicity is preserved on the common path.
+    """
     with _CONFIG_LOCK:
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        serialized = yaml.safe_dump(full_config, default_flow_style=False, sort_keys=False)
         fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".yaml")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                yaml.safe_dump(full_config, handle, default_flow_style=False, sort_keys=False)
-            os.replace(tmp_path, config_path)
-        except BaseException:
+                handle.write(serialized)
+            try:
+                os.replace(tmp_path, config_path)
+            except OSError:
+                # Destination is likely a bind-mounted file; rename can't replace
+                # a mount point, so write through it in place instead.
+                with open(config_path, "w", encoding="utf-8") as handle:
+                    handle.write(serialized)
+        finally:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
-            raise
     return full_config
 
 

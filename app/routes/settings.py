@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from copy import deepcopy
 from pathlib import Path
 from secrets import token_urlsafe
@@ -243,8 +244,13 @@ def upload_credentials():
 
     from app.services.email_digest import DEFAULT_CREDENTIALS_PATH, validate_credentials_redirect_uris
 
-    DEFAULT_CREDENTIALS_PATH.write_bytes(raw)
-    DEFAULT_CREDENTIALS_PATH.chmod(0o600)
+    # Write with 0600 from creation so the OAuth client secret is never briefly
+    # world-readable (avoids a write-then-chmod TOCTOU window); the trailing
+    # chmod also tightens an already-existing file.
+    fd = os.open(DEFAULT_CREDENTIALS_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(raw)
+    os.chmod(DEFAULT_CREDENTIALS_PATH, 0o600)
 
     callback_uri = url_for("settings.gmail_callback", _external=True)
     uri_check = validate_credentials_redirect_uris(callback_uri)

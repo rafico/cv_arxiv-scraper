@@ -37,10 +37,7 @@ def build_parser(default_port=DEFAULT_PORT, default_workers=DEFAULT_WORKERS):
         "--workers",
         type=int,
         default=default_workers,
-        help=(
-            "Number of gunicorn workers. Defaults to 1 because scrape progress "
-            "events are stored in process memory."
-        ),
+        help=("Number of gunicorn workers. Defaults to 1 because scrape progress events are stored in process memory."),
     )
     parser.add_argument("--threads", type=int, default=2, help="Number of threads per worker")
     parser.add_argument("--no-browser", action="store_true", help="Don't open browser on start")
@@ -100,9 +97,15 @@ def main(argv=None, *, app_factory=create_app, timer_factory=Timer, browser_open
             file=sys.stderr,
         )
 
-    port = _find_free_port(args.port)
-    if port != args.port:
-        print(f"Port {args.port} in use, falling back to {port}", file=out)
+    if _host_is_loopback(args.host):
+        # Local dev convenience: hop to a free port if the requested one is busy.
+        port = _find_free_port(args.port)
+        if port != args.port:
+            print(f"Port {args.port} in use, falling back to {port}", file=out)
+    else:
+        # Exposed/containerized: the published port mapping and healthcheck target
+        # a fixed port, so honour it exactly and let the server fail loudly if taken.
+        port = args.port
 
     app = app_factory()
 

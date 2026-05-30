@@ -101,24 +101,29 @@ class UploadCredentialsTests(FlaskDBTestCase):
         response = self.client.post("/settings/upload-credentials")
         self.assertEqual(response.status_code, 400)
 
-    @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
-    def test_upload_saves_valid_json(self, mock_creds_path):
+    def test_upload_saves_valid_json(self):
+        import stat
+        import tempfile
+
         token = self._csrf_token()
         valid_json = b'{"web":{"client_id":"123","client_secret":"456"}}'
 
-        response = self.client.post(
-            "/settings/upload-credentials",
-            data={
-                "csrf_token": token,
-                "credentials_file": (io.BytesIO(valid_json), "credentials.json"),
-            },
-            content_type="multipart/form-data",
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            creds_path = Path(tmpdir) / "credentials.json"
+            with patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH", creds_path):
+                response = self.client.post(
+                    "/settings/upload-credentials",
+                    data={
+                        "csrf_token": token,
+                        "credentials_file": (io.BytesIO(valid_json), "credentials.json"),
+                    },
+                    content_type="multipart/form-data",
+                )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/settings", response.headers["Location"])
-        mock_creds_path.write_bytes.assert_called_once_with(valid_json)
-        mock_creds_path.chmod.assert_called_once_with(0o600)
+                self.assertEqual(response.status_code, 302)
+                self.assertIn("/settings", response.headers["Location"])
+                self.assertEqual(creds_path.read_bytes(), valid_json)
+                self.assertEqual(stat.S_IMODE(creds_path.stat().st_mode), 0o600)
 
     @patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH")
     def test_upload_rejects_invalid_json(self, mock_creds_path):
