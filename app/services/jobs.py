@@ -28,6 +28,10 @@ class ScrapeJob:
 
 
 class ScrapeJobManager:
+    # INVARIANT: job state lives in this process's memory only. This is why the
+    # app runs a single web worker (run.py defaults to --workers 1): a job started
+    # in one worker is invisible to /api/scrape/stream served by another. Moving to
+    # multi-worker requires a shared job store (e.g. Redis/DB), not just this dict.
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="scrape-job")

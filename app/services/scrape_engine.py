@@ -207,6 +207,10 @@ def _process_paper_entry(
         interests_text=interests_text,
         config=product_config,
     )
+    # INVARIANT: pdf_content (PDF bytes, fetched once) rides along in the result
+    # dict and is consumed by the LAST pipeline steps — _generate_thumbnails AND
+    # _extract_sections. Don't .pop() it early (use .get()), or section extraction
+    # silently gets nothing. It is not persisted: _save_results maps explicit cols.
     result["pdf_content"] = pdf_content
     return result
 
