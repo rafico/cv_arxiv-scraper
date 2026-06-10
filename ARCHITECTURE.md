@@ -81,7 +81,8 @@ window degrades to `[]`.
 5. Add a test mirroring `tests/test_ingest_backends.py` (patch `request_with_backoff`).
 
 **Add an HTTP API endpoint**
-1. Add the view to the right Blueprint in `app/routes/` (`api.py` for `/api/*`).
+1. Add the view to the right Blueprint in `app/routes/` (the matching
+   `api/<feature>.py` module for `/api/*`).
 2. Guard mutations with `validate_csrf_token()`; keep the view thin (call a service).
 3. Map upstream/service failures to honest status codes (e.g. 502), not unhandled 500s.
 4. Escape user data into `data-*` attributes, not inline JS, in templates.

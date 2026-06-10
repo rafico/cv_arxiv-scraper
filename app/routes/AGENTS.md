@@ -12,8 +12,10 @@ belongs in [app/services](../services).
 - `settings.py` — settings UI + credential uploads, Gmail OAuth callback, config
   writes (via `save_config`). Note: credential files are written with `0600`.
 - `help.py` — static help/onboarding pages.
-- `api.py` — JSON API under `/api` (scrape stream, historical search, search,
-  collections, export, etc.).
+- `api/` — JSON API under `/api`, one shared `api_bp` blueprint assembled from
+  feature modules (`scrape`, `search`, `papers`, `export`, `collections`,
+  `saved_searches`, `feed_sources`). Add new endpoints to the matching module;
+  routes register on import via `api/__init__.py`.
 
 ## Conventions
 
