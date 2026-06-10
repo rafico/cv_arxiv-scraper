@@ -61,6 +61,11 @@ class RankedPaper:
             "llm_relevance_score": self.features.llm_relevance,
             "publication_dt": entry.get("publication_dt"),
             "publication_date": entry.get("publication_date", "Date Unknown"),
+            # INVARIANT: pdf_content (PDF bytes, fetched once during candidate
+            # generation) rides along in the result dict and is consumed by the
+            # LAST pipeline steps — _generate_thumbnails AND _extract_sections.
+            # Don't .pop() it early (use .get()), or section extraction silently
+            # gets nothing. It is not persisted: _save_results maps explicit cols.
             "pdf_content": self.pdf_content,
         }
 

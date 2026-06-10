@@ -36,11 +36,7 @@ class CandidateGenerator(Protocol):
 
 
 class WhitelistCandidateGenerator:
-    """Generates candidates by matching against author/title/affiliation whitelists.
-
-    Extracts logic from scrape_engine._check_fast_matches() and the affiliation
-    matching portion of _process_paper_entry().
-    """
+    """Generates candidates by matching against author/title/affiliation whitelists."""
 
     def __init__(
         self,
@@ -57,7 +53,7 @@ class WhitelistCandidateGenerator:
     def generate(self, papers: list[dict[str, Any]]) -> list[ScoredCandidate]:
         candidates = []
         for entry_data in papers:
-            candidate = self._process_single(entry_data)
+            candidate = self.process_single(entry_data)
             if candidate is not None:
                 candidates.append(candidate)
         return candidates
@@ -125,7 +121,7 @@ class WhitelistCandidateGenerator:
             return True
         return False
 
-    def _process_single(self, entry_data: dict) -> ScoredCandidate | None:
+    def process_single(self, entry_data: dict) -> ScoredCandidate | None:
         """Process a single paper entry through the candidate generation pipeline."""
         fast_matches = self._check_fast_matches(entry_data)
         affiliation_matches, pdf_content = self._check_affiliations(entry_data)

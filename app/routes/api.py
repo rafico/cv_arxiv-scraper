@@ -1,11 +1,9 @@
-from pathlib import Path
-
 from flask import Blueprint, Response, abort, current_app, jsonify, request
 
-from app import _validate_config
 from app.csrf import validate_csrf_token
 from app.enums import FeedbackAction, ReadingStatus
 from app.models import Collection, Paper, PaperCollection, SavedSearch, db
+from app.routes._config import persist_config
 from app.services import SCRAPE_JOB_MANAGER, apply_feedback_action
 from app.services.bibtex import paper_to_bibtex, papers_to_bibtex
 from app.services.export import generate_html_report
@@ -13,15 +11,9 @@ from app.services.preferences import (
     append_muted_term,
     append_whitelist_term,
     first_author_name,
-    save_config,
 )
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
-
-
-def _activate_saved_config(full_config: dict) -> None:
-    current_app.config["SCRAPER_CONFIG"] = full_config
-    current_app.config["USING_DEFAULT_CONFIG"] = False
 
 
 def _parse_int_query_arg(
@@ -472,11 +464,8 @@ def follow_recommendation(paper_id: int):
     if not term:
         return jsonify({"error": "No author available to follow"}), 400
 
-    config_path = Path(current_app.config["CONFIG_PATH"])
     full_config, added = append_whitelist_term(current_app.config["SCRAPER_CONFIG"], "authors", term)
-    _validate_config(full_config, config_path=config_path)
-    save_config(config_path, full_config)
-    _activate_saved_config(full_config)
+    persist_config(full_config)
     return jsonify({"term": term, "added": added, "message": f"Following {term}."})
 
 
@@ -489,11 +478,8 @@ def mute_recommendation(paper_id: int):
     if not term:
         return jsonify({"error": "No topic available to mute"}), 400
 
-    config_path = Path(current_app.config["CONFIG_PATH"])
     full_config, added = append_muted_term(current_app.config["SCRAPER_CONFIG"], "topics", term)
-    _validate_config(full_config, config_path=config_path)
-    save_config(config_path, full_config)
-    _activate_saved_config(full_config)
+    persist_config(full_config)
     return jsonify({"term": term, "added": added, "message": f"Muted topic {term}."})
 
 

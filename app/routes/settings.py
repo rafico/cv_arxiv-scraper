@@ -19,10 +19,10 @@ from flask import (
     url_for,
 )
 
-from app import _validate_config
 from app.constants import DEFAULT_LLM_MODEL, GEMMA_MODELS
 from app.csrf import get_or_create_csrf_token, validate_csrf_token
 from app.models import Paper, db
+from app.routes._config import activate_saved_config, persist_config
 from app.services.llm_client import has_api_key, write_api_key
 from app.services.preferences import get_preferences, save_config, update_preferences_from_form
 from app.services.ranking import recompute_all_paper_scores
@@ -45,7 +45,7 @@ def _save_config_key(key: str, value) -> None:
     full_config[key] = value
 
     save_config(config_path, full_config)
-    _activate_saved_config(full_config)
+    activate_saved_config(full_config)
 
 
 def _load_full_config() -> dict:
@@ -54,11 +54,6 @@ def _load_full_config() -> dict:
         with config_path.open("r", encoding="utf-8") as handle:
             return yaml.safe_load(handle)
     return deepcopy(current_app.config["SCRAPER_CONFIG"])
-
-
-def _activate_saved_config(full_config: dict) -> None:
-    current_app.config["SCRAPER_CONFIG"] = full_config
-    current_app.config["USING_DEFAULT_CONFIG"] = False
 
 
 def _llm_provider_defaults(provider: str) -> dict[str, str]:
@@ -167,7 +162,6 @@ def view_settings():
 def save_settings():
     validate_csrf_token()
 
-    config_path = Path(current_app.config["CONFIG_PATH"])
     new_whitelists = {
         "titles": _normalize_multiline(request.form.get("titles", "")),
         "affiliations": _normalize_multiline(request.form.get("affiliations", "")),
@@ -177,13 +171,11 @@ def save_settings():
     full_config["whitelists"] = new_whitelists
 
     try:
-        _validate_config(full_config, config_path=config_path)
+        persist_config(full_config)
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("settings.view_settings", section="interests"))
 
-    save_config(config_path, full_config)
-    _activate_saved_config(full_config)
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Settings saved successfully.", "success")
     return redirect(url_for("settings.view_settings", section="interests"))
@@ -193,16 +185,13 @@ def save_settings():
 def save_preferences():
     validate_csrf_token()
 
-    config_path = Path(current_app.config["CONFIG_PATH"])
     try:
         full_config = update_preferences_from_form(_load_full_config(), request.form)
-        _validate_config(full_config, config_path=config_path)
+        persist_config(full_config)
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("settings.view_settings", section="controls"))
 
-    save_config(config_path, full_config)
-    _activate_saved_config(full_config)
     recompute_all_paper_scores(current_app._get_current_object())
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Ranking and mute preferences saved.", "success")
@@ -290,7 +279,6 @@ def save_email_settings():
 def save_llm_settings():
     validate_csrf_token()
 
-    config_path = Path(current_app.config["CONFIG_PATH"])
     key_path = Path(current_app.config["LLM_KEY_PATH"])
     enabled = request.form.get("llm_enabled") == "on"
     provider = request.form.get("llm_provider", "openrouter").strip()
@@ -324,13 +312,11 @@ def save_llm_settings():
         write_api_key(api_key, key_path)
 
     try:
-        _validate_config(full_config, config_path=config_path)
+        persist_config(full_config)
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("settings.view_settings", section="ai"))
 
-    save_config(config_path, full_config)
-    _activate_saved_config(full_config)
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("LLM settings saved.", "success")
     return redirect(url_for("settings.view_settings", section="ai"))

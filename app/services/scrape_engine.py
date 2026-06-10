@@ -14,19 +14,12 @@ from sqlalchemy.exc import IntegrityError
 from app.constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_WORKERS
 from app.services.enrichment import (
     enrich_entries_with_api_metadata,
-    extract_affiliation_text,
     fetch_recent_papers,
     parse_feed_entries,
 )
-from app.services.http_client import create_session, request_with_backoff, resolve_user_agent
+from app.services.http_client import create_session, resolve_user_agent
 from app.services.ingest import IngestMode, IngestOrchestrator, PaperCandidate
 from app.services.llm_client import LLMClient, resolve_api_key
-from app.services.matching import (
-    MATCH_PRIORITY,
-    check_author_match,
-    check_whitelist_match,
-    dedupe_preserve_order,
-)
 from app.services.pipeline import WeightedSumRanker, WhitelistCandidateGenerator
 from app.services.preferences import get_preferences
 from app.services.ranking import compute_paper_score
@@ -78,143 +71,6 @@ def _emit(callback: EventCallback, event: str, data: dict) -> None:
         callback(event, data)
 
 
-def _build_result(
-    entry_data: dict,
-    category_matches: dict[str, list[str]],
-    llm_client: LLMClient | None = None,
-    interests_text: str = "",
-    config: dict | None = None,
-) -> dict:
-    """Assemble a result dict from an entry and its matches."""
-    match_types = [name for name, terms in category_matches.items() if terms]
-    matched_terms = dedupe_preserve_order(term for terms in category_matches.values() for term in terms)
-    title = entry_data["title"]
-    abstract = entry_data.get("abstract", "")
-    summary_text = (
-        generate_llm_summary(llm_client, title, abstract)
-        if llm_client is not None
-        else generate_summary(title, abstract)
-    )
-    llm_relevance_score = llm_client.rate_relevance(title, abstract, interests_text) if llm_client is not None else None
-
-    topic_tags = extract_topic_tags(title, abstract)
-
-    return {
-        "arxiv_id": entry_data.get("arxiv_id"),
-        "title": title,
-        "authors": entry_data["author"],
-        "link": entry_data["link"],
-        "pdf_link": entry_data["link"].replace("/abs/", "/pdf/"),
-        "abstract_text": abstract,
-        "summary_text": summary_text,
-        "topic_tags": topic_tags,
-        "categories": entry_data.get("categories", []),
-        "resource_links": entry_data.get("resource_links", []),
-        "matches": matched_terms,
-        "match_types": match_types,
-        "match_type": " + ".join(match_types),
-        "match_priority": min(MATCH_PRIORITY[name] for name in match_types),
-        "paper_score": compute_paper_score(
-            match_types=match_types,
-            matched_terms_count=len(matched_terms),
-            publication_dt=entry_data.get("publication_dt"),
-            resource_count=len(entry_data.get("resource_links", [])),
-            llm_relevance_score=llm_relevance_score,
-            config=config,
-        ),
-        "llm_relevance_score": llm_relevance_score,
-        "publication_dt": entry_data.get("publication_dt"),
-        "publication_date": entry_data.get("publication_date", "Date Unknown"),
-    }
-
-
-def _check_fast_matches(entry_data: dict, whitelists: dict) -> dict[str, list[str]]:
-    """Check title and author matches — no network needed."""
-    return {
-        "Author": check_author_match(entry_data["authors_list"], whitelists["authors"]),
-        "Title": check_whitelist_match(
-            [entry_data["title"], entry_data.get("abstract", "")],
-            whitelists["titles"],
-        ),
-    }
-
-
-def _process_paper_entry(
-    entry_data: dict,
-    whitelists: dict,
-    scraper_config: dict,
-    session: requests.Session | None = None,
-    llm_client: LLMClient | None = None,
-    interests_text: str = "",
-    product_config: dict | None = None,
-) -> dict | None:
-    # Phase 1: fast check — title and author (no PDF download).
-    fast_matches = _check_fast_matches(entry_data, whitelists)
-
-    # Phase 2: download PDF and check affiliations.
-    link = entry_data["link"]
-    pdf_url = link.replace("/abs/", "/pdf/")
-    affiliation_matches: list[str] = []
-
-    api_affiliations = entry_data.get("api_affiliations", "")
-    if api_affiliations:
-        affiliation_matches = check_whitelist_match([api_affiliations], whitelists["affiliations"])
-
-    pdf_content = None
-
-    if not affiliation_matches:
-        try:
-            pdf_response = request_with_backoff(
-                "GET",
-                pdf_url,
-                timeout=30,
-                attempts=scraper_config.get("pdf_attempts", 2),
-                base_delay=1.0,
-                session=session,
-            )
-            pdf_content = pdf_response.content
-            affiliation_text = extract_affiliation_text(
-                pdf_content,
-                lines_start=scraper_config.get("pdf_lines_start", 2),
-                max_header_lines=scraper_config.get("pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)),
-                smart_header=scraper_config.get("pdf_smart_header", True),
-            )
-            if affiliation_text:
-                affiliation_matches = check_whitelist_match([affiliation_text], whitelists["affiliations"])
-        except Exception as exc:
-            LOGGER.warning("Error fetching PDF for %s: %s", link, exc)
-
-    category_matches = {**fast_matches, "Affiliation": affiliation_matches}
-
-    if not any(category_matches.values()):
-        return None
-
-    # Check mute filters before expensive LLM calls.
-    preferences = get_preferences(product_config)
-    muted = preferences["muted"]
-    if check_author_match(entry_data["authors_list"], muted["authors"]):
-        return None
-    if check_whitelist_match([entry_data.get("api_affiliations", "")], muted["affiliations"]):
-        return None
-    topic_tags = extract_topic_tags(entry_data["title"], entry_data.get("abstract", ""))
-    if check_whitelist_match(topic_tags, muted["topics"]):
-        return None
-
-    result = _build_result(
-        entry_data,
-        category_matches,
-        llm_client=llm_client,
-        interests_text=interests_text,
-        config=product_config,
-    )
-    # INVARIANT: pdf_content (PDF bytes, fetched once) rides along in the result
-    # dict and is consumed by the LAST pipeline steps — _generate_thumbnails AND
-    # _extract_sections. Don't .pop() it early (use .get()), or section extraction
-    # silently gets nothing. It is not persisted: _save_results maps explicit cols.
-    result["pdf_content"] = pdf_content
-    return result
-
-
 def _enrich_candidate_with_llm(
     candidate,
     llm_client: LLMClient | None,
@@ -247,8 +103,8 @@ def _process_entries_with_pipeline(
 ):
     """Process entries using the ranking pipeline (candidates -> features -> rank).
 
-    Yields (processed, matched, result_dict) tuples for streaming progress,
-    maintaining the same interface as _process_entries_parallel.
+    Yields (processed, matched, result_dict) tuples for streaming progress;
+    result_dict is None for entries that did not match.
     """
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     preferences = get_preferences(product_config)
@@ -266,7 +122,7 @@ def _process_entries_with_pipeline(
     matched = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(generator._process_single, entry): entry for entry in entries}
+        futures = {executor.submit(generator.process_single, entry): entry for entry in entries}
 
         for future in as_completed(futures):
             entry = futures[future]
@@ -313,6 +169,26 @@ def _identity_keys(data: dict) -> set[str]:
     if isinstance(arxiv_id, str) and arxiv_id:
         keys.add(arxiv_id)
     return keys
+
+
+def _filter_existing_entries(app, entries: list[dict]) -> tuple[list[dict], int]:
+    """Drop entries already stored in the DB before doing any heavy work.
+
+    Returns (remaining_entries, dropped_count).
+    """
+    existing_ids = _get_existing_ids(app, entries)
+    if not existing_ids:
+        return entries, 0
+
+    remaining = [entry for entry in entries if not _identity_keys(entry).intersection(existing_ids)]
+    pre_filtered = len(entries) - len(remaining)
+    if pre_filtered:
+        LOGGER.info(
+            "Skipped %d already-stored papers, %d new to process",
+            pre_filtered,
+            len(remaining),
+        )
+    return remaining, pre_filtered
 
 
 def _save_results(app, results: list[dict]) -> tuple[int, int]:
@@ -626,6 +502,28 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
     return client, interests_text
 
 
+def _rescore_result(res: dict, config: dict | None) -> None:
+    """Recompute the paper score after enrichment added new signals (in-place)."""
+    res["paper_score"] = compute_paper_score(
+        match_types=res.get("match_types", []),
+        matched_terms_count=len(res.get("matches", [])),
+        publication_dt=res.get("publication_dt"),
+        resource_count=len(res.get("resource_links", [])),
+        llm_relevance_score=res.get("llm_relevance_score"),
+        citation_count=res.get("citation_count"),
+        config=config,
+    )
+
+
+def _mark_citation_source(res: dict, source: str, now) -> None:
+    res["citation_source"] = source
+    res["citation_provenance"] = {
+        "source": source,
+        "updated_at": now.isoformat(),
+    }
+    res["citation_updated_at"] = now
+
+
 def _enrich_results_with_citations(
     results: list[dict],
     session: requests.Session,
@@ -637,7 +535,6 @@ def _enrich_results_with_citations(
         return
 
     from app.services.citations import fetch_citations_batch
-    from app.services.ranking import compute_paper_score
 
     arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
     if not arxiv_ids:
@@ -655,21 +552,8 @@ def _enrich_results_with_citations(
             res["influential_citation_count"] = data.get("influential_citation_count")
             res["semantic_scholar_id"] = data.get("semantic_scholar_id")
             if res["citation_count"] is not None:
-                res["citation_source"] = "semantic_scholar"
-                res["citation_provenance"] = {
-                    "source": "semantic_scholar",
-                    "updated_at": now.isoformat(),
-                }
-                res["citation_updated_at"] = now
-            res["paper_score"] = compute_paper_score(
-                match_types=res.get("match_types", []),
-                matched_terms_count=len(res.get("matches", [])),
-                publication_dt=res.get("publication_dt"),
-                resource_count=len(res.get("resource_links", [])),
-                llm_relevance_score=res.get("llm_relevance_score"),
-                citation_count=res.get("citation_count"),
-                config=config,
-            )
+                _mark_citation_source(res, "semantic_scholar", now)
+            _rescore_result(res, config)
 
 
 def _enrich_results_with_openalex(
@@ -685,7 +569,6 @@ def _enrich_results_with_openalex(
         return
 
     from app.services.openalex import fetch_openalex_batch
-    from app.services.ranking import compute_paper_score
 
     arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
     if not arxiv_ids:
@@ -705,21 +588,83 @@ def _enrich_results_with_openalex(
             res["referenced_works_count"] = data.get("referenced_works_count")
             if res.get("citation_count") is None and res["openalex_cited_by_count"] is not None:
                 res["citation_count"] = res["openalex_cited_by_count"]
-                res["citation_source"] = "openalex"
-                res["citation_provenance"] = {
-                    "source": "openalex",
-                    "updated_at": now.isoformat(),
-                }
-                res["citation_updated_at"] = now
-                res["paper_score"] = compute_paper_score(
-                    match_types=res.get("match_types", []),
-                    matched_terms_count=len(res.get("matches", [])),
-                    publication_dt=res.get("publication_dt"),
-                    resource_count=len(res.get("resource_links", [])),
-                    llm_relevance_score=res.get("llm_relevance_score"),
-                    citation_count=res.get("citation_count"),
-                    config=config,
-                )
+                _mark_citation_source(res, "openalex", now)
+                _rescore_result(res, config)
+
+
+def _collect_matched_results(
+    entries: list[dict],
+    whitelists: dict,
+    scraper_config: dict,
+    session: requests.Session,
+    llm_client: LLMClient | None,
+    interests_text: str,
+    config: dict,
+    *,
+    total_entries: int,
+    event_callback: EventCallback = None,
+) -> list[dict]:
+    """Run entries through the ranking pipeline, emitting progress events."""
+    results: list[dict] = []
+    for processed, matched, result in _process_entries_with_pipeline(
+        entries,
+        whitelists,
+        scraper_config,
+        session,
+        llm_client,
+        interests_text,
+        product_config=config,
+    ):
+        payload = {"processed": processed, "total": total_entries, "matched": matched}
+        if result:
+            results.append(result)
+            _emit(
+                event_callback,
+                "match",
+                {
+                    **payload,
+                    "paper": {
+                        "title": result["title"],
+                        "match_type": result["match_type"],
+                        "match_types": result["match_types"],
+                        "matched_terms": result["matches"],
+                    },
+                },
+            )
+        else:
+            _emit(event_callback, "progress", payload)
+    return results
+
+
+def _finalize_results(
+    app,
+    results: list[dict],
+    session: requests.Session,
+    config: dict,
+    *,
+    pre_filtered: int,
+    total_entries: int,
+    event_callback: EventCallback = None,
+    now=None,
+) -> dict:
+    """Enrich, persist, and post-process matched results; returns the run summary."""
+    _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
+    _enrich_results_with_citations(results, session, config, now=now)
+    _enrich_results_with_openalex(results, session, config)
+
+    _sort_results(results)
+    new_count, skipped = _save_results(app, results)
+
+    _emit(event_callback, "status", {"phase": "thumbnails", "message": "Generating PDF thumbnails..."})
+    _generate_thumbnails(app, results, session)
+
+    _emit(event_callback, "status", {"phase": "embeddings", "message": "Generating embeddings..."})
+    _generate_embeddings(app, results)
+
+    _emit(event_callback, "status", {"phase": "sections", "message": "Extracting PDF sections..."})
+    _extract_sections(app, results)
+
+    return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
 
 
 def execute_scrape(app, event_callback: EventCallback = None, force: bool = False) -> dict:
@@ -782,18 +727,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         total_entries = len(entries)
         _emit(event_callback, "feed", {"total": total_entries})
 
-        # Skip entries already in the database before doing any heavy work.
-        existing_ids = _get_existing_ids(app, entries)
-        pre_filtered = 0
-        if existing_ids:
-            filtered_entries = [entry for entry in entries if not _identity_keys(entry).intersection(existing_ids)]
-            pre_filtered = len(entries) - len(filtered_entries)
-            entries = filtered_entries
-            LOGGER.info(
-                "Skipped %d already-stored papers, %d new to process",
-                pre_filtered,
-                len(entries),
-            )
+        entries, pre_filtered = _filter_existing_entries(app, entries)
 
         llm_client, interests_text = _create_llm_client(app)
 
@@ -810,63 +744,37 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             {"phase": "processing", "message": f"Processing {len(entries)} papers..."},
         )
 
-        results: list[dict] = []
-
-        for processed, matched, result in _process_entries_with_pipeline(
+        results = _collect_matched_results(
             entries,
             whitelists,
             scraper_config,
             session,
             llm_client,
             interests_text,
-            product_config=config,
-        ):
-            payload = {"processed": processed, "total": total_entries, "matched": matched}
-            if result:
-                results.append(result)
-                _emit(
-                    event_callback,
-                    "match",
-                    {
-                        **payload,
-                        "paper": {
-                            "title": result["title"],
-                            "match_type": result["match_type"],
-                            "match_types": result["match_types"],
-                            "matched_terms": result["matches"],
-                        },
-                    },
-                )
-            else:
-                _emit(event_callback, "progress", payload)
+            config,
+            total_entries=total_entries,
+            event_callback=event_callback,
+        )
 
-        _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
-
-        _enrich_results_with_citations(results, session, config, now=now)
-        _enrich_results_with_openalex(results, session, config)
-
-        _sort_results(results)
-        new_count, skipped = _save_results(app, results)
-
-        _emit(event_callback, "status", {"phase": "thumbnails", "message": "Generating PDF thumbnails..."})
-        _generate_thumbnails(app, results, session)
-
-        _emit(event_callback, "status", {"phase": "embeddings", "message": "Generating embeddings..."})
-        _generate_embeddings(app, results)
-
-        _emit(event_callback, "status", {"phase": "sections", "message": "Extracting PDF sections..."})
-        _extract_sections(app, results)
-
-        summary = _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
+        summary = _finalize_results(
+            app,
+            results,
+            session,
+            config,
+            pre_filtered=pre_filtered,
+            total_entries=total_entries,
+            event_callback=event_callback,
+            now=now,
+        )
         _emit(event_callback, "done", summary)
         _finish_scrape_run(app, scrape_run_id, status="success")
 
         LOGGER.info(
             "Scrape complete: %s new, %s duplicates, %s matched out of %s entries",
-            new_count,
-            skipped + pre_filtered,
-            len(results),
-            total_entries,
+            summary["new_papers"],
+            summary["duplicates_skipped"],
+            summary["total_matched"],
+            summary["total_in_feed"],
         )
         return summary
     except Exception:
@@ -889,9 +797,6 @@ def stream_or_start_scrape(app, force: bool = False):
 
 
 def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt: date) -> dict:
-    from app.services.enrichment import enrich_entries_with_api_metadata
-    from app.services.http_client import create_session
-
     config = app.config["SCRAPER_CONFIG"]
     whitelists = config["whitelists"]
     scraper_config = config["scraper"]
@@ -922,33 +827,29 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
         if not entries:
             return _build_summary(0, 0, 0, 0)
 
-        existing_ids = _get_existing_ids(app, entries)
-        pre_filtered = 0
-        if existing_ids:
-            filtered_entries = [e for e in entries if not _identity_keys(e).intersection(existing_ids)]
-            pre_filtered = len(entries) - len(filtered_entries)
-            entries = filtered_entries
+        entries, pre_filtered = _filter_existing_entries(app, entries)
 
         llm_client, interests_text = _create_llm_client(app)
         enrich_entries_with_api_metadata(entries, session=session)
 
-        results = []
-        for processed, matched, result in _process_entries_with_pipeline(
-            entries, whitelists, scraper_config, session, llm_client, interests_text, config
-        ):
-            if result:
-                results.append(result)
+        results = _collect_matched_results(
+            entries,
+            whitelists,
+            scraper_config,
+            session,
+            llm_client,
+            interests_text,
+            config,
+            total_entries=total_entries,
+        )
 
-        _enrich_results_with_citations(results, session, config)
-        _enrich_results_with_openalex(results, session, config)
-
-        _sort_results(results)
-        new_count, skipped = _save_results(app, results)
-
-        _generate_thumbnails(app, results, session)
-        _generate_embeddings(app, results)
-        _extract_sections(app, results)
-
-        return _build_summary(new_count, skipped + pre_filtered, len(results), total_entries)
+        return _finalize_results(
+            app,
+            results,
+            session,
+            config,
+            pre_filtered=pre_filtered,
+            total_entries=total_entries,
+        )
     finally:
         session.close()

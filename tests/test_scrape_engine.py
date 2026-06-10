@@ -133,9 +133,10 @@ class SaveResultsDedupeTests(FlaskDBTestCase):
         self.assertEqual(skipped, 1)
 
 
-class BuildResultTests(unittest.TestCase):
-    def test_build_result_uses_extractive_summary_when_llm_disabled(self):
-        from app.services.scrape_engine import _build_result
+class EnrichCandidateTests(unittest.TestCase):
+    def test_enrich_candidate_uses_extractive_summary_when_llm_disabled(self):
+        from app.services.pipeline import ScoredCandidate
+        from app.services.scrape_engine import _enrich_candidate_with_llm
 
         abstract = (
             "Brief intro. "
@@ -143,21 +144,24 @@ class BuildResultTests(unittest.TestCase):
             "segmentation performance across benchmarks. "
             "The approach also improves detection quality."
         )
-        entry = {
-            "title": "A Vision Model",
-            "abstract": abstract,
-            "author": "Author A",
-            "link": "https://arxiv.org/abs/0001",
-            "authors_list": ["Author A"],
-        }
-
-        result = _build_result(
-            entry,
-            {"Title": ["Vision"], "Author": [], "Affiliation": []},
+        candidate = ScoredCandidate(
+            entry_data={
+                "title": "A Vision Model",
+                "abstract": abstract,
+                "author": "Author A",
+                "link": "https://arxiv.org/abs/0001",
+                "authors_list": ["Author A"],
+            },
+            match_types=["Title"],
+            matched_terms=["Vision"],
         )
 
-        self.assertEqual(result["summary_text"], generate_summary(entry["title"], abstract))
-        self.assertNotEqual(result["summary_text"], abstract)
+        _enrich_candidate_with_llm(candidate, llm_client=None, interests_text="")
+
+        entry = candidate.entry_data
+        self.assertEqual(entry["summary_text"], generate_summary(entry["title"], abstract))
+        self.assertNotEqual(entry["summary_text"], abstract)
+        self.assertIsNone(entry["llm_relevance_score"])
 
 
 class CreateLLMClientTests(FlaskDBTestCase):
