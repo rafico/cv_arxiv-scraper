@@ -59,10 +59,14 @@ class RankedPaper:
             "match_priority": self.match_priority,
             "paper_score": self.score,
             "llm_relevance_score": self.features.llm_relevance,
+            "llm_insights": entry.get("llm_insights", {}),
             "arxiv_comment": entry.get("comment") or None,
             "venue": self.features.venue,
             "venue_year": self.features.venue_year,
             "acceptance_status": self.features.acceptance_status,
+            "interest_similarity": self.features.interest_similarity,
+            # Transient on-the-fly SPECTER2 vector, reused by _generate_embeddings.
+            "embedding": entry.get("_embedding"),
             "publication_dt": entry.get("publication_dt"),
             "publication_date": entry.get("publication_date", "Date Unknown"),
             # INVARIANT: pdf_content (PDF bytes, fetched once during candidate
@@ -91,9 +95,10 @@ class WeightedSumRanker:
         self,
         config: dict | None = None,
         feature_extractor: FeatureExtractor | None = None,
+        interest_profile=None,
     ) -> None:
         self.config = config
-        self.extractor = feature_extractor or DefaultFeatureExtractor(config)
+        self.extractor = feature_extractor or DefaultFeatureExtractor(config, interest_profile=interest_profile)
 
     def rank(self, candidates: list[ScoredCandidate]) -> list[RankedPaper]:
         ranked = []
@@ -107,6 +112,7 @@ class WeightedSumRanker:
                 llm_relevance_score=features.llm_relevance,
                 citation_count=features.citation_count,
                 acceptance_status=features.acceptance_status,
+                interest_similarity=features.interest_similarity,
                 config=self.config,
             )
             ranked.append(
@@ -169,6 +175,9 @@ class WeightedSumRanker:
 
         if features.llm_relevance is not None and features.llm_relevance >= 7:
             explanations.append(f"AI rated highly relevant ({features.llm_relevance:.0f}/10)")
+
+        if features.interest_similarity is not None and features.interest_similarity > 0.5:
+            explanations.append("Closely matches papers you saved")
 
         if ranked_paper.entry_data.get("resource_links"):
             explanations.append("Code or dataset available")

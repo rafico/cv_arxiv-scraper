@@ -121,6 +121,7 @@ def resolve_ranking_preferences(config: dict | None = None, *, ranking_config=No
         "ai_weight": float(weights["ai_weight"]),
         "citation_weight": float(weights["citation_weight"]),
         "venue_weight": float(weights["venue_weight"]),
+        "interest_weight": float(weights["interest_weight"]),
         "half_life_days": float(weights["freshness_half_life_days"]),
     }
 
@@ -150,6 +151,7 @@ def compute_paper_score(
     llm_relevance_score: float | None = None,
     citation_count: int | None = None,
     acceptance_status: str | None = None,
+    interest_similarity: float | None = None,
     config: dict | None = None,
     ranking_config=None,
 ) -> float:
@@ -168,10 +170,15 @@ def compute_paper_score(
 
         citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
     venue_score = venue_bonus(acceptance_status, preferences["venue_weight"])
+    interest_bonus = (interest_similarity or 0.0) * preferences["interest_weight"]
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
 
-    return round((match_score + term_score + resource_score + llm_bonus + citation_bonus + venue_score) * recency, 3)
+    return round(
+        (match_score + term_score + resource_score + llm_bonus + citation_bonus + venue_score + interest_bonus)
+        * recency,
+        3,
+    )
 
 
 def explain_score(
@@ -183,6 +190,7 @@ def explain_score(
     llm_relevance_score: float | None = None,
     citation_count: int | None = None,
     acceptance_status: str | None = None,
+    interest_similarity: float | None = None,
     feedback_score: int = 0,
     config: dict | None = None,
     ranking_config=None,
@@ -200,10 +208,13 @@ def explain_score(
 
         citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
     venue_score = venue_bonus(acceptance_status, preferences["venue_weight"])
+    interest_bonus = (interest_similarity or 0.0) * preferences["interest_weight"]
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
     base_score = round(
-        (match_score + term_score + resource_score + ai_bonus + citation_bonus + venue_score) * recency, 3
+        (match_score + term_score + resource_score + ai_bonus + citation_bonus + venue_score + interest_bonus)
+        * recency,
+        3,
     )
     feedback_bonus = round(feedback_score * FEEDBACK_BOOST, 3)
     return {
@@ -213,6 +224,7 @@ def explain_score(
         "ai_bonus": round(ai_bonus, 3),
         "citation_bonus": round(citation_bonus, 3),
         "venue_bonus": round(venue_score, 3),
+        "interest_bonus": round(interest_bonus, 3),
         "recency_multiplier": round(recency, 3),
         "base_score": base_score,
         "feedback_bonus": feedback_bonus,
@@ -240,6 +252,7 @@ def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
                     llm_relevance_score=paper.llm_relevance_score,
                     citation_count=paper.citation_count,
                     acceptance_status=paper.acceptance_status,
+                    interest_similarity=paper.interest_similarity,
                     config=config,
                 )
                 updated += 1
@@ -303,10 +316,15 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
         llm_relevance_score=paper.llm_relevance_score,
         citation_count=paper.citation_count,
         acceptance_status=paper.acceptance_status,
+        interest_similarity=paper.interest_similarity,
         config=config,
     )
     if breakdown["recency_multiplier"] > 0.9:
         explanations.append("Published very recently")
+
+    # Learned interest profile (embedding similarity to saved/skipped papers)
+    if paper.interest_similarity is not None and paper.interest_similarity > 0.5:
+        explanations.append("Closely matches papers you saved")
 
     # AI relevance explanation
     if paper.llm_relevance_score and paper.llm_relevance_score >= 7:

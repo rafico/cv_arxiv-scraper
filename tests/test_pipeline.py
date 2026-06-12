@@ -198,6 +198,69 @@ class TestVenueFeatures:
         assert ranked.to_result_dict()["arxiv_comment"] is None
 
 
+class TestInterestFeatures:
+    def _profile_and_service(self):
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        from app.services.interest_model import InterestProfile
+
+        centroid = np.zeros(768, dtype=np.float32)
+        centroid[0] = 1.0
+        profile = InterestProfile(pos_centroid=centroid, neg_centroid=None, fingerprint=(5, 5))
+
+        service = MagicMock()
+        service.encode.return_value = np.asarray([centroid], dtype=np.float32)
+        return profile, service
+
+    def test_extractor_scores_against_profile_and_stashes_embedding(self):
+        from unittest.mock import patch
+
+        profile, service = self._profile_and_service()
+        candidate = _make_candidate(["Title"], ["Vision"], date(2026, 4, 1))
+
+        with patch("app.services.embeddings.get_embedding_service", return_value=service):
+            ranked = WeightedSumRanker(interest_profile=profile).rank([candidate])[0]
+
+        assert ranked.features.interest_similarity == 1.0
+        assert ranked.features.interest_bonus == 12.0
+        assert candidate.entry_data["_embedding"] is not None
+
+        result = ranked.to_result_dict()
+        assert result["interest_similarity"] == 1.0
+        assert result["embedding"] is not None
+        assert ranked.score == compute_paper_score(
+            match_types=["Title"],
+            matched_terms_count=1,
+            publication_dt=date(2026, 4, 1),
+            resource_count=0,
+            interest_similarity=1.0,
+        )
+
+    def test_no_profile_keeps_feature_inert(self):
+        candidate = _make_candidate(["Title"], ["Vision"], date(2026, 4, 1))
+        ranked = WeightedSumRanker().rank([candidate])[0]
+
+        assert ranked.features.interest_similarity is None
+        assert ranked.features.interest_bonus == 0.0
+        assert ranked.to_result_dict()["embedding"] is None
+
+    def test_encode_failure_degrades_to_inert(self):
+        from unittest.mock import MagicMock, patch
+
+        profile, _ = self._profile_and_service()
+        service = MagicMock()
+        service.encode.side_effect = RuntimeError("model unavailable")
+        candidate = _make_candidate(["Title"], ["Vision"], date(2026, 4, 1))
+
+        with patch("app.services.embeddings.get_embedding_service", return_value=service):
+            ranked = WeightedSumRanker(interest_profile=profile).rank([candidate])[0]
+
+        assert ranked.features.interest_similarity is None
+        assert ranked.features.interest_bonus == 0.0
+
+
 class TestFeatureVector:
     def test_to_dict(self):
         fv = FeatureVector(author_match_score=44.0, term_count=2, term_score=6.0)

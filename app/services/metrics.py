@@ -62,6 +62,7 @@ def _rank_papers(
                     llm_relevance_score=paper.llm_relevance_score,
                     citation_count=paper.citation_count,
                     acceptance_status=paper.acceptance_status,
+                    interest_similarity=paper.interest_similarity,
                     config=config,
                     ranking_config=ranking_config,
                 ),

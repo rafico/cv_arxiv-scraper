@@ -272,6 +272,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             resource_count=len(paper.resource_links_list),
             llm_relevance_score=paper.llm_relevance_score,
             acceptance_status=paper.acceptance_status,
+            interest_similarity=paper.interest_similarity,
             feedback_score=int(paper.feedback_score or 0),
             config=config,
         )

@@ -128,6 +128,7 @@
                     <input type="hidden" name="pref_ai_weight" id="pref_ai_weight" value="{{ preferences.ranking.ai_weight }}">
                     <input type="hidden" name="pref_citation_weight" id="pref_citation_weight" value="{{ preferences.ranking.citation_weight|default(0.5) }}">
                     <input type="hidden" name="pref_venue_weight" id="pref_venue_weight" value="{{ preferences.ranking.venue_weight|default(8.0) }}">
+                    <input type="hidden" name="pref_interest_weight" id="pref_interest_weight" value="{{ preferences.ranking.interest_weight|default(12.0) }}">
 
                     {% set sliders = [
                         ('author', 'Author match', 'Papers by researchers you follow', preferences.ranking.author_weight, 'blue'),
@@ -136,6 +137,7 @@
                         ('ai', 'AI relevance', 'LLM-scored relevance (if enabled)', preferences.ranking.ai_weight, 'amber'),
                         ('citation', 'Citation count', 'Highly-cited papers get a boost', preferences.ranking.citation_weight|default(0.5), 'sky'),
                         ('venue', 'Venue acceptance', 'Papers accepted at CVPR, ICCV, NeurIPS, etc.', preferences.ranking.venue_weight|default(8.0), 'purple'),
+                        ('interest', 'Learned interests', 'Learned from your saves/skips (needs ≥5 saved papers)', preferences.ranking.interest_weight|default(12.0), 'rose'),
                     ] %}
 
                     <div class="space-y-4">
@@ -844,6 +846,7 @@
         ai: 'pref_ai_weight',
         citation: 'pref_citation_weight',
         venue: 'pref_venue_weight',
+        interest: 'pref_interest_weight',
     };
 
     function syncSlider(key) {

@@ -35,6 +35,9 @@ preferences:
     ai_weight: 5.0
     citation_weight: 0.05
     venue_weight: 8.0
+    # Learned interest profile (embedding similarity to your saved/skipped
+    # papers); inert until >= 5 saved papers have embeddings.
+    interest_weight: 12.0
     freshness_half_life_days: 14.0
   muted:
     authors: []

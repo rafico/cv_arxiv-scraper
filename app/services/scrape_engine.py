@@ -21,6 +21,7 @@ from app.services.enrichment import (
 )
 from app.services.http_client import create_session, resolve_user_agent
 from app.services.ingest import IngestMode, IngestOrchestrator, PaperCandidate
+from app.services.interest_model import build_interest_profile
 from app.services.llm_client import LLMClient, resolve_api_key
 from app.services.pipeline import WeightedSumRanker, WhitelistCandidateGenerator
 from app.services.preferences import get_preferences
@@ -77,20 +78,39 @@ def _enrich_candidate_with_llm(
     candidate,
     llm_client: LLMClient | None,
     interests_text: str,
+    structured_insights: bool = False,
 ) -> None:
-    """Add LLM summary, relevance score, and topic tags to candidate entry_data (in-place)."""
+    """Add LLM summary, relevance score, and topic tags to candidate entry_data (in-place).
+
+    With structured_insights enabled, one combined JSON call replaces the
+    TLDR + relevance pair and additionally extracts tasks/datasets/method/
+    backbone. Per-paper parse failures fall back to the legacy path.
+    """
     entry = candidate.entry_data
     title = entry.get("title", "")
     abstract = entry.get("abstract", "")
 
-    entry["summary_text"] = (
-        generate_llm_summary(llm_client, title, abstract)
-        if llm_client is not None
-        else generate_summary(title, abstract)
-    )
-    entry["llm_relevance_score"] = (
-        llm_client.rate_relevance(title, abstract, interests_text) if llm_client is not None else None
-    )
+    insights = None
+    if llm_client is not None and structured_insights:
+        insights = llm_client.analyze_paper(title, abstract, interests_text, matched_terms=candidate.matched_terms)
+
+    if insights is not None:
+        tldr = insights.get("tldr") or ""
+        entry["summary_text"] = tldr[:280].rstrip() if tldr else generate_summary(title, abstract)
+        entry["llm_relevance_score"] = insights.get("relevance")
+        entry["llm_insights"] = {
+            key: insights[key] for key in ("tasks", "datasets", "method_type", "backbone", "why_matched")
+        }
+    else:
+        entry["summary_text"] = (
+            generate_llm_summary(llm_client, title, abstract)
+            if llm_client is not None
+            else generate_summary(title, abstract)
+        )
+        entry["llm_relevance_score"] = (
+            llm_client.rate_relevance(title, abstract, interests_text) if llm_client is not None else None
+        )
+        entry["llm_insights"] = {}
     entry["topic_tags"] = extract_topic_tags(title, abstract)
 
 
@@ -102,6 +122,7 @@ def _process_entries_with_pipeline(
     llm_client: LLMClient | None = None,
     interests_text: str = "",
     product_config: dict | None = None,
+    interest_profile=None,
 ):
     """Process entries using the ranking pipeline (candidates -> features -> rank).
 
@@ -111,6 +132,7 @@ def _process_entries_with_pipeline(
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     preferences = get_preferences(product_config)
     muted = preferences["muted"]
+    structured_insights = bool(((product_config or {}).get("llm") or {}).get("structured_insights", False))
 
     generator = WhitelistCandidateGenerator(
         whitelists=whitelists,
@@ -118,7 +140,7 @@ def _process_entries_with_pipeline(
         muted=muted,
         session=session,
     )
-    ranker = WeightedSumRanker(config=product_config)
+    ranker = WeightedSumRanker(config=product_config, interest_profile=interest_profile)
 
     processed = 0
     matched = 0
@@ -140,7 +162,7 @@ def _process_entries_with_pipeline(
                 )
 
             if candidate is not None:
-                _enrich_candidate_with_llm(candidate, llm_client, interests_text)
+                _enrich_candidate_with_llm(candidate, llm_client, interests_text, structured_insights)
                 ranked_list = ranker.rank([candidate])
                 if ranked_list:
                     ranked = ranked_list[0]
@@ -240,10 +262,12 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 matched_terms=result["matches"],
                 paper_score=float(result.get("paper_score", 0.0)),
                 llm_relevance_score=result.get("llm_relevance_score"),
+                llm_insights=result.get("llm_insights", {}),
                 arxiv_comment=result.get("arxiv_comment"),
                 venue=result.get("venue"),
                 venue_year=result.get("venue_year"),
                 acceptance_status=result.get("acceptance_status"),
+                interest_similarity=result.get("interest_similarity"),
                 publication_date=result["publication_date"],
                 publication_dt=result.get("publication_dt"),
                 scraped_date=today_str,
@@ -326,14 +350,17 @@ def _generate_embeddings(app, results: list[dict]) -> None:
         with app.app_context():
             paper_ids = []
             texts = []
+            vectors = []
             for result in results:
                 paper = Paper.query.filter_by(link=result["link"]).first()
                 if paper and not service.has_paper(paper.id):
                     paper_ids.append(paper.id)
                     texts.append(f"{paper.title} {paper.abstract_text or ''}")
+                    # Reuse the vector computed during interest scoring, if any.
+                    vectors.append(result.get("embedding"))
 
             if paper_ids:
-                added = service.add_papers(paper_ids, texts)
+                added = service.add_papers(paper_ids, texts, vectors=vectors)
                 service.save()
                 LOGGER.info("Generated embeddings for %d papers", added)
     except Exception:
@@ -518,6 +545,7 @@ def _rescore_result(res: dict, config: dict | None) -> None:
         llm_relevance_score=res.get("llm_relevance_score"),
         citation_count=res.get("citation_count"),
         acceptance_status=res.get("acceptance_status"),
+        interest_similarity=res.get("interest_similarity"),
         config=config,
     )
 
@@ -667,6 +695,7 @@ def _collect_matched_results(
     *,
     total_entries: int,
     event_callback: EventCallback = None,
+    interest_profile=None,
 ) -> list[dict]:
     """Run entries through the ranking pipeline, emitting progress events."""
     results: list[dict] = []
@@ -678,6 +707,7 @@ def _collect_matched_results(
         llm_client,
         interests_text,
         product_config=config,
+        interest_profile=interest_profile,
     ):
         payload = {"processed": processed, "total": total_entries, "matched": matched}
         if result:
@@ -796,6 +826,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         entries, pre_filtered = _filter_existing_entries(app, entries)
 
         llm_client, interests_text = _create_llm_client(app)
+        interest_profile = build_interest_profile(app)
 
         _emit(
             event_callback,
@@ -820,6 +851,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             config,
             total_entries=total_entries,
             event_callback=event_callback,
+            interest_profile=interest_profile,
         )
 
         summary = _finalize_results(
@@ -896,6 +928,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
         entries, pre_filtered = _filter_existing_entries(app, entries)
 
         llm_client, interests_text = _create_llm_client(app)
+        interest_profile = build_interest_profile(app)
         enrich_entries_with_api_metadata(entries, session=session)
 
         results = _collect_matched_results(
@@ -907,6 +940,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
             interests_text,
             config,
             total_entries=total_entries,
+            interest_profile=interest_profile,
         )
 
         return _finalize_results(

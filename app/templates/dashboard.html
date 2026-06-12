@@ -436,6 +436,7 @@
                         <div class="rounded-lg bg-white px-2 py-1.5">AI boost: {{ '%.1f'|format(paper.score_breakdown.ai_bonus) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Citations: {{ '%.1f'|format(paper.score_breakdown.citation_bonus|default(0.0)) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Venue: {{ '%.1f'|format(paper.score_breakdown.venue_bonus|default(0.0)) }}</div>
+                        <div class="rounded-lg bg-white px-2 py-1.5">For you: {{ '%.1f'|format(paper.score_breakdown.interest_bonus|default(0.0)) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Freshness x{{ '%.2f'|format(paper.score_breakdown.recency_multiplier) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Feedback: {{ '%.1f'|format(paper.score_breakdown.feedback_bonus) }}</div>
                     </div>

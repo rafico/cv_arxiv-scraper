@@ -76,6 +76,42 @@ class RankingTests(unittest.TestCase):
         self.assertGreater(accepted, workshop)
         self.assertGreater(oral, accepted)
 
+    def test_interest_similarity_shifts_score_both_ways(self):
+        today = date.today()
+        base_kwargs = {
+            "match_types": ["Title"],
+            "matched_terms_count": 1,
+            "publication_dt": today,
+            "resource_count": 0,
+        }
+        neutral = compute_paper_score(**base_kwargs)
+        none_similarity = compute_paper_score(**base_kwargs, interest_similarity=None)
+        liked = compute_paper_score(**base_kwargs, interest_similarity=0.8)
+        disliked = compute_paper_score(**base_kwargs, interest_similarity=-0.8)
+
+        self.assertEqual(neutral, none_similarity)
+        self.assertGreater(liked, neutral)
+        self.assertLess(disliked, neutral)
+
+    def test_explain_score_includes_interest_bonus(self):
+        from app.services.ranking import explain_score
+
+        breakdown = explain_score(
+            match_types=["Title"],
+            matched_terms_count=1,
+            publication_dt=date.today(),
+            resource_count=0,
+            interest_similarity=0.5,
+        )
+        self.assertEqual(breakdown["interest_bonus"], 6.0)
+        without = explain_score(
+            match_types=["Title"],
+            matched_terms_count=1,
+            publication_dt=date.today(),
+            resource_count=0,
+        )
+        self.assertEqual(without["interest_bonus"], 0.0)
+
     def test_explain_score_includes_venue_bonus(self):
         from app.services.ranking import explain_score
 

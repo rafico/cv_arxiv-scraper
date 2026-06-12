@@ -87,23 +87,36 @@ class EmbeddingService:
         embeddings = self._model.encode(texts, show_progress_bar=False, normalize_embeddings=True)
         return np.asarray(embeddings, dtype=np.float32)
 
-    def add_papers(self, paper_ids: list[int], texts: list[str]) -> int:
-        """Generate embeddings and add to the FAISS index. Returns count added."""
+    def add_papers(self, paper_ids: list[int], texts: list[str], vectors: list | None = None) -> int:
+        """Add papers to the FAISS index. Returns count added.
+
+        `vectors` may carry precomputed (L2-normalized) embeddings aligned with
+        `paper_ids`; entries that are None are encoded from the matching text.
+        """
         if not paper_ids:
             return 0
+
+        aligned_vectors = list(vectors) if vectors is not None else [None] * len(paper_ids)
 
         # Filter out papers already indexed
         new_ids = []
         new_texts = []
-        for pid, text in zip(paper_ids, texts):
+        new_vectors = []
+        for pid, text, vec in zip(paper_ids, texts, aligned_vectors):
             if pid not in self._pk_to_row:
                 new_ids.append(pid)
                 new_texts.append(text)
+                new_vectors.append(vec)
 
         if not new_ids:
             return 0
 
-        embeddings = self.encode(new_texts)
+        to_encode = [idx for idx, vec in enumerate(new_vectors) if vec is None]
+        if to_encode:
+            encoded = self.encode([new_texts[idx] for idx in to_encode])
+            for encoded_idx, idx in enumerate(to_encode):
+                new_vectors[idx] = encoded[encoded_idx]
+        embeddings = np.asarray(new_vectors, dtype=np.float32)
 
         with self._lock:
             self._index.add(embeddings)

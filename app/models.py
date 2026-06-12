@@ -96,6 +96,8 @@ class Paper(db.Model):
     matched_terms = db.Column(JSONList, nullable=False, default=list)
     paper_score = db.Column(db.Float, nullable=False, default=0.0)
     llm_relevance_score = db.Column(db.Float, nullable=True)
+    # Structured LLM extraction: tasks, datasets, method_type, backbone, why_matched.
+    llm_insights = db.Column(JSONDict, nullable=False, default=dict)
     feedback_score = db.Column(db.Integer, nullable=False, default=0)
     is_hidden = db.Column(db.Boolean, nullable=False, default=False)
 
@@ -128,6 +130,9 @@ class Paper(db.Model):
     venue = db.Column(db.Text, nullable=True)
     venue_year = db.Column(db.Integer, nullable=True)
     acceptance_status = db.Column(db.String(16), nullable=True)
+
+    # Cosine similarity to the learned interest profile; NULL until computed.
+    interest_similarity = db.Column(db.Float, nullable=True)
 
     # Legacy string dates are preserved for compatibility with older rows.
     publication_date = db.Column(db.Text)

@@ -192,7 +192,14 @@ def save_preferences():
         flash(str(exc), "error")
         return redirect(url_for("settings.view_settings", section="controls"))
 
-    recompute_all_paper_scores(current_app._get_current_object())
+    from app.services.interest_model import build_interest_profile, recompute_interest_similarities
+
+    app_obj = current_app._get_current_object()
+    if build_interest_profile(app_obj) is not None:
+        # Refreshes similarities from the FAISS index, then rescores all papers.
+        recompute_interest_similarities(app_obj)
+    else:
+        recompute_all_paper_scores(app_obj)
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Ranking and mute preferences saved.", "success")
     return redirect(url_for("settings.view_settings", section="controls"))

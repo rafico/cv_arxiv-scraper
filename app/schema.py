@@ -106,6 +106,8 @@ PAPER_COLUMN_DEFS = {
     "venue": "TEXT",
     "venue_year": "INTEGER",
     "acceptance_status": "TEXT",
+    "interest_similarity": "REAL",
+    "llm_insights": "TEXT NOT NULL DEFAULT '{}'",
 }
 
 INDEX_STATEMENTS = [

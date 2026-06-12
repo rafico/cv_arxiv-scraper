@@ -1,6 +1,12 @@
 """Semantic package for ranking, feedback, and preference logic."""
 
 from app.services.feedback import apply_feedback_action, get_feedback_snapshot
+from app.services.interest_model import (
+    InterestProfile,
+    build_interest_profile,
+    recompute_interest_similarities,
+    score_vector,
+)
 from app.services.matching import MATCH_PRIORITY, check_author_match
 from app.services.metrics import (
     compute_author_follow_hit_rate,
@@ -41,6 +47,7 @@ __all__ = [
     "FEEDBACK_BOOST",
     "FeatureExtractor",
     "FeatureVector",
+    "InterestProfile",
     "MATCH_PRIORITY",
     "RankedPaper",
     "Ranker",
@@ -48,6 +55,7 @@ __all__ = [
     "WeightedSumRanker",
     "WhitelistCandidateGenerator",
     "apply_feedback_action",
+    "build_interest_profile",
     "check_author_match",
     "combined_rank_score",
     "compute_author_follow_hit_rate",
@@ -61,7 +69,9 @@ __all__ = [
     "get_feedback_snapshot",
     "get_preferences",
     "recompute_all_paper_scores",
+    "recompute_interest_similarities",
     "resolve_ranking_preferences",
     "save_config",
+    "score_vector",
     "update_preferences_from_form",
 ]

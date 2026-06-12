@@ -52,6 +52,29 @@ class TestEmbeddingService:
         assert service.has_paper(2)
         assert not service.has_paper(999)
 
+    def test_add_papers_with_precomputed_vectors_skips_encode(self, index_dir):
+        service = EmbeddingService(index_dir)
+        # No model attached: any encode attempt would try to load the real model.
+        vectors = np.eye(3, 768, dtype=np.float32)
+
+        added = service.add_papers([1, 2, 3], ["a", "b", "c"], vectors=list(vectors))
+
+        assert added == 3
+        found_ids, reconstructed = service.get_paper_vectors([1, 2, 3])
+        assert found_ids == [1, 2, 3]
+        np.testing.assert_allclose(reconstructed, vectors, atol=1e-6)
+
+    def test_add_papers_encodes_only_missing_vectors(self, index_dir):
+        service = _make_service(index_dir)
+        precomputed = np.zeros(768, dtype=np.float32)
+        precomputed[0] = 1.0
+
+        added = service.add_papers([1, 2], ["a", "b"], vectors=[precomputed, None])
+
+        assert added == 2
+        found_ids, reconstructed = service.get_paper_vectors([1])
+        np.testing.assert_allclose(reconstructed[0], precomputed, atol=1e-6)
+
     def test_search_returns_results(self, index_dir):
         service = _make_service(index_dir)
         service.add_papers([10, 20, 30], ["alpha", "beta", "gamma"])

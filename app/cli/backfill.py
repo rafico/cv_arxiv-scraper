@@ -33,6 +33,7 @@ def _recompute_paper_score(paper: Paper, config: dict | None) -> float:
         llm_relevance_score=paper.llm_relevance_score,
         citation_count=paper.citation_count,
         acceptance_status=paper.acceptance_status,
+        interest_similarity=paper.interest_similarity,
         config=config,
     )
     return float(paper.paper_score or 0.0)
@@ -445,6 +446,16 @@ def backfill_thumbnails(
     return total_generated
 
 
+def backfill_interest(app, *, emit: Emit = print) -> int:
+    """Recompute learned-interest similarities from feedback + the FAISS index."""
+    from app.rank import recompute_interest_similarities
+
+    emit("Recomputing interest similarities from feedback...")
+    updated = recompute_interest_similarities(app)
+    emit(f"Interest backfill complete: {updated} papers updated")
+    return updated
+
+
 def run_all_backfills(
     app,
     *,
@@ -480,6 +491,7 @@ def build_parser() -> argparse.ArgumentParser:
     embeddings.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
     index_rebuild = subparsers.add_parser("index-rebuild", help="Rebuild the semantic paper index from the DB")
     index_rebuild.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
+    subparsers.add_parser("interest", help="Recompute learned-interest similarities from feedback")
 
     for command in ("citations", "openalex", "comments", "github", "thumbnails", "all"):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
@@ -503,6 +515,8 @@ def main(argv: list[str] | None = None) -> int:
             backfill_citations(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "openalex":
             backfill_openalex(app, batch_size=args.batch_size, delay_seconds=args.delay)
+        elif args.command == "interest":
+            backfill_interest(app)
         elif args.command == "comments":
             backfill_comments(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "github":

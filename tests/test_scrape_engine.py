@@ -217,7 +217,7 @@ class PreFilterCountTests(FlaskDBTestCase):
             pass
 
         def fake_process(
-            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None
+            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None, **_kw
         ):
             for i, entry in enumerate(entries, 1):
                 result = _make_result(entry["link"], entry["title"])
@@ -350,7 +350,7 @@ class RollingWindowTests(FlaskDBTestCase):
         seen_titles: list[str] = []
 
         def fake_process(
-            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None
+            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None, **_kw
         ):
             seen_titles.extend(entry["title"] for entry in entries)
             for i, entry in enumerate(entries, 1):
@@ -464,6 +464,17 @@ class VenuePersistenceTests(FlaskDBTestCase):
         self.assertEqual(stored.venue_year, 2026)
         self.assertEqual(stored.acceptance_status, "accepted")
 
+    def test_save_results_persists_interest_similarity(self):
+        from app.services.scrape_engine import _save_results
+
+        result = _make_result("https://arxiv.org/abs/0012")
+        result["interest_similarity"] = 0.7321
+
+        _save_results(self.app, [result])
+
+        stored = Paper.query.filter_by(arxiv_id="0012").one()
+        self.assertAlmostEqual(stored.interest_similarity, 0.7321)
+
 
 class PdfLinkEnrichmentTests(FlaskDBTestCase):
     @patch("app.services.scrape_engine.extract_pdf_resource_links")
@@ -547,7 +558,7 @@ class HistoricalScrapeTests(FlaskDBTestCase):
         orchestrator = FakeOrchestrator()
 
         def fake_process(
-            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None
+            entries, whitelists, config, session=None, llm_client=None, interests_text="", product_config=None, **_kw
         ):
             for i, entry in enumerate(entries, 1):
                 result = _make_result(entry["link"], entry["title"])

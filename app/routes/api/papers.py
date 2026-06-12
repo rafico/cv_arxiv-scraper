@@ -164,6 +164,7 @@ def paper_explain(paper_id: int):
         llm_relevance_score=paper.llm_relevance_score,
         citation_count=paper.citation_count,
         acceptance_status=paper.acceptance_status,
+        interest_similarity=paper.interest_similarity,
         feedback_score=int(paper.feedback_score or 0),
         config=config,
     )
