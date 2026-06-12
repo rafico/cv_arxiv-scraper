@@ -120,6 +120,12 @@ def _apply_resource_filter(query: Query, resource_filter: str) -> Query:
     return query
 
 
+def _apply_venue_filter(query: Query, venue: str | None) -> Query:
+    if not venue:
+        return query
+    return query.filter(Paper.venue == venue)
+
+
 def _build_filter_options(query: Query) -> dict:
     base = query.order_by(None)
 
@@ -139,8 +145,20 @@ def _build_filter_options(query: Query) -> dict:
         {"label": label, "name": ARXIV_CATEGORY_NAMES.get(label, label), "count": count}
         for label, count in sorted(category_counts.items(), key=lambda item: (-item[1], item[0].lower()))
     ]
+
+    venue_rows = (
+        base.filter(Paper.venue.is_not(None))
+        .with_entities(Paper.venue, db.func.count(Paper.id))
+        .group_by(Paper.venue)
+        .all()
+    )
+    venues = [
+        {"label": venue, "count": count}
+        for venue, count in sorted(venue_rows, key=lambda row: (-row[1], (row[0] or "").lower()))
+    ]
     return {
         "categories": categories,
+        "venues": venues,
         "resources": {
             "available": resources_available,
             "missing": resources_missing,
@@ -253,6 +271,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             publication_dt=paper.publication_dt,
             resource_count=len(paper.resource_links_list),
             llm_relevance_score=paper.llm_relevance_score,
+            acceptance_status=paper.acceptance_status,
             feedback_score=int(paper.feedback_score or 0),
             config=config,
         )
@@ -363,12 +382,14 @@ def index():
         query = query.filter(Paper.authors.ilike(escaped_author, escape="\\"))
 
     category = request.args.get("category", "").strip()
+    venue = request.args.get("venue", "").strip()
     resource_filter = request.args.get("resource_filter", "all").strip()
     if resource_filter not in RESOURCE_FILTER_OPTIONS:
         resource_filter = "all"
 
     filter_options = _build_filter_options(query)
     query = _apply_category_filter(query, category or None)
+    query = _apply_venue_filter(query, venue or None)
     query = _apply_resource_filter(query, resource_filter)
 
     default_sort = "saved" if view == "saved" else "trending"
@@ -450,6 +471,7 @@ def index():
             "sort": sort,
             "include_hidden": include_hidden,
             "category": category,
+            "venue": venue,
             "resource_filter": resource_filter,
             "reading_status": reading_status,
             "author": author_filter,

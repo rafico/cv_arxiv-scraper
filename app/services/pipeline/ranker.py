@@ -59,6 +59,10 @@ class RankedPaper:
             "match_priority": self.match_priority,
             "paper_score": self.score,
             "llm_relevance_score": self.features.llm_relevance,
+            "arxiv_comment": entry.get("comment") or None,
+            "venue": self.features.venue,
+            "venue_year": self.features.venue_year,
+            "acceptance_status": self.features.acceptance_status,
             "publication_dt": entry.get("publication_dt"),
             "publication_date": entry.get("publication_date", "Date Unknown"),
             # INVARIANT: pdf_content (PDF bytes, fetched once during candidate
@@ -102,6 +106,7 @@ class WeightedSumRanker:
                 resource_count=features.resource_count,
                 llm_relevance_score=features.llm_relevance,
                 citation_count=features.citation_count,
+                acceptance_status=features.acceptance_status,
                 config=self.config,
             )
             ranked.append(
@@ -146,6 +151,15 @@ class WeightedSumRanker:
                     explanations.append(f"Title matches: {', '.join(matched_terms)}")
                 else:
                     explanations.append("Title matches your interests")
+
+        if features.venue and features.acceptance_status and features.acceptance_status != "mentioned":
+            venue_label = f"{features.venue} {features.venue_year}" if features.venue_year else features.venue
+            if features.acceptance_status in ("oral", "spotlight", "highlight"):
+                explanations.append(f"Accepted at {venue_label} ({features.acceptance_status})")
+            elif features.acceptance_status == "workshop":
+                explanations.append(f"{venue_label} workshop paper")
+            else:
+                explanations.append(f"Accepted at {venue_label}")
 
         if features.citation_count and features.citation_count > 10:
             explanations.append(f"Highly cited ({features.citation_count} citations)")

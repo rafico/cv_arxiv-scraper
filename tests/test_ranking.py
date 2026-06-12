@@ -57,6 +57,44 @@ class RankingTests(unittest.TestCase):
     def test_recency_multiplier_uses_utc_today(self, _mock_today):
         self.assertEqual(recency_multiplier(date(2026, 3, 20)), 1.0)
 
+    def test_venue_acceptance_increases_score(self):
+        today = date.today()
+        base_kwargs = {
+            "match_types": ["Title"],
+            "matched_terms_count": 1,
+            "publication_dt": today,
+            "resource_count": 0,
+        }
+        no_venue = compute_paper_score(**base_kwargs)
+        mentioned = compute_paper_score(**base_kwargs, acceptance_status="mentioned")
+        accepted = compute_paper_score(**base_kwargs, acceptance_status="accepted")
+        oral = compute_paper_score(**base_kwargs, acceptance_status="oral")
+        workshop = compute_paper_score(**base_kwargs, acceptance_status="workshop")
+
+        self.assertEqual(no_venue, mentioned)
+        self.assertGreater(workshop, mentioned)
+        self.assertGreater(accepted, workshop)
+        self.assertGreater(oral, accepted)
+
+    def test_explain_score_includes_venue_bonus(self):
+        from app.services.ranking import explain_score
+
+        breakdown = explain_score(
+            match_types=["Title"],
+            matched_terms_count=1,
+            publication_dt=date.today(),
+            resource_count=0,
+            acceptance_status="accepted",
+        )
+        self.assertEqual(breakdown["venue_bonus"], 8.0)
+        without = explain_score(
+            match_types=["Title"],
+            matched_terms_count=1,
+            publication_dt=date.today(),
+            resource_count=0,
+        )
+        self.assertEqual(without["venue_bonus"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

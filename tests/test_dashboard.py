@@ -112,6 +112,35 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertNotIn("https://arxiv.org/abs/2602.1000", text)
         self.assertIn("cs.RO", text)
 
+    def test_venue_filter_and_badge(self):
+        accepted = Paper.query.filter_by(title="Paper 0").one()
+        accepted.arxiv_comment = "Accepted to CVPR 2026 (oral)"
+        accepted.venue = "CVPR"
+        accepted.venue_year = 2026
+        accepted.acceptance_status = "oral"
+        db.session.commit()
+
+        response = self.client.get("/?timeframe=all&venue=CVPR")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Paper 0", text)
+        self.assertNotIn("Paper 1<", text)
+        self.assertIn("CVPR 2026 · Oral", text)
+        self.assertIn("All venues", text)
+
+    def test_mentioned_venue_shows_no_badge(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+        paper.venue = "ICLR"
+        paper.acceptance_status = "mentioned"
+        db.session.commit()
+
+        response = self.client.get("/?timeframe=all")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("ICLR · ", text)
+
     def test_resource_filter_limits_results(self):
         response = self.client.get("/?timeframe=all&resource_filter=available")
         text = response.get_data(as_text=True)

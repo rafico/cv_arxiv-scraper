@@ -19,6 +19,7 @@ def _make_candidate(
     resource_links: list[dict] | None = None,
     llm_relevance_score: float | None = None,
     citation_count: int | None = None,
+    comment: str = "",
 ) -> ScoredCandidate:
     entry = {
         "arxiv_id": "2401.00001",
@@ -33,6 +34,7 @@ def _make_candidate(
         "categories": [],
         "llm_relevance_score": llm_relevance_score,
         "citation_count": citation_count,
+        "comment": comment,
     }
     return ScoredCandidate(
         entry_data=entry,
@@ -157,6 +159,43 @@ class TestPipelineScoreParity:
             citation_count=50,
         )
         assert ranked[0].score == old_score
+
+
+class TestVenueFeatures:
+    def test_accepted_venue_flows_into_features_and_result(self):
+        candidate = _make_candidate(["Title"], ["Vision"], date(2026, 4, 1), comment="Accepted to CVPR 2026 (oral)")
+        ranked = WeightedSumRanker().rank([candidate])[0]
+
+        assert ranked.features.venue == "CVPR"
+        assert ranked.features.venue_year == 2026
+        assert ranked.features.acceptance_status == "oral"
+        assert ranked.features.venue_bonus == 12.0
+
+        result = ranked.to_result_dict()
+        assert result["venue"] == "CVPR"
+        assert result["venue_year"] == 2026
+        assert result["acceptance_status"] == "oral"
+        assert result["arxiv_comment"] == "Accepted to CVPR 2026 (oral)"
+        assert ranked.score == compute_paper_score(
+            match_types=["Title"],
+            matched_terms_count=1,
+            publication_dt=date(2026, 4, 1),
+            resource_count=0,
+            acceptance_status="oral",
+        )
+
+    def test_venue_explanation_line(self):
+        candidate = _make_candidate(["Title"], ["Vision"], date(2026, 4, 1), comment="Accepted to ECCV 2026")
+        ranker = WeightedSumRanker()
+        ranked = ranker.rank([candidate])[0]
+        assert "Accepted at ECCV 2026" in ranker.generate_explanation(ranked)
+
+    def test_no_comment_leaves_venue_unset(self):
+        candidate = _make_candidate(["Title"], ["Vision"], date(2026, 4, 1))
+        ranked = WeightedSumRanker().rank([candidate])[0]
+        assert ranked.features.venue is None
+        assert ranked.features.venue_bonus == 0.0
+        assert ranked.to_result_dict()["arxiv_comment"] is None
 
 
 class TestFeatureVector:

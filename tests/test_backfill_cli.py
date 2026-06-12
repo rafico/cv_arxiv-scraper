@@ -177,6 +177,31 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertTrue(service.has_paper(Paper.query.filter_by(arxiv_id="2601.00005").one().id))
         self.assertTrue(service.has_paper(Paper.query.filter_by(arxiv_id="2601.00006").one().id))
 
+    @patch("app.services.enrichment._fetch_api_metadata")
+    def test_backfill_comments_detects_venue_and_links(self, mock_fetch):
+        from backfill_cli import backfill_comments
+
+        paper = _paper("2601.00010")
+        paper.abstract_text = "We release code at https://github.com/lab/venue-model for reproducibility."
+        db.session.add(paper)
+        db.session.commit()
+        mock_fetch.return_value = {
+            "2601.00010": {
+                "comment": "Accepted to ICCV 2025 (oral). Code: https://github.com/lab/venue-model",
+                "doi": "",
+            }
+        }
+
+        updated = backfill_comments(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
+
+        stored = Paper.query.filter_by(arxiv_id="2601.00010").one()
+        self.assertEqual(updated, 1)
+        self.assertEqual(stored.venue, "ICCV")
+        self.assertEqual(stored.venue_year, 2025)
+        self.assertEqual(stored.acceptance_status, "oral")
+        self.assertEqual(stored.resource_links_list[0]["url"], "https://github.com/lab/venue-model")
+        self.assertGreater(stored.paper_score, 1.0)
+
     @patch("app.enrich.GitHubProvider")
     def test_backfill_github_updates_papers_with_code_links(self, mock_provider_cls):
         paper = _paper("2601.00009")
@@ -199,11 +224,12 @@ class BackfillCliTests(FlaskDBTestCase):
 
     @patch("backfill_cli.backfill_thumbnails", return_value=4)
     @patch("backfill_cli.backfill_github", return_value=5)
+    @patch("backfill_cli.backfill_comments", return_value=6)
     @patch("backfill_cli.backfill_openalex", return_value=3)
     @patch("backfill_cli.backfill_citations", return_value=2)
     @patch("backfill_cli.run_embeddings_backfill", return_value=1)
     def test_run_all_backfills_runs_each_task(
-        self, mock_embeddings, mock_citations, mock_openalex, mock_github, mock_thumbnails
+        self, mock_embeddings, mock_citations, mock_openalex, mock_comments, mock_github, mock_thumbnails
     ):
         result = run_all_backfills(self.app, batch_size=25, delay_seconds=0, emit=lambda _: None)
 
@@ -213,6 +239,7 @@ class BackfillCliTests(FlaskDBTestCase):
                 "embeddings": 1,
                 "citations": 2,
                 "openalex": 3,
+                "comments": 6,
                 "github": 5,
                 "thumbnails": 4,
             },
@@ -220,6 +247,7 @@ class BackfillCliTests(FlaskDBTestCase):
         mock_embeddings.assert_called_once()
         mock_citations.assert_called_once()
         mock_openalex.assert_called_once()
+        mock_comments.assert_called_once()
         mock_github.assert_called_once()
         mock_thumbnails.assert_called_once()
 

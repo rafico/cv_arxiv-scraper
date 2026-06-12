@@ -240,6 +240,10 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 matched_terms=result["matches"],
                 paper_score=float(result.get("paper_score", 0.0)),
                 llm_relevance_score=result.get("llm_relevance_score"),
+                arxiv_comment=result.get("arxiv_comment"),
+                venue=result.get("venue"),
+                venue_year=result.get("venue_year"),
+                acceptance_status=result.get("acceptance_status"),
                 publication_date=result["publication_date"],
                 publication_dt=result.get("publication_dt"),
                 scraped_date=today_str,
@@ -513,6 +517,7 @@ def _rescore_result(res: dict, config: dict | None) -> None:
         resource_count=len(res.get("resource_links", [])),
         llm_relevance_score=res.get("llm_relevance_score"),
         citation_count=res.get("citation_count"),
+        acceptance_status=res.get("acceptance_status"),
         config=config,
     )
 

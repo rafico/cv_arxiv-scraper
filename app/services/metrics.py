@@ -61,6 +61,7 @@ def _rank_papers(
                     resource_count=len(paper.resource_links_list),
                     llm_relevance_score=paper.llm_relevance_score,
                     citation_count=paper.citation_count,
+                    acceptance_status=paper.acceptance_status,
                     config=config,
                     ranking_config=ranking_config,
                 ),

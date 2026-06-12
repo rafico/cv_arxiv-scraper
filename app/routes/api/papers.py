@@ -163,6 +163,7 @@ def paper_explain(paper_id: int):
         resource_count=len(paper.resource_links_list),
         llm_relevance_score=paper.llm_relevance_score,
         citation_count=paper.citation_count,
+        acceptance_status=paper.acceptance_status,
         feedback_score=int(paper.feedback_score or 0),
         config=config,
     )

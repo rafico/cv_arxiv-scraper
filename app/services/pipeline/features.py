@@ -14,6 +14,7 @@ from app.services.ranking import (
     recency_multiplier,
     resolve_ranking_preferences,
 )
+from app.services.venues import parse_venue, venue_bonus
 
 
 @dataclass(slots=True)
@@ -32,6 +33,10 @@ class FeatureVector:
     llm_bonus: float = 0.0
     citation_count: int | None = None
     citation_bonus: float = 0.0
+    venue: str | None = None
+    venue_year: int | None = None
+    acceptance_status: str | None = None
+    venue_bonus: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +52,10 @@ class FeatureVector:
             "llm_bonus": self.llm_bonus,
             "citation_count": self.citation_count,
             "citation_bonus": self.citation_bonus,
+            "venue": self.venue,
+            "venue_year": self.venue_year,
+            "acceptance_status": self.acceptance_status,
+            "venue_bonus": self.venue_bonus,
         }
 
 
@@ -88,6 +97,12 @@ class DefaultFeatureExtractor:
         if citation_count and citation_count > 0:
             citation_bonus = math.log1p(citation_count) * self.preferences["citation_weight"]
 
+        venue_match = parse_venue(entry.get("comment", ""))
+        venue_score = venue_bonus(
+            venue_match.status if venue_match else None,
+            self.preferences["venue_weight"],
+        )
+
         recency = recency_multiplier(
             entry.get("publication_dt"),
             half_life_days=self.preferences["half_life_days"],
@@ -106,4 +121,8 @@ class DefaultFeatureExtractor:
             llm_bonus=llm_bonus,
             citation_count=citation_count,
             citation_bonus=citation_bonus,
+            venue=venue_match.venue if venue_match else None,
+            venue_year=venue_match.year if venue_match else None,
+            acceptance_status=venue_match.status if venue_match else None,
+            venue_bonus=venue_score,
         )

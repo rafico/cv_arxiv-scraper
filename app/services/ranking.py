@@ -120,6 +120,7 @@ def resolve_ranking_preferences(config: dict | None = None, *, ranking_config=No
         "Title": float(weights["title_weight"]),
         "ai_weight": float(weights["ai_weight"]),
         "citation_weight": float(weights["citation_weight"]),
+        "venue_weight": float(weights["venue_weight"]),
         "half_life_days": float(weights["freshness_half_life_days"]),
     }
 
@@ -148,9 +149,12 @@ def compute_paper_score(
     resource_count: int,
     llm_relevance_score: float | None = None,
     citation_count: int | None = None,
+    acceptance_status: str | None = None,
     config: dict | None = None,
     ranking_config=None,
 ) -> float:
+    from app.services.venues import venue_bonus
+
     preferences = resolve_ranking_preferences(config, ranking_config=ranking_config)
     match_score = sum(
         preferences.get(match_type, MATCH_TYPE_WEIGHTS.get(match_type, 0.0)) for match_type in match_types
@@ -163,10 +167,11 @@ def compute_paper_score(
         import math
 
         citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
+    venue_score = venue_bonus(acceptance_status, preferences["venue_weight"])
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
 
-    return round((match_score + term_score + resource_score + llm_bonus + citation_bonus) * recency, 3)
+    return round((match_score + term_score + resource_score + llm_bonus + citation_bonus + venue_score) * recency, 3)
 
 
 def explain_score(
@@ -177,10 +182,13 @@ def explain_score(
     resource_count: int,
     llm_relevance_score: float | None = None,
     citation_count: int | None = None,
+    acceptance_status: str | None = None,
     feedback_score: int = 0,
     config: dict | None = None,
     ranking_config=None,
 ) -> dict[str, float]:
+    from app.services.venues import venue_bonus
+
     preferences = resolve_ranking_preferences(config, ranking_config=ranking_config)
     match_score = sum(preferences.get(match_type, 0.0) for match_type in match_types)
     term_score = matched_terms_count * TERM_MATCH_WEIGHT
@@ -191,9 +199,12 @@ def explain_score(
         import math
 
         citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
+    venue_score = venue_bonus(acceptance_status, preferences["venue_weight"])
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
-    base_score = round((match_score + term_score + resource_score + ai_bonus + citation_bonus) * recency, 3)
+    base_score = round(
+        (match_score + term_score + resource_score + ai_bonus + citation_bonus + venue_score) * recency, 3
+    )
     feedback_bonus = round(feedback_score * FEEDBACK_BOOST, 3)
     return {
         "match_score": round(match_score, 3),
@@ -201,6 +212,7 @@ def explain_score(
         "resource_score": round(resource_score, 3),
         "ai_bonus": round(ai_bonus, 3),
         "citation_bonus": round(citation_bonus, 3),
+        "venue_bonus": round(venue_score, 3),
         "recency_multiplier": round(recency, 3),
         "base_score": base_score,
         "feedback_bonus": feedback_bonus,
@@ -227,6 +239,7 @@ def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
                     resource_count=len(paper.resource_links_list),
                     llm_relevance_score=paper.llm_relevance_score,
                     citation_count=paper.citation_count,
+                    acceptance_status=paper.acceptance_status,
                     config=config,
                 )
                 updated += 1
@@ -267,6 +280,16 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
             else:
                 explanations.append("Title matches your interests")
 
+    # Venue acceptance explanation
+    if paper.venue and paper.acceptance_status and paper.acceptance_status != "mentioned":
+        venue_label = f"{paper.venue} {paper.venue_year}" if paper.venue_year else paper.venue
+        if paper.acceptance_status in ("oral", "spotlight", "highlight"):
+            explanations.append(f"Accepted at {venue_label} ({paper.acceptance_status})")
+        elif paper.acceptance_status == "workshop":
+            explanations.append(f"{venue_label} workshop paper")
+        else:
+            explanations.append(f"Accepted at {venue_label}")
+
     # Citation explanation
     if paper.citation_count and paper.citation_count > 10:
         explanations.append(f"Highly cited ({paper.citation_count} citations)")
@@ -279,6 +302,7 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
         resource_count=len(paper.resource_links_list),
         llm_relevance_score=paper.llm_relevance_score,
         citation_count=paper.citation_count,
+        acceptance_status=paper.acceptance_status,
         config=config,
     )
     if breakdown["recency_multiplier"] > 0.9:

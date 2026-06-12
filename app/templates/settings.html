@@ -127,6 +127,7 @@
                     <input type="hidden" name="pref_title_weight" id="pref_title_weight" value="{{ preferences.ranking.title_weight }}">
                     <input type="hidden" name="pref_ai_weight" id="pref_ai_weight" value="{{ preferences.ranking.ai_weight }}">
                     <input type="hidden" name="pref_citation_weight" id="pref_citation_weight" value="{{ preferences.ranking.citation_weight|default(0.5) }}">
+                    <input type="hidden" name="pref_venue_weight" id="pref_venue_weight" value="{{ preferences.ranking.venue_weight|default(8.0) }}">
 
                     {% set sliders = [
                         ('author', 'Author match', 'Papers by researchers you follow', preferences.ranking.author_weight, 'blue'),
@@ -134,6 +135,7 @@
                         ('title', 'Topic keywords', 'Papers matching your title keywords', preferences.ranking.title_weight, 'violet'),
                         ('ai', 'AI relevance', 'LLM-scored relevance (if enabled)', preferences.ranking.ai_weight, 'amber'),
                         ('citation', 'Citation count', 'Highly-cited papers get a boost', preferences.ranking.citation_weight|default(0.5), 'sky'),
+                        ('venue', 'Venue acceptance', 'Papers accepted at CVPR, ICCV, NeurIPS, etc.', preferences.ranking.venue_weight|default(8.0), 'purple'),
                     ] %}
 
                     <div class="space-y-4">
@@ -841,6 +843,7 @@
         title: 'pref_title_weight',
         ai: 'pref_ai_weight',
         citation: 'pref_citation_weight',
+        venue: 'pref_venue_weight',
     };
 
     function syncSlider(key) {

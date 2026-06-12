@@ -32,6 +32,7 @@ def _recompute_paper_score(paper: Paper, config: dict | None) -> float:
         resource_count=len(paper.resource_links_list),
         llm_relevance_score=paper.llm_relevance_score,
         citation_count=paper.citation_count,
+        acceptance_status=paper.acceptance_status,
         config=config,
     )
     return float(paper.paper_score or 0.0)
@@ -250,6 +251,75 @@ def backfill_openalex(
     return total_updated
 
 
+def backfill_comments(
+    app,
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    emit: Emit = print,
+) -> int:
+    """Fetch arXiv comment metadata for older rows; detect venues and resource links."""
+    from app.services.enrichment import _fetch_api_metadata, extract_resource_links, merge_resource_links
+    from app.services.venues import parse_venue
+
+    total_updated = 0
+    last_seen_id = 0
+    session = create_session(pool_size=1, scraper_config=app.config.get("SCRAPER_CONFIG"), rate_limit_profile="bulk")
+
+    try:
+        with app.app_context():
+            scraper_config = app.config.get("SCRAPER_CONFIG")
+            while True:
+                papers = (
+                    Paper.query.filter(
+                        Paper.id > last_seen_id,
+                        Paper.arxiv_id.is_not(None),
+                        Paper.arxiv_comment.is_(None),
+                    )
+                    .order_by(Paper.id)
+                    .limit(batch_size)
+                    .all()
+                )
+                if not papers:
+                    break
+
+                last_seen_id = papers[-1].id
+                arxiv_ids = [paper.arxiv_id for paper in papers if paper.arxiv_id]
+                metadata = _fetch_api_metadata(arxiv_ids, session=session)
+                updated_now = 0
+
+                for paper in papers:
+                    data = metadata.get(paper.arxiv_id or "")
+                    if not data:
+                        continue
+
+                    comment = data.get("comment", "")
+                    paper.arxiv_comment = comment
+                    venue_match = parse_venue(comment)
+                    if venue_match:
+                        paper.venue = venue_match.venue
+                        paper.venue_year = venue_match.year
+                        paper.acceptance_status = venue_match.status
+
+                    new_links = extract_resource_links(paper.abstract_text, comment, data.get("doi", ""))
+                    paper.resource_links = merge_resource_links(paper.resource_links_list, new_links)
+                    _recompute_paper_score(paper, scraper_config)
+                    updated_now += 1
+
+                db.session.commit()
+                total_updated += updated_now
+                emit(
+                    f"Comments batch through paper {last_seen_id}: "
+                    f"updated {updated_now}/{len(papers)} papers (total {total_updated})"
+                )
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
+    finally:
+        session.close()
+
+    return total_updated
+
+
 def backfill_github(
     app,
     *,
@@ -386,6 +456,7 @@ def run_all_backfills(
         "embeddings": run_embeddings_backfill(app, batch_size=EMBEDDINGS_BATCH_SIZE, emit=emit),
         "citations": backfill_citations(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "openalex": backfill_openalex(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
+        "comments": backfill_comments(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "github": backfill_github(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "thumbnails": backfill_thumbnails(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
     }
@@ -394,6 +465,7 @@ def run_all_backfills(
         f"embeddings={results['embeddings']}, "
         f"citations={results['citations']}, "
         f"openalex={results['openalex']}, "
+        f"comments={results['comments']}, "
         f"github={results['github']}, "
         f"thumbnails={results['thumbnails']}"
     )
@@ -409,7 +481,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_rebuild = subparsers.add_parser("index-rebuild", help="Rebuild the semantic paper index from the DB")
     index_rebuild.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
 
-    for command in ("citations", "openalex", "github", "thumbnails", "all"):
+    for command in ("citations", "openalex", "comments", "github", "thumbnails", "all"):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
         subparser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
         subparser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
@@ -431,6 +503,8 @@ def main(argv: list[str] | None = None) -> int:
             backfill_citations(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "openalex":
             backfill_openalex(app, batch_size=args.batch_size, delay_seconds=args.delay)
+        elif args.command == "comments":
+            backfill_comments(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "github":
             backfill_github(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "thumbnails":

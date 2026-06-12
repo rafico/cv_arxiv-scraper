@@ -441,6 +441,30 @@ class OpenAlexEnrichmentTests(FlaskDBTestCase):
         )
 
 
+class VenuePersistenceTests(FlaskDBTestCase):
+    def test_save_results_persists_venue_fields(self):
+        from app.services.scrape_engine import _save_results
+
+        result = _make_result("https://arxiv.org/abs/0011")
+        result.update(
+            {
+                "arxiv_comment": "Accepted to CVPR 2026",
+                "venue": "CVPR",
+                "venue_year": 2026,
+                "acceptance_status": "accepted",
+            }
+        )
+
+        new_count, _ = _save_results(self.app, [result])
+
+        self.assertEqual(new_count, 1)
+        stored = Paper.query.filter_by(arxiv_id="0011").one()
+        self.assertEqual(stored.arxiv_comment, "Accepted to CVPR 2026")
+        self.assertEqual(stored.venue, "CVPR")
+        self.assertEqual(stored.venue_year, 2026)
+        self.assertEqual(stored.acceptance_status, "accepted")
+
+
 class PdfLinkEnrichmentTests(FlaskDBTestCase):
     @patch("app.services.scrape_engine.extract_pdf_resource_links")
     def test_pdf_links_merged_and_rescored(self, mock_extract):

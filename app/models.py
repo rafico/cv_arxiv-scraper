@@ -76,6 +76,7 @@ class Paper(db.Model):
         db.Index("idx_papers_publication_dt", "publication_dt"),
         db.Index("idx_papers_rank", "paper_score", "feedback_score"),
         db.Index("idx_papers_hidden", "is_hidden"),
+        db.Index("idx_papers_venue", "venue"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -122,6 +123,11 @@ class Paper(db.Model):
     github_repo = db.Column(db.Text, nullable=True)
     github_stars = db.Column(db.Integer, nullable=True)
     github_license = db.Column(db.Text, nullable=True)
+
+    arxiv_comment = db.Column(db.Text, nullable=True)
+    venue = db.Column(db.Text, nullable=True)
+    venue_year = db.Column(db.Integer, nullable=True)
+    acceptance_status = db.Column(db.String(16), nullable=True)
 
     # Legacy string dates are preserved for compatibility with older rows.
     publication_date = db.Column(db.Text)

@@ -102,6 +102,10 @@ PAPER_COLUMN_DEFS = {
     "github_repo": "TEXT",
     "github_stars": "INTEGER",
     "github_license": "TEXT",
+    "arxiv_comment": "TEXT",
+    "venue": "TEXT",
+    "venue_year": "INTEGER",
+    "acceptance_status": "TEXT",
 }
 
 INDEX_STATEMENTS = [
@@ -109,6 +113,7 @@ INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_papers_publication_dt ON papers (publication_dt)",
     "CREATE INDEX IF NOT EXISTS idx_papers_rank ON papers (paper_score, feedback_score)",
     "CREATE INDEX IF NOT EXISTS idx_papers_hidden ON papers (is_hidden)",
+    "CREATE INDEX IF NOT EXISTS idx_papers_venue ON papers (venue)",
     "CREATE INDEX IF NOT EXISTS idx_feedback_paper_action ON paper_feedback (paper_id, action)",
 ]
 UNIQUE_ARXIV_INDEX_STATEMENT = (

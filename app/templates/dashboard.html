@@ -140,7 +140,7 @@
     </div>
 
     {# ── Advanced filters (collapsible) — includes match type, category, exports ── #}
-    {% set has_advanced_filters = current_filters.match_type or current_filters.category or current_filters.resource_filter != 'all' or current_filters.include_hidden or current_filters.reading_status or current_filters.author %}
+    {% set has_advanced_filters = current_filters.match_type or current_filters.category or current_filters.venue or current_filters.resource_filter != 'all' or current_filters.include_hidden or current_filters.reading_status or current_filters.author %}
     <div class="mb-4">
         <button type="button" onclick="toggleAdvancedFilters()"
                 class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors">
@@ -183,6 +183,18 @@
                         </option>
                         {% endfor %}
                     </select>
+                    {% if filter_options.venues %}
+                    <select name="venue" id="venue"
+                            onchange="document.getElementById('filter-form').submit();"
+                            class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                        <option value="">All venues</option>
+                        {% for venue in filter_options.venues %}
+                        <option value="{{ venue.label }}" {{ 'selected' if current_filters.venue == venue.label }}>
+                            {{ venue.label }} ({{ venue.count }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                    {% endif %}
                     <select name="resource_filter" id="resource_filter"
                             onchange="document.getElementById('filter-form').submit();"
                             class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
@@ -273,6 +285,12 @@
                 {% if paper.llm_relevance_score is not none %}
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700">
                     AI: {{ paper.llm_relevance_score|round|int }}/10
+                </span>
+                {% endif %}
+                {% if paper.venue and paper.acceptance_status and paper.acceptance_status != 'mentioned' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-700"
+                      title="Detected from arXiv comment: {{ paper.arxiv_comment or '' }}">
+                    {{ paper.venue }}{{ ' ' ~ paper.venue_year if paper.venue_year }}{{ ' · ' ~ paper.acceptance_status|title if paper.acceptance_status in ('oral', 'spotlight', 'highlight', 'workshop') }}
                 </span>
                 {% endif %}
                 {% set citation_display_count = paper.citation_count if paper.citation_count is not none else paper.openalex_cited_by_count %}
@@ -417,6 +435,7 @@
                         <div class="rounded-lg bg-white px-2 py-1.5">Resources: {{ '%.1f'|format(paper.score_breakdown.resource_score) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">AI boost: {{ '%.1f'|format(paper.score_breakdown.ai_bonus) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Citations: {{ '%.1f'|format(paper.score_breakdown.citation_bonus|default(0.0)) }}</div>
+                        <div class="rounded-lg bg-white px-2 py-1.5">Venue: {{ '%.1f'|format(paper.score_breakdown.venue_bonus|default(0.0)) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Freshness x{{ '%.2f'|format(paper.score_breakdown.recency_multiplier) }}</div>
                         <div class="rounded-lg bg-white px-2 py-1.5">Feedback: {{ '%.1f'|format(paper.score_breakdown.feedback_bonus) }}</div>
                     </div>

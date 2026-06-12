@@ -20,6 +20,7 @@ DEFAULT_PREFERENCES = {
         "title_weight": 14.0,
         "ai_weight": 5.0,
         "citation_weight": 0.05,
+        "venue_weight": 8.0,
         "freshness_half_life_days": 14.0,
     },
     "display": {
