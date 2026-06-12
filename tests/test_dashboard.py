@@ -129,6 +129,84 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertIn("CVPR 2026 · Oral", text)
         self.assertIn("All venues", text)
 
+    def test_teaser_route_serves_existing_file(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+        thumbnails_dir = Path(self.app.static_folder) / "thumbnails"
+        thumbnails_dir.mkdir(parents=True, exist_ok=True)
+        (thumbnails_dir / f"{paper.arxiv_id}_teaser.png").write_bytes(b"\x89PNG\r\n\x1a\nteaser")
+
+        response = self.client.get(f"/papers/{paper.id}/teaser.png")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"teaser", response.data)
+
+    def test_teaser_route_falls_back_to_thumbnail(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+        thumbnails_dir = Path(self.app.static_folder) / "thumbnails"
+        thumbnails_dir.mkdir(parents=True, exist_ok=True)
+        (thumbnails_dir / f"{paper.arxiv_id}.png").write_bytes(b"\x89PNG\r\n\x1a\npage-one")
+
+        response = self.client.get(f"/papers/{paper.id}/teaser.png")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"page-one", response.data)
+
+    def test_visual_density_toggle_switches_grid_and_teasers(self):
+        response = self.client.get("/?timeframe=all&density=visual")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("lg:grid-cols-4", text)
+        self.assertIn("/teaser.png", text)
+        self.assertIn("Comfortable view", text)
+
+        default = self.client.get("/?timeframe=all").get_data(as_text=True)
+        self.assertIn("lg:grid-cols-3", default)
+        self.assertNotIn("/teaser.png", default)
+        self.assertIn("Visual grid", default)
+
+    def test_invalid_density_falls_back_to_comfortable(self):
+        response = self.client.get("/?timeframe=all&density=bogus")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("lg:grid-cols-3", text)
+
+    def test_dataset_filter_and_insight_chips(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+        paper.llm_insights = {
+            "tasks": ["object detection"],
+            "datasets": ["COCO", "LVIS"],
+            "method_type": "transformer",
+            "backbone": "ViT-L",
+            "why_matched": "Zero-shot detection overlaps your interests.",
+        }
+        db.session.commit()
+
+        response = self.client.get("/?timeframe=all&dataset=COCO")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Paper 0", text)
+        self.assertNotIn("Paper 1<", text)
+        self.assertIn("COCO", text)
+        self.assertIn("Why for you:", text)
+        self.assertIn("Zero-shot detection overlaps your interests.", text)
+
+    def test_dataset_filter_quote_delimited_avoids_substring_collisions(self):
+        coco = Paper.query.filter_by(title="Paper 0").one()
+        coco.llm_insights = {"datasets": ["COCO"]}
+        coco_stuff = Paper.query.filter_by(title="Paper 2").one()
+        coco_stuff.llm_insights = {"datasets": ["COCO-Stuff"]}
+        db.session.commit()
+
+        response = self.client.get("/?timeframe=all&dataset=COCO")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Paper 0", text)
+        self.assertNotIn("Paper 2<", text)
+
     def test_mentioned_venue_shows_no_badge(self):
         paper = Paper.query.filter_by(title="Paper 0").one()
         paper.venue = "ICLR"

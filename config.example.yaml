@@ -9,12 +9,16 @@ scraper:
   pdf_lines_start: 2
   pdf_max_header_lines: 50
   pdf_smart_header: true
+  thumbnail_dpi: 150
 ingest:
   backends:
     - rss
     - arxiv_api
 llm:
   enabled: false
+  # One combined JSON call per paper that also extracts tasks, datasets,
+  # method type, backbone, and a "why this matched you" line.
+  structured_insights: false
   provider: ollama
   model: gemma4:e2b
   base_url: http://localhost:11434/v1

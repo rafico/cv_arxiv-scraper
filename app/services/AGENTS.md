@@ -24,12 +24,17 @@ from here — add logic here, not there.
   `request_with_backoff`), `rate_limiter.py`.
 
 **Enrichment** (external metadata)
-- `enrichment_providers/` — `OpenAlexProvider`, `SemanticScholarProvider`.
+- `enrichment_providers/` — `OpenAlexProvider`, `SemanticScholarProvider`,
+  `GitHubProvider` (repo stars/license; per-run fetch cap for the
+  unauthenticated rate limit).
 - `openalex.py`, `citations.py`.
 
 **Ranking / matching** — see [pipeline/](pipeline)
 - `pipeline/` — `FeatureExtractor`, candidate generation, `ranker`.
-- `matching.py` (author/whitelist matching), `ranking.py`, `feedback.py`
+- `matching.py` (author/whitelist matching), `ranking.py`, `venues.py`
+  (`parse_venue` detects conference acceptance from arXiv comments),
+  `interest_model.py` (learned interest centroids from feedback + the FAISS
+  index; inert below 5 saved papers), `feedback.py`
   (save/skip/priority/shared actions), `metrics.py`, `recommendations.py`,
   `preferences.py` (reads/writes `config.yaml` via `save_config` — atomic with an
   in-place fallback for bind-mounted destinations).

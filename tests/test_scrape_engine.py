@@ -162,6 +162,84 @@ class EnrichCandidateTests(unittest.TestCase):
         self.assertEqual(entry["summary_text"], generate_summary(entry["title"], abstract))
         self.assertNotEqual(entry["summary_text"], abstract)
         self.assertIsNone(entry["llm_relevance_score"])
+        self.assertEqual(entry["llm_insights"], {})
+
+    def _make_candidate(self):
+        from app.services.pipeline import ScoredCandidate
+
+        return ScoredCandidate(
+            entry_data={
+                "title": "A Vision Model",
+                "abstract": "We introduce a transformer for dense prediction tasks.",
+                "author": "Author A",
+                "link": "https://arxiv.org/abs/0001",
+                "authors_list": ["Author A"],
+            },
+            match_types=["Title"],
+            matched_terms=["Vision"],
+        )
+
+    def test_structured_insights_uses_single_combined_call(self):
+        from unittest.mock import MagicMock
+
+        from app.services.scrape_engine import _enrich_candidate_with_llm
+
+        candidate = self._make_candidate()
+        llm_client = MagicMock()
+        llm_client.analyze_paper.return_value = {
+            "tldr": "Combined TLDR.",
+            "relevance": 7.0,
+            "tasks": ["segmentation"],
+            "datasets": ["ADE20K"],
+            "method_type": "transformer",
+            "backbone": "ViT-B",
+            "why_matched": "Matches your dense-prediction interests.",
+        }
+
+        _enrich_candidate_with_llm(candidate, llm_client, "interests", structured_insights=True)
+
+        entry = candidate.entry_data
+        self.assertEqual(entry["summary_text"], "Combined TLDR.")
+        self.assertEqual(entry["llm_relevance_score"], 7.0)
+        self.assertEqual(entry["llm_insights"]["datasets"], ["ADE20K"])
+        self.assertNotIn("tldr", entry["llm_insights"])
+        llm_client.analyze_paper.assert_called_once()
+        llm_client.generate_tldr.assert_not_called()
+        llm_client.rate_relevance.assert_not_called()
+
+    def test_structured_insights_falls_back_per_paper_on_failure(self):
+        from unittest.mock import MagicMock
+
+        from app.services.scrape_engine import _enrich_candidate_with_llm
+
+        candidate = self._make_candidate()
+        llm_client = MagicMock()
+        llm_client.analyze_paper.return_value = None
+        llm_client.generate_tldr.return_value = "Legacy TLDR."
+        llm_client.rate_relevance.return_value = 6.0
+
+        _enrich_candidate_with_llm(candidate, llm_client, "interests", structured_insights=True)
+
+        entry = candidate.entry_data
+        self.assertEqual(entry["summary_text"], "Legacy TLDR.")
+        self.assertEqual(entry["llm_relevance_score"], 6.0)
+        self.assertEqual(entry["llm_insights"], {})
+
+    def test_flag_off_keeps_legacy_two_call_path(self):
+        from unittest.mock import MagicMock
+
+        from app.services.scrape_engine import _enrich_candidate_with_llm
+
+        candidate = self._make_candidate()
+        llm_client = MagicMock()
+        llm_client.generate_tldr.return_value = "Legacy TLDR."
+        llm_client.rate_relevance.return_value = 5.0
+
+        _enrich_candidate_with_llm(candidate, llm_client, "interests", structured_insights=False)
+
+        llm_client.analyze_paper.assert_not_called()
+        self.assertEqual(candidate.entry_data["summary_text"], "Legacy TLDR.")
+        self.assertEqual(candidate.entry_data["llm_insights"], {})
 
 
 class CreateLLMClientTests(FlaskDBTestCase):

@@ -140,7 +140,7 @@
     </div>
 
     {# ── Advanced filters (collapsible) — includes match type, category, exports ── #}
-    {% set has_advanced_filters = current_filters.match_type or current_filters.category or current_filters.venue or current_filters.resource_filter != 'all' or current_filters.include_hidden or current_filters.reading_status or current_filters.author %}
+    {% set has_advanced_filters = current_filters.match_type or current_filters.category or current_filters.venue or current_filters.dataset or current_filters.resource_filter != 'all' or current_filters.include_hidden or current_filters.reading_status or current_filters.author %}
     <div class="mb-4">
         <button type="button" onclick="toggleAdvancedFilters()"
                 class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors">
@@ -250,6 +250,9 @@
             <a href="{{ url_for('dashboard.index', view=current_filters.view, timeframe='all' if current_filters.view == 'saved' else 'daily', sort='saved' if current_filters.view == 'saved' else 'trending') }}"
                class="text-gray-500 hover:text-gray-700">Reset filters</a>
             {% endif %}
+            {% set visual_mode = current_filters.density == 'visual' %}
+            <a href="{{ url_for('dashboard.index', **dict(request.args.to_dict(), density='comfortable' if visual_mode else 'visual')) }}"
+               class="text-gray-400 hover:text-gray-600 text-xs">{{ 'Comfortable view' if visual_mode else 'Visual grid' }}</a>
             <button type="button" onclick="toggleBulkMode()"
                     id="bulk-mode-toggle"
                     class="text-gray-400 hover:text-gray-600 text-xs">Select</button>
@@ -257,19 +260,29 @@
     </div>
 </form>
 
+{% set visual_mode = current_filters.density == 'visual' %}
 {% if papers %}
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="paper-grid">
+<div class="grid grid-cols-1 md:grid-cols-2 {{ 'lg:grid-cols-4' if visual_mode else 'lg:grid-cols-3' }} gap-4" id="paper-grid">
     {% for paper in papers %}
         {% set paper_id = paper.arxiv_id or paper.link.split('/')[-1] %}
     <article class="group bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md hover:border-gray-300 transition-all duration-200 flex flex-col paper-card"
              data-paper-id="{{ paper.id }}" tabindex="0">
         <a href="{{ paper.link }}" target="_blank" class="block paper-link">
+            {% if visual_mode %}
+            <div class="w-full h-64 bg-white overflow-hidden">
+                <img src="{{ url_for('dashboard.paper_teaser', paper_id=paper.id) }}"
+                     alt="" loading="lazy"
+                     class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                     onerror="handleImgError(this)">
+            </div>
+            {% else %}
             <div class="w-full h-36 bg-gray-100 overflow-hidden">
                 <img src="{{ url_for('dashboard.paper_thumbnail', paper_id=paper.id) }}"
                      alt="" loading="lazy"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                      onerror="handleImgError(this)">
             </div>
+            {% endif %}
         </a>
         <div class="p-4 flex flex-col flex-1">
             {# ── Badges + date ── #}
@@ -324,7 +337,7 @@
             </p>
 
             {# ── Summary (click to expand full abstract) ── #}
-            <div class="cursor-pointer group/summary mb-3" onclick="toggleSummary(this)">
+            <div class="cursor-pointer group/summary mb-3 {{ 'hidden' if visual_mode }}" onclick="toggleSummary(this)">
                 <span class="text-[11px] font-medium text-gray-400">TL;DR</span>
                 <p class="summary-text text-xs text-gray-600 leading-relaxed mb-1"
                    data-clamp="{{ preferences.display.summary_lines }}"
@@ -339,6 +352,25 @@
                 {% endif %}
                 <span class="summary-toggle-hint text-[11px] text-gray-300 group-hover/summary:text-gray-400 transition-colors">&#9656; full abstract</span>
             </div>
+
+            {# ── Structured LLM insights ── #}
+            {% set insights = paper.llm_insights or {} %}
+            {% if insights.get('why_matched') %}
+            <p class="text-[11px] text-rose-600/80 mb-2">
+                <span class="font-medium">Why for you:</span> {{ insights['why_matched'] }}
+            </p>
+            {% endif %}
+            {% if insights.get('datasets') %}
+            <div class="flex flex-wrap items-center gap-1 mb-2">
+                {% for dataset in insights['datasets'][:6] %}
+                <a href="{{ url_for('dashboard.index', dataset=dataset, timeframe='all') }}"
+                   onclick="event.stopPropagation()"
+                   class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-cyan-50 text-cyan-700 hover:bg-cyan-100 transition-colors">
+                    {{ dataset }}
+                </a>
+                {% endfor %}
+            </div>
+            {% endif %}
 
             {# ── Feedback buttons + reading status (always visible for quick triage) ── #}
             <div class="flex items-center gap-2 mb-3 flex-wrap">
@@ -452,7 +484,7 @@
                 </details>
 
                 {# ── User notes ── #}
-                <div class="mb-3">
+                <div class="mb-3 {{ 'hidden' if visual_mode }}">
                     <textarea data-paper-id="{{ paper.id }}"
                               oninput="debounceSaveNotes({{ paper.id }}, this)"
                               placeholder="Add a note..."

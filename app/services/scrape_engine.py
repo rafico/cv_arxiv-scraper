@@ -320,16 +320,20 @@ def _generate_thumbnails(app, results: list[dict], session: requests.Session) ->
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as FuturesTimeout
 
-    from app.services.thumbnail_generator import generate_thumbnail
+    from app.services.thumbnail_generator import DEFAULT_THUMBNAIL_DPI, generate_thumbnail
 
     static_folder = app.static_folder if app.static_folder else Path(__file__).parent.parent / "static"
+    scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {}) or {}
+    resolution = int(scraper_config.get("thumbnail_dpi", DEFAULT_THUMBNAIL_DPI))
 
     def worker(res):
         arxiv_id = res.get("arxiv_id") or (res.get("link") or "").split("/")[-1]
         pdf_link = res.get("pdf_link")
         pdf_content = res.get("pdf_content")
         if arxiv_id and pdf_link:
-            generate_thumbnail(arxiv_id, pdf_link, static_folder, session=session, pdf_content=pdf_content)
+            generate_thumbnail(
+                arxiv_id, pdf_link, static_folder, session=session, pdf_content=pdf_content, resolution=resolution
+            )
 
     try:
         with ThreadPoolExecutor(max_workers=4) as executor:

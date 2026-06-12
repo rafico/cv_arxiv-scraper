@@ -126,6 +126,15 @@ def _apply_venue_filter(query: Query, venue: str | None) -> Query:
     return query.filter(Paper.venue == venue)
 
 
+def _apply_dataset_filter(query: Query, dataset: str | None) -> Query:
+    if not dataset:
+        return query
+    # Quote-delimited match against the llm_insights JSON text to avoid
+    # substring collisions (e.g. "COCO" inside "COCO-Stuff").
+    escaped = f'%"{_escape_like_term(dataset)}"%'
+    return query.filter(db.cast(Paper.llm_insights, db.Text).ilike(escaped, escape="\\"))
+
+
 def _build_filter_options(query: Query) -> dict:
     base = query.order_by(None)
 
@@ -382,8 +391,13 @@ def index():
         escaped_author = f"%{_escape_like_term(author_filter)}%"
         query = query.filter(Paper.authors.ilike(escaped_author, escape="\\"))
 
+    density = request.args.get("density", "comfortable").strip()
+    if density not in ("comfortable", "visual"):
+        density = "comfortable"
+
     category = request.args.get("category", "").strip()
     venue = request.args.get("venue", "").strip()
+    dataset = request.args.get("dataset", "").strip()
     resource_filter = request.args.get("resource_filter", "all").strip()
     if resource_filter not in RESOURCE_FILTER_OPTIONS:
         resource_filter = "all"
@@ -391,6 +405,7 @@ def index():
     filter_options = _build_filter_options(query)
     query = _apply_category_filter(query, category or None)
     query = _apply_venue_filter(query, venue or None)
+    query = _apply_dataset_filter(query, dataset or None)
     query = _apply_resource_filter(query, resource_filter)
 
     default_sort = "saved" if view == "saved" else "trending"
@@ -473,6 +488,8 @@ def index():
             "include_hidden": include_hidden,
             "category": category,
             "venue": venue,
+            "dataset": dataset,
+            "density": density,
             "resource_filter": resource_filter,
             "reading_status": reading_status,
             "author": author_filter,
@@ -508,3 +525,22 @@ def paper_thumbnail(paper_id: int):
         return ("", 404)
 
     return send_file(thumbnail_path, mimetype="image/png", conditional=True, max_age=86400)
+
+
+@dashboard_bp.route("/papers/<int:paper_id>/teaser.png")
+def paper_teaser(paper_id: int):
+    """Teaser figure extracted from the PDF; falls back to the page-1 thumbnail."""
+    paper = Paper.query.get_or_404(paper_id)
+    storage_key = _thumbnail_storage_key(paper)
+    if not storage_key or not paper.pdf_link:
+        return ("", 404)
+
+    static_root = Path(current_app.static_folder or Path(__file__).resolve().parent.parent / "static")
+    thumbnail_root = (static_root / "thumbnails").resolve()
+    teaser_path = (thumbnail_root / f"{storage_key}_teaser.png").resolve()
+    if not teaser_path.is_relative_to(thumbnail_root):
+        return ("", 404)
+
+    if teaser_path.exists():
+        return send_file(teaser_path, mimetype="image/png", conditional=True, max_age=86400)
+    return paper_thumbnail(paper_id)

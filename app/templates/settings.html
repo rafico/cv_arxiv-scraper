@@ -734,6 +734,15 @@
                     </span>
                 </label>
 
+                <label class="inline-flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" name="llm_structured_insights" {% if llm_config.structured_insights %}checked{% endif %}
+                           class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                    <span>
+                        <span class="block text-sm font-semibold text-gray-900">Structured insights</span>
+                        <span class="block text-xs text-gray-500 mt-0.5">One combined JSON call also extracts tasks, datasets, method type, backbone, and a "why this matched you" line.</span>
+                    </span>
+                </label>
+
                 <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
                     <div>
                         <label for="llm_provider" class="block text-sm font-medium text-gray-700 mb-1">Provider</label>

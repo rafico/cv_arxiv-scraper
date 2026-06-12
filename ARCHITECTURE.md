@@ -43,11 +43,16 @@ files are backward-compat shims via `app/_module_alias.py`. Put new logic in
 
 ```
 ingest.orchestrator.fetch(mode)            # RSS + arXiv-API backends, resumable
-   → enrich_entries_with_api_metadata      # OpenAlex / Semantic Scholar / citations
-   → _process_entries_with_pipeline        # feature extraction + ranking + LLM summary
+   → enrich_entries_with_api_metadata      # arXiv API affiliations/comments/links
+   → _process_entries_with_pipeline        # features (venue, learned-interest sim)
+                                           #   + ranking + LLM summary/insights
+   → _enrich_results_with_citations        # Semantic Scholar
+   → _enrich_results_with_openalex         # OpenAlex
+   → _enrich_results_with_pdf_links        # code/project links from PDF pages 1-2
    → _save_results                         # explicit field mapping onto Paper rows
-   → _generate_thumbnails                   # reads result["pdf_content"]
-   → _generate_embeddings                   # FAISS index update
+   → _enrich_results_with_github           # repo stars/license (rows must exist)
+   → _generate_thumbnails                   # reads result["pdf_content"]; page + teaser
+   → _generate_embeddings                   # FAISS update (reuses in-flight vectors)
    → _extract_sections                      # reads result["pdf_content"]  ← last consumer
 ```
 

@@ -244,6 +244,85 @@ class RateRelevanceTests(unittest.TestCase):
         self.assertEqual(client.rate_relevance("Title", "Abstract", "Vision"), 7.5)
 
 
+_VALID_ANALYSIS = (
+    '{"tldr": "A new detector.", "relevance": 8, "tasks": ["object detection"], '
+    '"datasets": ["COCO", "LVIS"], "method_type": "transformer", "backbone": "ViT-L", '
+    '"why_matched": "Zero-shot detection overlaps your interests."}'
+)
+
+
+class AnalyzePaperTests(unittest.TestCase):
+    def _client_with_content(self, mock_openai, content: str) -> LLMClient:
+        response = Mock()
+        response.choices = [Mock(message=Mock(content=content))]
+        mock_openai.return_value.chat.completions.create.return_value = response
+        return LLMClient("test-key", "model", "https://example.com")
+
+    @patch("app.services.llm_client.OpenAI")
+    def test_analyze_paper_parses_valid_json(self, mock_openai):
+        client = self._client_with_content(mock_openai, _VALID_ANALYSIS)
+
+        result = client.analyze_paper("Title", "Abstract", "Vision", matched_terms=["Zero Shot"])
+
+        self.assertEqual(result["tldr"], "A new detector.")
+        self.assertEqual(result["relevance"], 8.0)
+        self.assertEqual(result["datasets"], ["COCO", "LVIS"])
+        self.assertEqual(result["backbone"], "ViT-L")
+        self.assertIn("Zero-shot", result["why_matched"])
+        # Single combined call.
+        self.assertEqual(mock_openai.return_value.chat.completions.create.call_count, 1)
+
+    @patch("app.services.llm_client.OpenAI")
+    def test_analyze_paper_strips_code_fences(self, mock_openai):
+        client = self._client_with_content(mock_openai, f"```json\n{_VALID_ANALYSIS}\n```")
+
+        result = client.analyze_paper("Title", "Abstract", "Vision")
+
+        self.assertEqual(result["tasks"], ["object detection"])
+
+    @patch("app.services.llm_client.OpenAI")
+    def test_analyze_paper_returns_none_on_malformed_json(self, mock_openai):
+        client = self._client_with_content(mock_openai, "this is not json {")
+        self.assertIsNone(client.analyze_paper("Title", "Abstract", "Vision"))
+
+    @patch("app.services.llm_client.OpenAI")
+    def test_analyze_paper_returns_none_on_non_dict_json(self, mock_openai):
+        client = self._client_with_content(mock_openai, '["a", "list"]')
+        self.assertIsNone(client.analyze_paper("Title", "Abstract", "Vision"))
+
+    @patch("app.services.llm_client.OpenAI")
+    def test_analyze_paper_clamps_relevance(self, mock_openai):
+        client = self._client_with_content(mock_openai, '{"tldr": "x", "relevance": 42}')
+
+        result = client.analyze_paper("Title", "Abstract", "Vision")
+
+        self.assertEqual(result["relevance"], 10.0)
+        self.assertEqual(result["datasets"], [])
+        self.assertIsNone(result["backbone"])
+
+    @patch("app.services.llm_client.OpenAI")
+    def test_analyze_paper_retries_without_response_format(self, mock_openai):
+        mock_create = mock_openai.return_value.chat.completions.create
+        ok_response = Mock()
+        ok_response.choices = [Mock(message=Mock(content=_VALID_ANALYSIS))]
+        mock_create.side_effect = [TypeError("response_format unsupported"), ok_response]
+
+        client = LLMClient("test-key", "model", "https://example.com")
+        result = client.analyze_paper("Title", "Abstract", "Vision")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(mock_create.call_count, 2)
+        self.assertIn("response_format", mock_create.call_args_list[0].kwargs)
+        self.assertNotIn("response_format", mock_create.call_args_list[1].kwargs)
+
+    @patch("app.services.llm_client.OpenAI")
+    def test_analyze_paper_returns_none_when_all_attempts_fail(self, mock_openai):
+        mock_openai.return_value.chat.completions.create.side_effect = RuntimeError("boom")
+
+        client = LLMClient("test-key", "model", "https://example.com")
+        self.assertIsNone(client.analyze_paper("Title", "Abstract", "Vision"))
+
+
 class CreateCompletionTests(unittest.TestCase):
     @patch("app.services.llm_client.OpenAI")
     def test_passes_all_parameters(self, mock_openai):

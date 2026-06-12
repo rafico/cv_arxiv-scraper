@@ -74,6 +74,7 @@ def _build_llm_view_model(config: dict) -> dict:
     defaults = _llm_provider_defaults(provider)
     return {
         "enabled": bool(llm_cfg.get("enabled", False)),
+        "structured_insights": bool(llm_cfg.get("structured_insights", False)),
         "provider": provider,
         "model": llm_cfg.get("model", defaults["model"]),
         "base_url": llm_cfg.get("base_url", defaults["base_url"]),
@@ -288,6 +289,7 @@ def save_llm_settings():
 
     key_path = Path(current_app.config["LLM_KEY_PATH"])
     enabled = request.form.get("llm_enabled") == "on"
+    structured_insights = request.form.get("llm_structured_insights") == "on"
     provider = request.form.get("llm_provider", "openrouter").strip()
     if provider not in ("openrouter", "ollama"):
         provider = "openrouter"
@@ -309,6 +311,7 @@ def save_llm_settings():
     full_config = _load_full_config()
     full_config["llm"] = {
         "enabled": enabled,
+        "structured_insights": structured_insights,
         "provider": provider,
         "model": model,
         "base_url": base_url,

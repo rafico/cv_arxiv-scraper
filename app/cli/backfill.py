@@ -395,6 +395,7 @@ def backfill_thumbnails(
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    teasers_only: bool = False,
     emit: Emit = print,
 ) -> int:
     from app.search_.thumbnail_generator import generate_thumbnail
@@ -426,7 +427,11 @@ def backfill_thumbnails(
                 generated_now = 0
                 for paper in papers:
                     thumbnail_path = thumbnails_dir / f"{paper.arxiv_id}.png"
-                    if thumbnail_path.exists():
+                    teaser_path = thumbnails_dir / f"{paper.arxiv_id}_teaser.png"
+                    if teasers_only:
+                        if teaser_path.exists():
+                            continue
+                    elif thumbnail_path.exists() and teaser_path.exists():
                         continue
 
                     if generate_thumbnail(paper.arxiv_id, paper.pdf_link, static_dir, session=session):
@@ -444,6 +449,61 @@ def backfill_thumbnails(
         session.close()
 
     return total_generated
+
+
+def backfill_insights(app, *, limit: int = 200, emit: Emit = print) -> int:
+    """Run structured LLM extraction for papers without insights (cost-capped)."""
+    from app.services.scrape_engine import _create_llm_client
+
+    llm_config = (app.config.get("SCRAPER_CONFIG") or {}).get("llm") or {}
+    if not llm_config.get("enabled"):
+        emit("LLM is disabled in config; nothing to do.")
+        return 0
+
+    total_updated = 0
+    with app.app_context():
+        llm_client, interests_text = _create_llm_client(app)
+        if llm_client is None:
+            emit("LLM client unavailable; nothing to do.")
+            return 0
+
+        papers = (
+            Paper.query.filter(db.cast(Paper.llm_insights, db.Text) == "{}")
+            .order_by(Paper.id.desc())
+            .limit(limit)
+            .all()
+        )
+        emit(f"Analyzing {len(papers)} papers (newest first, limit {limit})...")
+        scraper_config = app.config.get("SCRAPER_CONFIG")
+
+        for index, paper in enumerate(papers, start=1):
+            insights = llm_client.analyze_paper(
+                paper.title,
+                paper.abstract_text or "",
+                interests_text,
+                matched_terms=paper.matched_terms_list,
+            )
+            if not insights:
+                continue
+
+            if insights.get("tldr"):
+                paper.summary_text = insights["tldr"][:280].rstrip()
+            if insights.get("relevance") is not None:
+                paper.llm_relevance_score = insights["relevance"]
+            paper.llm_insights = {
+                key: insights[key] for key in ("tasks", "datasets", "method_type", "backbone", "why_matched")
+            }
+            _recompute_paper_score(paper, scraper_config)
+            total_updated += 1
+
+            if index % 25 == 0:
+                db.session.commit()
+                emit(f"Insights progress: {index}/{len(papers)} analyzed (updated {total_updated})")
+
+        db.session.commit()
+
+    emit(f"Insights backfill complete: {total_updated} papers updated")
+    return total_updated
 
 
 def backfill_interest(app, *, emit: Emit = print) -> int:
@@ -492,11 +552,15 @@ def build_parser() -> argparse.ArgumentParser:
     index_rebuild = subparsers.add_parser("index-rebuild", help="Rebuild the semantic paper index from the DB")
     index_rebuild.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
     subparsers.add_parser("interest", help="Recompute learned-interest similarities from feedback")
+    insights = subparsers.add_parser("insights", help="Run structured LLM extraction for papers without insights")
+    insights.add_argument("--limit", type=int, default=200, help="Max papers to analyze (one LLM call each)")
 
     for command in ("citations", "openalex", "comments", "github", "thumbnails", "all"):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
         subparser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
         subparser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
+        if command == "thumbnails":
+            subparser.add_argument("--teasers-only", action="store_true", help="Only generate missing teaser figures")
 
     return parser
 
@@ -517,12 +581,16 @@ def main(argv: list[str] | None = None) -> int:
             backfill_openalex(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "interest":
             backfill_interest(app)
+        elif args.command == "insights":
+            backfill_insights(app, limit=args.limit)
         elif args.command == "comments":
             backfill_comments(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "github":
             backfill_github(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "thumbnails":
-            backfill_thumbnails(app, batch_size=args.batch_size, delay_seconds=args.delay)
+            backfill_thumbnails(
+                app, batch_size=args.batch_size, delay_seconds=args.delay, teasers_only=args.teasers_only
+            )
         else:
             run_all_backfills(app, batch_size=args.batch_size, delay_seconds=args.delay)
     except (RuntimeError, ValueError) as exc:

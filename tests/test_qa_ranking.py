@@ -223,6 +223,8 @@ class ExplainScoreTests(unittest.TestCase):
             "resource_score",
             "ai_bonus",
             "citation_bonus",
+            "venue_bonus",
+            "interest_bonus",
             "recency_multiplier",
             "base_score",
             "feedback_bonus",

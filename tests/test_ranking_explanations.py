@@ -20,6 +20,10 @@ def _make_paper(**kwargs):
     paper.llm_relevance_score = kwargs.get("llm_relevance_score")
     paper.abstract_text = kwargs.get("abstract_text", "A paper about neural networks.")
     paper.title = kwargs.get("title", "Test Paper Title")
+    paper.venue = kwargs.get("venue")
+    paper.venue_year = kwargs.get("venue_year")
+    paper.acceptance_status = kwargs.get("acceptance_status")
+    paper.interest_similarity = kwargs.get("interest_similarity")
     return paper
 
 
@@ -58,6 +62,26 @@ class TestGenerateRankingExplanation:
         paper = _make_paper(publication_dt=date.today())
         explanations = generate_ranking_explanation(paper)
         assert any("recently" in e.lower() for e in explanations)
+
+    def test_venue_acceptance_explained(self):
+        paper = _make_paper(venue="CVPR", venue_year=2026, acceptance_status="oral")
+        explanations = generate_ranking_explanation(paper)
+        assert any("Accepted at CVPR 2026 (oral)" in e for e in explanations)
+
+    def test_mentioned_venue_not_explained(self):
+        paper = _make_paper(venue="ICLR", acceptance_status="mentioned")
+        explanations = generate_ranking_explanation(paper)
+        assert not any("ICLR" in e for e in explanations)
+
+    def test_high_interest_similarity_explained(self):
+        paper = _make_paper(interest_similarity=0.8)
+        explanations = generate_ranking_explanation(paper)
+        assert any("matches papers you saved" in e.lower() for e in explanations)
+
+    def test_low_interest_similarity_not_explained(self):
+        paper = _make_paper(interest_similarity=0.1)
+        explanations = generate_ranking_explanation(paper)
+        assert not any("matches papers you saved" in e.lower() for e in explanations)
 
     def test_old_paper_no_recency(self):
         paper = _make_paper(publication_dt=date.today() - timedelta(days=60))

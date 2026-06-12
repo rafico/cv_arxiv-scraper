@@ -17,6 +17,15 @@ _DEFAULT_KEY_PATH = _PROJECT_ROOT / ".llm_api_key"
 _NUMERIC_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
 
 
+def _strip_code_fences(content: str) -> str:
+    """Remove a wrapping ```json ... ``` fence that some models emit."""
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
 def resolve_api_key(key_path: Path | None = None) -> str | None:
     """Resolve API key from env var first, then from a gitignored file."""
     key = os.environ.get("OPENROUTER_API_KEY", "").strip()
@@ -71,6 +80,7 @@ class LLMClient:
         user_prompt: str,
         max_tokens: int,
         temperature: float,
+        **extra,
     ):
         request = {
             "model": self.model,
@@ -80,6 +90,7 @@ class LLMClient:
             ],
             "max_tokens": max_tokens,
             "temperature": temperature,
+            **extra,
         }
         if self.reasoning_effort:
             request["reasoning_effort"] = self.reasoning_effort
@@ -107,6 +118,90 @@ class LLMClient:
         except (AttributeError, IndexError):
             return None
         return content.strip() if isinstance(content, str) and content.strip() else None
+
+    def analyze_paper(
+        self,
+        title: str,
+        abstract: str,
+        interests: str,
+        matched_terms: list[str] | None = None,
+    ) -> dict | None:
+        """One structured call combining TLDR, relevance, and paper facts.
+
+        Returns a dict with tldr/relevance/tasks/datasets/method_type/backbone/
+        why_matched, or None on any failure (caller falls back to the legacy
+        two-call path).
+        """
+        import json
+
+        system_prompt = (
+            "You analyze computer-vision research papers. Respond with STRICT JSON only, no prose, "
+            "matching exactly this schema: "
+            '{"tldr": string, "relevance": number, "tasks": [string], "datasets": [string], '
+            '"method_type": string, "backbone": string or null, "why_matched": string}. '
+            "tldr: specific 1-2 sentence summary, under 280 characters. "
+            "relevance: 1-10 relevance to the reader's interests. "
+            "tasks: vision tasks addressed (e.g. object detection). "
+            "datasets: benchmark/dataset names evaluated on (e.g. COCO, ADE20K); [] if unclear. "
+            "method_type: one short phrase (e.g. diffusion model, transformer). "
+            "backbone: main architecture/backbone, or null. "
+            "why_matched: one line (under 120 chars) tying the paper to the reader's interests."
+        )
+        matched = ", ".join(matched_terms or []) or "none"
+        user_prompt = (
+            f"Reader interests: {interests or 'General computer vision'}\n"
+            f"Matched interest terms: {matched}\n\n"
+            f"Title: {title}\n\nAbstract: {abstract}"
+        )
+
+        content = None
+        # Some OpenAI-compatible servers reject response_format; retry without it.
+        for extra in ({"response_format": {"type": "json_object"}}, {}):
+            try:
+                with self._semaphore:
+                    response = self._create_completion(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        max_tokens=400,
+                        temperature=0.2,
+                        **extra,
+                    )
+                content = response.choices[0].message.content
+                break
+            except Exception:  # noqa: S112 — retry without response_format, then give up
+                continue
+
+        if not isinstance(content, str) or not content.strip():
+            return None
+        try:
+            data = json.loads(_strip_code_fences(content))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+
+        relevance = None
+        try:
+            if data.get("relevance") is not None:
+                relevance = max(1.0, min(10.0, float(data["relevance"])))
+        except (TypeError, ValueError):
+            relevance = None
+
+        def _str_list(value) -> list[str]:
+            if not isinstance(value, list):
+                return []
+            return [str(item).strip() for item in value if str(item).strip()][:8]
+
+        backbone = data.get("backbone")
+        return {
+            "tldr": str(data.get("tldr") or "").strip(),
+            "relevance": relevance,
+            "tasks": _str_list(data.get("tasks")),
+            "datasets": _str_list(data.get("datasets")),
+            "method_type": str(data.get("method_type") or "").strip(),
+            "backbone": str(backbone).strip() if backbone else None,
+            "why_matched": str(data.get("why_matched") or "").strip()[:160],
+        }
 
     def rate_relevance(self, title: str, abstract: str, interests: str) -> float | None:
         system_prompt = (

@@ -138,12 +138,34 @@ class BackfillCliTests(FlaskDBTestCase):
         existing_dir = static_dir / "thumbnails"
         existing_dir.mkdir(parents=True, exist_ok=True)
         (existing_dir / "2601.00003.png").write_bytes(b"png")
+        (existing_dir / "2601.00003_teaser.png").write_bytes(b"png")
 
         generated = backfill_thumbnails(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
 
         self.assertEqual(generated, 1)
         mock_generate.assert_called_once()
         self.assertEqual(mock_generate.call_args.args[:2], ("2601.00004", "https://arxiv.org/pdf/2601.00004.pdf"))
+
+    @patch("app.search_.thumbnail_generator.generate_thumbnail", return_value=True)
+    def test_backfill_thumbnails_teasers_only_targets_missing_teasers(self, mock_generate):
+        static_dir = Path(self._tmpdir.name) / "static"
+        self.app.static_folder = str(static_dir)
+        db.session.add_all([_paper("2601.00007"), _paper("2601.00008")])
+        db.session.commit()
+
+        existing_dir = static_dir / "thumbnails"
+        existing_dir.mkdir(parents=True, exist_ok=True)
+        # 00007 has a page thumbnail but no teaser; 00008 already has a teaser.
+        (existing_dir / "2601.00007.png").write_bytes(b"png")
+        (existing_dir / "2601.00008_teaser.png").write_bytes(b"png")
+
+        generated = backfill_thumbnails(
+            self.app, batch_size=10, delay_seconds=0, teasers_only=True, emit=lambda _: None
+        )
+
+        self.assertEqual(generated, 1)
+        mock_generate.assert_called_once()
+        self.assertEqual(mock_generate.call_args.args[0], "2601.00007")
 
     @patch("app.services.embeddings.EmbeddingService.encode", autospec=True)
     def test_rebuild_semantic_index_replaces_existing_files(self, mock_encode):
