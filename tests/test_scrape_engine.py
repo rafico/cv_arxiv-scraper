@@ -441,6 +441,64 @@ class OpenAlexEnrichmentTests(FlaskDBTestCase):
         )
 
 
+class PdfLinkEnrichmentTests(FlaskDBTestCase):
+    @patch("app.services.scrape_engine.extract_pdf_resource_links")
+    def test_pdf_links_merged_and_rescored(self, mock_extract):
+        from app.services.scrape_engine import _enrich_results_with_pdf_links
+
+        result = _make_result("https://arxiv.org/abs/0008")
+        result["publication_dt"] = date(2026, 1, 1)
+        result["pdf_content"] = b"%PDF-fake"
+        baseline_score = result["paper_score"]
+        mock_extract.return_value = [{"type": "code", "label": "Code", "url": "https://github.com/lab/repo"}]
+
+        _enrich_results_with_pdf_links([result], self.app.config["SCRAPER_CONFIG"])
+
+        self.assertEqual(result["resource_links"][0]["url"], "https://github.com/lab/repo")
+        # pdf_content must survive for downstream thumbnail/section steps.
+        self.assertEqual(result["pdf_content"], b"%PDF-fake")
+        self.assertNotEqual(result["paper_score"], baseline_score)
+        self.assertEqual(
+            result["paper_score"],
+            compute_paper_score(
+                match_types=result["match_types"],
+                matched_terms_count=len(result["matches"]),
+                publication_dt=result["publication_dt"],
+                resource_count=1,
+                llm_relevance_score=None,
+                citation_count=None,
+                config=self.app.config["SCRAPER_CONFIG"],
+            ),
+        )
+
+    def test_missing_pdf_content_is_skipped(self):
+        from app.services.scrape_engine import _enrich_results_with_pdf_links
+
+        result = _make_result("https://arxiv.org/abs/0009")
+        baseline_score = result["paper_score"]
+
+        _enrich_results_with_pdf_links([result], self.app.config["SCRAPER_CONFIG"])
+
+        self.assertEqual(result["resource_links"], [])
+        self.assertEqual(result["paper_score"], baseline_score)
+
+    @patch("app.services.scrape_engine.extract_pdf_resource_links")
+    def test_duplicate_links_do_not_trigger_rescore(self, mock_extract):
+        from app.services.scrape_engine import _enrich_results_with_pdf_links
+
+        result = _make_result("https://arxiv.org/abs/0010")
+        existing = {"type": "code", "label": "Code", "url": "https://github.com/lab/repo"}
+        result["resource_links"] = [existing]
+        result["pdf_content"] = b"%PDF-fake"
+        baseline_score = result["paper_score"]
+        mock_extract.return_value = [dict(existing)]
+
+        _enrich_results_with_pdf_links([result], self.app.config["SCRAPER_CONFIG"])
+
+        self.assertEqual(result["resource_links"], [existing])
+        self.assertEqual(result["paper_score"], baseline_score)
+
+
 class HistoricalScrapeTests(FlaskDBTestCase):
     def test_execute_historical_scrape_uses_orchestrator_bridge(self):
         from app.services import scrape_engine

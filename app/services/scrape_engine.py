@@ -14,7 +14,9 @@ from sqlalchemy.exc import IntegrityError
 from app.constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_WORKERS
 from app.services.enrichment import (
     enrich_entries_with_api_metadata,
+    extract_pdf_resource_links,
     fetch_recent_papers,
+    merge_resource_links,
     parse_feed_entries,
 )
 from app.services.http_client import create_session, resolve_user_agent
@@ -592,6 +594,63 @@ def _enrich_results_with_openalex(
                 _rescore_result(res, config)
 
 
+def _enrich_results_with_github(app, results: list[dict], session: requests.Session, config: dict) -> None:
+    """Fetch GitHub repo metadata (stars, license) for saved papers with code links."""
+    github_config = config.get("github", {})
+    if not github_config.get("enabled", True):
+        return
+
+    import os
+
+    from app.services.enrichment_providers import GitHubProvider, extract_github_repo
+
+    repos_by_arxiv_id: dict[str, str] = {}
+    for res in results:
+        arxiv_id = res.get("arxiv_id")
+        repo = extract_github_repo(res.get("resource_links"))
+        if arxiv_id and repo:
+            repos_by_arxiv_id[arxiv_id] = repo
+    if not repos_by_arxiv_id:
+        return
+
+    token = os.environ.get("GITHUB_TOKEN") or github_config.get("token") or None
+    provider = GitHubProvider(token=token)
+    try:
+        with app.app_context():
+            payloads = provider.fetch_batch(
+                list(repos_by_arxiv_id),
+                repos_by_arxiv_id=repos_by_arxiv_id,
+                session=session,
+            )
+            if not payloads:
+                return
+
+            from app.models import Paper, db
+
+            papers = Paper.query.filter(Paper.arxiv_id.in_(list(payloads))).all()
+            for paper in papers:
+                data = payloads.get(paper.arxiv_id) or {}
+                paper.github_repo = data.get("github_repo")
+                paper.github_stars = data.get("github_stars")
+                paper.github_license = data.get("github_license")
+            db.session.commit()
+    except Exception:
+        LOGGER.warning("GitHub enrichment failed (non-fatal)", exc_info=True)
+
+
+def _enrich_results_with_pdf_links(results: list[dict], config: dict | None) -> None:
+    """Merge code/project links found in PDF front matter into resource_links (in-place)."""
+    for res in results:
+        # .get(), not .pop(): pdf_content is still needed by thumbnails/sections.
+        pdf_links = extract_pdf_resource_links(res.get("pdf_content"))
+        if not pdf_links:
+            continue
+        merged = merge_resource_links(res.get("resource_links"), pdf_links)
+        if len(merged) != len(res.get("resource_links") or []):
+            res["resource_links"] = merged
+            _rescore_result(res, config)
+
+
 def _collect_matched_results(
     entries: list[dict],
     whitelists: dict,
@@ -651,9 +710,11 @@ def _finalize_results(
     _emit(event_callback, "status", {"phase": "saving", "message": "Saving to database..."})
     _enrich_results_with_citations(results, session, config, now=now)
     _enrich_results_with_openalex(results, session, config)
+    _enrich_results_with_pdf_links(results, config)
 
     _sort_results(results)
     new_count, skipped = _save_results(app, results)
+    _enrich_results_with_github(app, results, session, config)
 
     _emit(event_callback, "status", {"phase": "thumbnails", "message": "Generating PDF thumbnails..."})
     _generate_thumbnails(app, results, session)

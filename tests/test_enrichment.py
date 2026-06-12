@@ -4,7 +4,35 @@ import unittest
 from datetime import date
 from unittest.mock import Mock, patch
 
-from app.services.enrichment import _fetch_api_metadata, fetch_recent_papers
+from app.services.enrichment import (
+    _fetch_api_metadata,
+    extract_pdf_resource_links,
+    fetch_recent_papers,
+    merge_resource_links,
+)
+
+
+def _make_pdf(pages: list[list[str]]) -> bytes:
+    """Create a minimal PDF with the given text lines per page using fpdf."""
+    import os
+    import pathlib
+    import tempfile
+
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.set_font("Helvetica", size=11)
+    for lines in pages:
+        pdf.add_page()
+        for line in lines:
+            pdf.cell(0, 6, txt=line, ln=1)
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        pdf.output(tmp.name)
+    try:
+        return pathlib.Path(tmp.name).read_bytes()
+    finally:
+        os.unlink(tmp.name)
 
 
 class FetchRecentPapersTests(unittest.TestCase):
@@ -53,6 +81,67 @@ class FetchRecentPapersTests(unittest.TestCase):
             [2, 1, 1],
         )
         self.assertTrue(all(call.kwargs["rate_limit_profile"] == "bulk" for call in mock_request.call_args_list))
+
+
+class ExtractPdfResourceLinksTests(unittest.TestCase):
+    def test_keeps_code_and_project_links_and_drops_generic_web(self):
+        pdf = _make_pdf(
+            [
+                [
+                    "A Great Paper",
+                    "Code: https://github.com/lab/great-paper",
+                    "Project page: https://lab.github.io/great-paper",
+                    "See https://example.com/blog for details",
+                ]
+            ]
+        )
+
+        links = extract_pdf_resource_links(pdf)
+
+        urls = {link["url"]: link["type"] for link in links}
+        self.assertEqual(urls["https://github.com/lab/great-paper"], "code")
+        self.assertEqual(urls["https://lab.github.io/great-paper"], "project")
+        self.assertNotIn("https://example.com/blog", urls)
+
+    def test_drops_arxiv_and_doi_self_links(self):
+        pdf = _make_pdf([["https://arxiv.org/abs/2606.00001", "https://doi.org/10.1000/x"]])
+
+        self.assertEqual(extract_pdf_resource_links(pdf), [])
+
+    def test_ignores_pages_beyond_max_pages(self):
+        pdf = _make_pdf(
+            [
+                ["First page"],
+                ["Second page"],
+                ["https://github.com/lab/late-mention"],
+            ]
+        )
+
+        self.assertEqual(extract_pdf_resource_links(pdf, max_pages=2), [])
+
+    def test_handles_none_and_invalid_bytes(self):
+        self.assertEqual(extract_pdf_resource_links(None), [])
+        self.assertEqual(extract_pdf_resource_links(b"not a pdf"), [])
+
+
+class MergeResourceLinksTests(unittest.TestCase):
+    def test_dedupes_on_url_keeping_existing_entry(self):
+        existing = [{"type": "code", "label": "Code", "url": "https://github.com/a/b"}]
+        new = [
+            {"type": "code", "label": "Other", "url": "https://github.com/a/b"},
+            {"type": "project", "label": "Project", "url": "https://a.github.io/b"},
+        ]
+
+        merged = merge_resource_links(existing, new)
+
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0], existing[0])
+        self.assertEqual(merged[1]["url"], "https://a.github.io/b")
+
+    def test_handles_none_inputs(self):
+        self.assertEqual(merge_resource_links(None, None), [])
+        link = [{"type": "code", "label": "Code", "url": "https://github.com/a/b"}]
+        self.assertEqual(merge_resource_links(None, link), link)
 
 
 if __name__ == "__main__":

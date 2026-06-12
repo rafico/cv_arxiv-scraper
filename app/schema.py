@@ -99,6 +99,9 @@ PAPER_COLUMN_DEFS = {
     "referenced_works_count": "INTEGER",
     "openalex_cited_by_count": "INTEGER",
     "mendeley_doc_id": "TEXT",
+    "github_repo": "TEXT",
+    "github_stars": "INTEGER",
+    "github_license": "TEXT",
 }
 
 INDEX_STATEMENTS = [

@@ -11,6 +11,7 @@ from app.services.embeddings import EmbeddingService, reset_embedding_service
 from app.services.ranking import compute_paper_score
 from backfill_cli import (
     backfill_citations,
+    backfill_github,
     backfill_openalex,
     backfill_thumbnails,
     main,
@@ -176,11 +177,34 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertTrue(service.has_paper(Paper.query.filter_by(arxiv_id="2601.00005").one().id))
         self.assertTrue(service.has_paper(Paper.query.filter_by(arxiv_id="2601.00006").one().id))
 
+    @patch("app.enrich.GitHubProvider")
+    def test_backfill_github_updates_papers_with_code_links(self, mock_provider_cls):
+        paper = _paper("2601.00009")
+        paper.resource_links = [{"type": "code", "label": "Code", "url": "https://github.com/lab/model"}]
+        db.session.add(paper)
+        db.session.commit()
+        mock_provider_cls.return_value.fetch_batch.return_value = {
+            "2601.00009": {"github_repo": "lab/model", "github_stars": 250, "github_license": "MIT"}
+        }
+
+        updated = backfill_github(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
+
+        stored = Paper.query.filter_by(arxiv_id="2601.00009").one()
+        self.assertEqual(updated, 1)
+        self.assertEqual(stored.github_repo, "lab/model")
+        self.assertEqual(stored.github_stars, 250)
+        self.assertEqual(stored.github_license, "MIT")
+        repos = mock_provider_cls.return_value.fetch_batch.call_args.kwargs["repos_by_arxiv_id"]
+        self.assertEqual(repos, {"2601.00009": "lab/model"})
+
     @patch("backfill_cli.backfill_thumbnails", return_value=4)
+    @patch("backfill_cli.backfill_github", return_value=5)
     @patch("backfill_cli.backfill_openalex", return_value=3)
     @patch("backfill_cli.backfill_citations", return_value=2)
     @patch("backfill_cli.run_embeddings_backfill", return_value=1)
-    def test_run_all_backfills_runs_each_task(self, mock_embeddings, mock_citations, mock_openalex, mock_thumbnails):
+    def test_run_all_backfills_runs_each_task(
+        self, mock_embeddings, mock_citations, mock_openalex, mock_github, mock_thumbnails
+    ):
         result = run_all_backfills(self.app, batch_size=25, delay_seconds=0, emit=lambda _: None)
 
         self.assertEqual(
@@ -189,12 +213,14 @@ class BackfillCliTests(FlaskDBTestCase):
                 "embeddings": 1,
                 "citations": 2,
                 "openalex": 3,
+                "github": 5,
                 "thumbnails": 4,
             },
         )
         mock_embeddings.assert_called_once()
         mock_citations.assert_called_once()
         mock_openalex.assert_called_once()
+        mock_github.assert_called_once()
         mock_thumbnails.assert_called_once()
 
     @patch("backfill_cli.rebuild_semantic_index", return_value=2)

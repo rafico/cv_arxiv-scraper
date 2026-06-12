@@ -250,6 +250,75 @@ def backfill_openalex(
     return total_updated
 
 
+def backfill_github(
+    app,
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    emit: Emit = print,
+) -> int:
+    from app.enrich import GitHubProvider, extract_github_repo
+
+    total_updated = 0
+    last_seen_id = 0
+    session = create_session(pool_size=1, scraper_config=app.config.get("SCRAPER_CONFIG"), rate_limit_profile="bulk")
+    github_config = (app.config.get("SCRAPER_CONFIG") or {}).get("github") or {}
+    token = os.environ.get("GITHUB_TOKEN") or github_config.get("token") or None
+
+    try:
+        with app.app_context():
+            while True:
+                papers = (
+                    Paper.query.filter(
+                        Paper.id > last_seen_id,
+                        Paper.arxiv_id.is_not(None),
+                        Paper.github_repo.is_(None),
+                        db.cast(Paper.resource_links, db.Text).like("%github.com%"),
+                    )
+                    .order_by(Paper.id)
+                    .limit(batch_size)
+                    .all()
+                )
+                if not papers:
+                    break
+
+                last_seen_id = papers[-1].id
+                repos_by_arxiv_id: dict[str, str] = {}
+                for paper in papers:
+                    repo = extract_github_repo(paper.resource_links_list)
+                    if paper.arxiv_id and repo:
+                        repos_by_arxiv_id[paper.arxiv_id] = repo
+
+                provider = GitHubProvider(token=token, max_fetches=batch_size)
+                payloads = provider.fetch_batch(
+                    list(repos_by_arxiv_id),
+                    repos_by_arxiv_id=repos_by_arxiv_id,
+                    session=session,
+                )
+                updated_now = 0
+                for paper in papers:
+                    data = payloads.get(paper.arxiv_id or "")
+                    if not data:
+                        continue
+                    paper.github_repo = data.get("github_repo")
+                    paper.github_stars = data.get("github_stars")
+                    paper.github_license = data.get("github_license")
+                    updated_now += 1
+
+                db.session.commit()
+                total_updated += updated_now
+                emit(
+                    f"GitHub batch through paper {last_seen_id}: "
+                    f"updated {updated_now}/{len(papers)} papers (total {total_updated})"
+                )
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
+    finally:
+        session.close()
+
+    return total_updated
+
+
 def backfill_thumbnails(
     app,
     *,
@@ -317,6 +386,7 @@ def run_all_backfills(
         "embeddings": run_embeddings_backfill(app, batch_size=EMBEDDINGS_BATCH_SIZE, emit=emit),
         "citations": backfill_citations(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "openalex": backfill_openalex(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
+        "github": backfill_github(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "thumbnails": backfill_thumbnails(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
     }
     emit(
@@ -324,6 +394,7 @@ def run_all_backfills(
         f"embeddings={results['embeddings']}, "
         f"citations={results['citations']}, "
         f"openalex={results['openalex']}, "
+        f"github={results['github']}, "
         f"thumbnails={results['thumbnails']}"
     )
     return results
@@ -338,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_rebuild = subparsers.add_parser("index-rebuild", help="Rebuild the semantic paper index from the DB")
     index_rebuild.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
 
-    for command in ("citations", "openalex", "thumbnails", "all"):
+    for command in ("citations", "openalex", "github", "thumbnails", "all"):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
         subparser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
         subparser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
@@ -360,6 +431,8 @@ def main(argv: list[str] | None = None) -> int:
             backfill_citations(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "openalex":
             backfill_openalex(app, batch_size=args.batch_size, delay_seconds=args.delay)
+        elif args.command == "github":
+            backfill_github(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "thumbnails":
             backfill_thumbnails(app, batch_size=args.batch_size, delay_seconds=args.delay)
         else:

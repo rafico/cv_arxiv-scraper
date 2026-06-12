@@ -22,6 +22,11 @@ llm:
 openalex:
   enabled: true
   email: ""
+github:
+  enabled: true
+  # Optional personal access token (or set GITHUB_TOKEN) to raise the API rate
+  # limit from 60 to 5000 requests/hour. Without it, fetches are capped per run.
+  token: ""
 preferences:
   ranking:
     author_weight: 44.0

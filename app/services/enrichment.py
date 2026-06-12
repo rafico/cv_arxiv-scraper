@@ -206,7 +206,7 @@ def _categorize_resource(url: str) -> tuple[str, str]:
         return "dataset", "Dataset"
     if "huggingface.co/spaces" in normalized:
         return "demo", "Demo"
-    if "/project/" in normalized or normalized.endswith("/project"):
+    if ".github.io" in normalized or "/project/" in normalized or normalized.endswith("/project"):
         return "project", "Project"
     if "youtube.com" in normalized or "youtu.be" in normalized:
         return "video", "Video"
@@ -229,6 +229,65 @@ def extract_resource_links(*texts: str | None) -> list[dict[str, str]]:
             links.append({"type": resource_type, "label": label, "url": cleaned})
 
     return links
+
+
+_PDF_LINK_TYPES = {"code", "dataset", "demo", "project"}
+_PDF_LINK_HOSTS = ("github.com", "gitlab.com", "huggingface.co", "github.io")
+_SELF_LINK_HOSTS = ("arxiv.org", "doi.org")
+
+
+def _host_matches(host: str, suffixes: tuple[str, ...]) -> bool:
+    return any(host == suffix or host.endswith("." + suffix) for suffix in suffixes)
+
+
+def extract_pdf_resource_links(pdf_content: bytes | None, max_pages: int = 2) -> list[dict[str, str]]:
+    """Extract code/dataset/project links from the first pages of a paper PDF.
+
+    Generic web links are dropped (front-matter references are noisy); only
+    resource-typed URLs or known code/project hosts survive.
+    """
+    if not pdf_content:
+        return []
+
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+            text = "\n".join(page.extract_text() or "" for page in pdf.pages[:max_pages])
+    except Exception as exc:
+        LOGGER.warning("Failed to extract resource links from PDF: %s", exc)
+        return []
+
+    links: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for url in _URL_RE.findall(text):
+        cleaned = url.rstrip(".,;:")
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        host = urlparse(cleaned).netloc.lower()
+        if _host_matches(host, _SELF_LINK_HOSTS):
+            continue
+        resource_type, label = _categorize_resource(cleaned)
+        if resource_type not in _PDF_LINK_TYPES and not _host_matches(host, _PDF_LINK_HOSTS):
+            continue
+        links.append({"type": resource_type, "label": label, "url": cleaned})
+
+    return links
+
+
+def merge_resource_links(
+    existing: list[dict[str, str]] | None,
+    new: list[dict[str, str]] | None,
+) -> list[dict[str, str]]:
+    """Combine two resource-link lists, deduplicating on URL (existing wins)."""
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for link in (existing or []) + (new or []):
+        url = link.get("url")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        merged.append(link)
+    return merged
 
 
 def _merge_api_metadata(root: ET.Element, metadata: dict[str, dict]) -> None:
