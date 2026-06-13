@@ -7,7 +7,13 @@ belongs in [app/services](../services).
 
 ## Blueprints
 
-- `dashboard.py` — main paper feed UI (`/`), feedback actions, user tags.
+- `dashboard.py` — main paper feed UI (`/`), feedback actions, user tags. The
+  inbox filters come in as **URL query params** (the JS `applyFilters` helper
+  rewrites the querystring), not a form POST. `density` is `list` (default) or
+  `visual`.
+- `_shell.py` — a context processor injecting `shell` (collections, saved
+  searches, inbox/saved counts) into **every** template so the sidebar renders
+  app-wide. Queries are guarded against a missing DB.
 - `discover.py` — discovery/recommendations/corpus views.
 - `settings.py` — settings UI + credential uploads, Gmail OAuth callback, config
   writes (via `save_config`). Note: credential files are written with `0600`.
@@ -25,7 +31,14 @@ belongs in [app/services](../services).
 - **Escape user data in templates.** Jinja autoescaping handles HTML, but values
   interpolated into inline JS or HTML attributes need care — render them into
   `data-*` attributes and read via `dataset` rather than into `onclick="...('{{ x }}')"`
-  (see the user-tag handling in `templates/dashboard.html`).
+  (see the user-tag handling in `templates/partials/_paper_details.html`).
+- **Stable hooks for JS and tests.** Front-end behavior and the e2e/QA tests
+  target semantic hooks, not utility classes: `.paper-card`, `.paper-link`,
+  `.paper-pdf-link`, `.feedback-btn[data-action]` + `data-active`,
+  `.reading-status-select`, `.card-toggle`, `[data-card-details]`,
+  `#paper-list` / `#paper-grid`, `#theme-toggle`, `#scrape-btn`, `#app-sidebar`,
+  settings tabs' `data-active`. Don't rename these when restyling; assert on
+  them rather than on Tailwind classes.
 - **Map upstream failures to honest status codes.** Services raise on failure;
   surface that — e.g. `search_historical` returns **502** when the arXiv fetch
   fails rather than letting it become an unhandled 500.

@@ -29,21 +29,21 @@
                 <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-bold text-white">2</div>
                 <div>
                     <h3 class="text-base font-semibold text-fg">Run Scrape</h3>
-                    <p class="mt-1 text-sm text-fg-muted">Click <strong>Run Scrape</strong> in the top navigation. The app pulls recent papers from your enabled feeds, scores them against your interests, and adds the best matches to your inbox.</p>
+                    <p class="mt-1 text-sm text-fg-muted">Click <strong>Run Scrape</strong> in the top bar. The app pulls recent papers from your enabled feeds, scores them against your interests, and adds the best matches to your inbox.</p>
                 </div>
             </div>
             <div class="flex gap-4">
                 <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-bold text-white">3</div>
                 <div>
                     <h3 class="text-base font-semibold text-fg">Review Inbox</h3>
-                    <p class="mt-1 text-sm text-fg-muted">On the <a href="/" class="font-medium text-blue-600 hover:text-blue-800">Papers</a> page, use <strong>Save</strong> for papers you want to keep and <strong>Not Interested</strong> for weak matches. Those actions also improve future ranking.</p>
+                    <p class="mt-1 text-sm text-fg-muted">Open your <a href="/" class="font-medium text-blue-600 hover:text-blue-800">Inbox</a> from the sidebar, then use <strong>Save</strong> for papers you want to keep and <strong>Not Interested</strong> for weak matches. Those actions also improve future ranking.</p>
                 </div>
             </div>
         </div>
         <div>
             <figure class="rounded-xl border border-edge bg-surface p-2 shadow-sm">
-                <img src="{{ url_for('static', filename='help/navbar_runscrape.webp') }}" alt="Navbar showing Run Scrape button" class="w-full rounded-lg" onerror="handleImgError(this)">
-                <figcaption class="mt-2 text-center text-xs text-fg-muted">Click "Run Scrape" to fetch recent arXiv papers.</figcaption>
+                <img src="{{ url_for('static', filename='help/navbar_runscrape.webp') }}" alt="Top bar with the Run Scrape button" class="w-full rounded-lg" onerror="handleImgError(this)">
+                <figcaption class="mt-2 text-center text-xs text-fg-muted">Click "Run Scrape" in the top bar to fetch recent arXiv papers.</figcaption>
             </figure>
         </div>
     </div>
@@ -83,7 +83,7 @@
                 <h3 class="mt-1 text-base font-semibold text-fg">Review the inbox</h3>
             </div>
             <div class="p-5">
-                <p class="text-sm text-fg-muted mb-4">Open the <strong>Papers</strong> page. Save the papers you want to keep, and mark weak matches as <strong>Not Interested</strong>. This feedback helps the ranking adapt to your taste over time.</p>
+                <p class="text-sm text-fg-muted mb-4">Open your <strong>Inbox</strong> from the sidebar. Triage runs as a dense list by default; save the papers you want to keep, and mark weak matches as <strong>Not Interested</strong>. This feedback helps the ranking adapt to your taste over time.</p>
                 <img src="{{ url_for('static', filename='help/papers_dashboard.webp') }}" alt="Dashboard displaying papers" class="w-full rounded border border-edge" onerror="handleImgError(this)">
             </div>
         </div>
@@ -94,7 +94,7 @@
                 <h3 class="mt-1 text-base font-semibold text-fg">Come back to Saved</h3>
             </div>
             <div class="p-5">
-                <p class="text-sm text-fg-muted">The <strong>Saved</strong> tab is your shortlist. Use it for papers you want to revisit, cite, export, or send to Mendeley/Zotero later.</p>
+                <p class="text-sm text-fg-muted">The <strong>Saved</strong> view in the sidebar is your shortlist. Use it for papers you want to revisit, cite, export, or send to Mendeley/Zotero later.</p>
             </div>
         </div>
     </div>

@@ -3,7 +3,7 @@
 #
 # Usage: `make <target>`. Run `make help` for the list.
 .DEFAULT_GOAL := help
-.PHONY: help setup run run-prod test test-fast test-cov lint format types audit check ci tailwind clean
+.PHONY: help setup run run-prod test test-fast test-cov lint format types audit check ci tailwind screenshots clean
 
 PYTHON ?= python
 
@@ -48,6 +48,9 @@ audit: ## Security audit of resolved deps (advisory; matches CI)
 
 tailwind: ## Rebuild Tailwind CSS from the local CLI binary
 	./tailwindcss -i app/static/src.css -o app/static/style.css --minify
+
+screenshots: ## Regenerate help/README screenshots (needs: playwright install chromium)
+	$(PYTHON) scripts/capture_screenshots.py
 
 check: lint types test ## Run the full local gate before pushing (lint + types + test)
 

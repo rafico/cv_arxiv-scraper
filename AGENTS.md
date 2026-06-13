@@ -87,8 +87,17 @@ run.py / wsgi.py ── create_app() ── blueprints (app/routes/*) ── ser
 - **app/models.py** — SQLAlchemy models (`Paper`, `Collection`, feedback, etc.).
 - **app/cli/** — installable console scripts (`cv-arxiv-scrape`, `-sync`,
   `-backfill`, `-digest`); see `[project.scripts]` in `pyproject.toml`.
-- **app/templates/**, **app/static/** — Jinja templates + assets (Tailwind CLI
-  binary is `./tailwindcss`).
+- **app/templates/**, **app/static/** — Jinja templates + assets. The shell
+  (sidebar + top bar) lives in `base.html`; page-specific chrome fills the
+  `page_title` / `topbar_tools` / `sidebar_filters` / `sidebar_extra` blocks.
+  Reusable fragments are in `app/templates/partials/` (paper row/card/details,
+  scrape progress, shell scripts). Styling is **token-based**: semantic CSS
+  custom properties + component classes are defined in `app/static/src.css`,
+  compiled to the **committed** `app/static/style.css` via `./tailwindcss`
+  (`make tailwind`) — rerun it after any template class change. Dark mode is
+  driven entirely by the tokens (`html[data-theme="dark"]`); do not reintroduce
+  raw `gray-*` utilities. Regenerate help/README screenshots with
+  `make screenshots`.
 
 ### Semantic re-export packages
 
