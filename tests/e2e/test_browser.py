@@ -61,11 +61,11 @@ def test_feedback_save_toggles_button(e2e_page):
     save_btn.click()
 
     # Wait for the fetch to complete and button to update
-    expect(save_btn).to_have_class(re.compile(r"bg-emerald-50"))
+    expect(save_btn).to_have_attribute("data-active", "true")
 
     # Click again -- should toggle off
     save_btn.click()
-    expect(save_btn).not_to_have_class(re.compile(r"bg-emerald-50"))
+    expect(save_btn).to_have_attribute("data-active", "")
 
 
 # ── Test 3: Keyboard shortcuts ──
@@ -95,7 +95,7 @@ def test_keyboard_navigation(e2e_page):
     # Press 's' to save the focused card
     page.keyboard.press("s")
     save_btn = first_card.locator('.feedback-btn[data-action="save"]')
-    expect(save_btn).to_have_class(re.compile(r"bg-emerald-50"))
+    expect(save_btn).to_have_attribute("data-active", "true")
 
     # Verify '?' shortcut toggles help overlay class
     overlay = page.locator("#shortcut-overlay")
@@ -142,7 +142,10 @@ def test_add_and_remove_tag(e2e_page):
     page.wait_for_selector(".paper-card")
 
     first_card = page.locator(".paper-card").first
+    # User tags live in the expandable details; open them first.
+    first_card.locator(".card-toggle").click()
     tags_container = first_card.locator(".user-tags-container")
+    expect(tags_container).to_be_visible()
 
     # Initially no user tags
     initial_tag_count = tags_container.locator(".user-tag").count()

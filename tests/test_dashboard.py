@@ -158,19 +158,22 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("lg:grid-cols-4", text)
         self.assertIn("/teaser.png", text)
-        self.assertIn("Comfortable view", text)
+        self.assertIn("List view", text)
 
         default = self.client.get("/?timeframe=all").get_data(as_text=True)
-        self.assertIn("lg:grid-cols-3", default)
+        self.assertIn('id="paper-list"', default)
         self.assertNotIn("/teaser.png", default)
         self.assertIn("Visual grid", default)
 
-    def test_invalid_density_falls_back_to_comfortable(self):
+    def test_invalid_density_falls_back_to_list(self):
         response = self.client.get("/?timeframe=all&density=bogus")
-        text = response.get_data(as_text=True)
-
         self.assertEqual(response.status_code, 200)
-        self.assertIn("lg:grid-cols-3", text)
+        self.assertIn('id="paper-list"', response.get_data(as_text=True))
+
+    def test_legacy_comfortable_density_maps_to_list(self):
+        response = self.client.get("/?timeframe=all&density=comfortable")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="paper-list"', response.get_data(as_text=True))
 
     def test_dataset_filter_and_insight_chips(self):
         paper = Paper.query.filter_by(title="Paper 0").one()

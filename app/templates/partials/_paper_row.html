@@ -1,0 +1,59 @@
+{# Dense list-mode triage row (default density). Context: `paper`, `BADGE`,
+   `FEEDBACK`, plus the shared partials' context. #}
+<article class="paper-card group" data-paper-id="{{ paper.id }}" tabindex="0">
+    <div class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-3 px-4 py-3">
+        <a href="{{ paper.link }}" target="_blank" class="hidden sm:block shrink-0 w-14 h-[4.5rem] rounded border border-edge bg-surface-2 overflow-hidden">
+            <img src="{{ url_for('dashboard.paper_thumbnail', paper_id=paper.id) }}"
+                 alt="" loading="lazy"
+                 class="w-full h-full object-cover"
+                 onerror="handleImgError(this)">
+        </a>
+        <div class="min-w-0 flex-1">
+            {# ── Title + badges ── #}
+            <div class="flex items-baseline gap-1.5 flex-wrap">
+                <a href="{{ paper.link }}" target="_blank"
+                   class="paper-link text-sm font-medium text-fg hover:text-accent line-clamp-2">{{ paper.title }}</a>
+                {% for mtype in paper.match_type.split(' + ') %}
+                {% if mtype in BADGE %}<span class="badge badge-accent">{{ mtype }}</span>{% endif %}
+                {% endfor %}
+                {% if paper.duplicate_of_id %}<span class="badge badge-warn">Dup</span>{% endif %}
+                {% if paper.venue and paper.acceptance_status and paper.acceptance_status != 'mentioned' %}
+                <span class="badge badge-outline" title="Detected from arXiv comment: {{ paper.arxiv_comment or '' }}">
+                    {{ paper.venue }}{{ ' ' ~ paper.venue_year if paper.venue_year }}{{ ' · ' ~ paper.acceptance_status|title if paper.acceptance_status in ('oral', 'spotlight', 'highlight', 'workshop') }}
+                </span>
+                {% endif %}
+            </div>
+
+            {# ── Authors + quiet stats ── #}
+            <div class="mt-1 flex items-center gap-x-3 gap-y-0.5 flex-wrap text-xs text-fg-muted">
+                <span class="line-clamp-1 min-w-0">
+                    {% for author in paper.authors.split(', ') %}{% if not loop.first %}, {% endif %}<a href="{{ url_for('dashboard.index', author=author.strip(), timeframe='all') }}" class="hover:text-accent hover:underline" onclick="event.stopPropagation()">{{ author.strip() }}</a>{% endfor %}
+                </span>
+                {% include "partials/_paper_stats.html" %}
+                <span class="stat-quiet">{{ paper.publication_dt or paper.scraped_date }}</span>
+            </div>
+
+            {# ── Matched terms (triage signal) ── #}
+            {% if paper.matched_terms_list %}
+            <div class="mt-1.5 flex flex-wrap gap-1">
+                {% for term in paper.matched_terms_list[:6] %}
+                <span class="badge badge-warn">{{ term }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        {# ── Actions ── #}
+        <div class="flex items-center gap-1.5 flex-wrap shrink-0 sm:justify-end">
+            {% include "partials/_paper_actions.html" %}
+            <button type="button" onclick="toggleCardDetails(this)"
+                    class="card-toggle px-2 py-1 text-[11px] font-medium text-fg-subtle hover:text-fg transition-colors">
+                More details
+            </button>
+        </div>
+    </div>
+
+    <div class="card-details hidden border-t border-edge px-4 py-4" data-card-details>
+        {% include "partials/_paper_details.html" %}
+    </div>
+</article>

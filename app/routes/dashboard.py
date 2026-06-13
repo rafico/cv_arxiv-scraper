@@ -391,9 +391,11 @@ def index():
         escaped_author = f"%{_escape_like_term(author_filter)}%"
         query = query.filter(Paper.authors.ilike(escaped_author, escape="\\"))
 
-    density = request.args.get("density", "comfortable").strip()
-    if density not in ("comfortable", "visual"):
-        density = "comfortable"
+    density = request.args.get("density", "list").strip()
+    if density == "comfortable":  # legacy alias (saved searches may persist it)
+        density = "list"
+    if density not in ("list", "visual"):
+        density = "list"
 
     category = request.args.get("category", "").strip()
     venue = request.args.get("venue", "").strip()

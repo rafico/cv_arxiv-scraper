@@ -47,7 +47,7 @@ class WebUiQaTests(FlaskDBTestCase):
         self.assertIn("Run a scrape", text)
         self.assertIn('id="theme-toggle"', text)
         self.assertIn("cv-arxiv-theme", text)
-        self.assertIn("grid-cols-1 gap-3 lg:grid-cols-3", text)
+        self.assertIn('id="onboarding-steps"', text)
 
     def test_dashboard_cards_render_metadata_badges_and_score_details(self):
         db.session.add(_make_paper())
