@@ -1,0 +1,26 @@
+{# Keyboard shortcut help overlay (toggled by the ? key and the corner button). #}
+<button onclick="toggleShortcutHelp()" title="Keyboard shortcuts (?)"
+        class="fixed bottom-4 left-4 z-40 w-8 h-8 rounded-full bg-surface-2 text-fg-muted hover:bg-edge hover:text-fg text-sm font-bold shadow transition-colors flex items-center justify-center">
+    ?
+</button>
+<div id="shortcut-overlay" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/30" onclick="toggleShortcutHelp()"></div>
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-overlay rounded-xl shadow-xl border border-edge w-80 max-w-[90vw] p-5">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-fg">Keyboard Shortcuts</h3>
+            <button onclick="toggleShortcutHelp()" class="text-fg-subtle hover:text-fg">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="space-y-2 text-sm">
+            {% set _kbd = 'px-1.5 py-0.5 rounded bg-surface-2 border border-edge text-xs font-mono text-fg-muted' %}
+            <div class="flex justify-between"><span class="text-fg-muted">Navigate papers</span><span><kbd class="{{ _kbd }}">j</kbd> / <kbd class="{{ _kbd }}">k</kbd></span></div>
+            <div class="flex justify-between"><span class="text-fg-muted">Save paper</span><kbd class="{{ _kbd }}">s</kbd></div>
+            <div class="flex justify-between"><span class="text-fg-muted">Skip (Not Interested)</span><kbd class="{{ _kbd }}">x</kbd></div>
+            <div class="flex justify-between"><span class="text-fg-muted">Open on arXiv</span><kbd class="{{ _kbd }}">o</kbd></div>
+            <div class="flex justify-between"><span class="text-fg-muted">Open PDF</span><kbd class="{{ _kbd }}">p</kbd></div>
+            <div class="flex justify-between"><span class="text-fg-muted">Toggle details</span><kbd class="{{ _kbd }}">d</kbd></div>
+            <div class="flex justify-between"><span class="text-fg-muted">This help</span><kbd class="{{ _kbd }}">?</kbd></div>
+        </div>
+    </div>
+</div>
