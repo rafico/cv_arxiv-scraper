@@ -21,53 +21,6 @@
             }
         })();
     </script>
-    {# Legacy dark-mode overrides for pages not yet migrated to design tokens.
-       Removed once every template is token-driven. #}
-    <style>
-        html[data-theme="dark"] {
-            color-scheme: dark;
-            background-color: #0f172a;
-        }
-        html[data-theme="dark"] body,
-        html[data-theme="dark"] .bg-white {
-            background-color: #0f172a !important;
-        }
-        html[data-theme="dark"] .bg-gray-50,
-        html[data-theme="dark"] .bg-gray-50\/60,
-        html[data-theme="dark"] .from-gray-50,
-        html[data-theme="dark"] .to-gray-100 {
-            background-color: #111827 !important;
-        }
-        html[data-theme="dark"] .bg-gray-100 {
-            background-color: #1f2937 !important;
-        }
-        html[data-theme="dark"] .border-gray-100,
-        html[data-theme="dark"] .border-gray-200 {
-            border-color: #334155 !important;
-        }
-        html[data-theme="dark"] .text-gray-900 {
-            color: #f8fafc !important;
-        }
-        html[data-theme="dark"] .text-gray-800,
-        html[data-theme="dark"] .text-gray-700,
-        html[data-theme="dark"] .text-gray-600 {
-            color: #cbd5e1 !important;
-        }
-        html[data-theme="dark"] .text-gray-500,
-        html[data-theme="dark"] .text-gray-400,
-        html[data-theme="dark"] .text-gray-300 {
-            color: #94a3b8 !important;
-        }
-        html[data-theme="dark"] .bg-gray-900 {
-            background-color: #e2e8f0 !important;
-            color: #0f172a !important;
-        }
-        html[data-theme="dark"] .hover\:bg-gray-50:hover,
-        html[data-theme="dark"] .hover\:bg-gray-100:hover,
-        html[data-theme="dark"] .hover\:bg-gray-200:hover {
-            background-color: #1e293b !important;
-        }
-    </style>
 </head>
 <body class="h-full bg-canvas text-fg">
     {% set _ep = request.endpoint or '' %}

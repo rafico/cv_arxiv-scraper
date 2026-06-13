@@ -4,24 +4,25 @@
 
 {% macro pill_link(target, label) -%}
 <button type="button" onclick="switchTab('{{ target }}')" data-tab="{{ target }}"
-   class="settings-tab px-3 py-1.5 rounded-full text-sm font-medium transition-colors {{ 'bg-gray-900 text-white' if section == target else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+   data-active="{{ 'true' if section == target else '' }}"
+   class="settings-tab px-3 py-1.5 rounded-full text-sm font-medium transition-colors {{ 'bg-accent text-white' if section == target else 'bg-surface-2 text-fg-muted hover:bg-edge' }}">
     {{ label }}
 </button>
 {%- endmacro %}
 
 {% macro auto_subtab(target, label) -%}
 <button type="button" onclick="switchAutoTab('{{ target }}')" data-auto-tab="{{ target }}"
-   class="auto-subtab px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-gray-100 text-gray-500 hover:bg-gray-200">
+   class="auto-subtab px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-surface-2 text-fg-muted hover:bg-edge">
     {{ label }}
 </button>
 {%- endmacro %}
 
 {% macro multiline_textarea(name, label, help_text, items, rows=7) -%}
-<div class="rounded-2xl border border-gray-200 bg-white p-5">
-    <label for="{{ name }}" class="block text-sm font-semibold text-gray-900 mb-1">{{ label }}</label>
-    <p class="text-xs text-gray-500 mb-3">{{ help_text }}</p>
+<div class="rounded-2xl border border-edge bg-surface p-5">
+    <label for="{{ name }}" class="block text-sm font-semibold text-fg mb-1">{{ label }}</label>
+    <p class="text-xs text-fg-muted mb-3">{{ help_text }}</p>
     <textarea name="{{ name }}" id="{{ name }}" rows="{{ rows }}"
-              class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-mono outline-none transition-colors focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">{%- for item in items %}
+              class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm font-mono outline-none transition-colors focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">{%- for item in items %}
 {{ item }}
 {%- endfor %}</textarea>
 </div>
@@ -31,8 +32,8 @@
 <div class="max-w-6xl">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between mb-6">
         <div>
-            <h1 class="text-2xl font-bold text-gray-900">Settings</h1>
-            <p class="text-sm text-gray-500 mt-1">Configure research signals, automation, and ranking behavior.</p>
+            <h1 class="text-2xl font-bold text-fg">Settings</h1>
+            <p class="text-sm text-fg-muted mt-1">Configure research signals, automation, and ranking behavior.</p>
         </div>
         <div class="flex flex-wrap gap-2">
             {{ pill_link('interests', 'Research Setup') }}
@@ -43,27 +44,27 @@
     </div>
 
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 mb-8">
-        <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Tracked Signals</div>
-            <div class="mt-2 text-base font-semibold text-gray-900">
+        <div class="rounded-2xl border border-edge bg-surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Tracked Signals</div>
+            <div class="mt-2 text-base font-semibold text-fg">
                 {{ whitelists.authors|length }} authors · {{ whitelists.affiliations|length }} labs · {{ whitelists.titles|length }} topics
             </div>
         </div>
-        <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Muted</div>
-            <div class="mt-2 text-base font-semibold text-gray-900">
+        <div class="rounded-2xl border border-edge bg-surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Muted</div>
+            <div class="mt-2 text-base font-semibold text-fg">
                 {{ preferences.muted.authors|length }} authors · {{ preferences.muted.affiliations|length }} labs · {{ preferences.muted.topics|length }} topics
             </div>
         </div>
-        <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Digest Ready</div>
-            <div class="mt-2 text-base font-semibold text-gray-900">{{ digest_preview.papers_count }} papers</div>
-            <p class="mt-1 text-xs text-gray-500 truncate">{{ digest_preview.subject }}</p>
+        <div class="rounded-2xl border border-edge bg-surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Digest Ready</div>
+            <div class="mt-2 text-base font-semibold text-fg">{{ digest_preview.papers_count }} papers</div>
+            <p class="mt-1 text-xs text-fg-muted truncate">{{ digest_preview.subject }}</p>
         </div>
-        <div class="rounded-2xl border border-gray-200 bg-white p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Gmail Status</div>
-            <div class="mt-2 text-base font-semibold text-gray-900">{{ gmail_status.status.replace('_', ' ').title() }}</div>
-            <p class="mt-1 text-xs text-gray-500">{{ gmail_status.message }}</p>
+        <div class="rounded-2xl border border-edge bg-surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Gmail Status</div>
+            <div class="mt-2 text-base font-semibold text-fg">{{ gmail_status.status.replace('_', ' ').title() }}</div>
+            <p class="mt-1 text-xs text-fg-muted">{{ gmail_status.message }}</p>
         </div>
     </div>
 
@@ -76,10 +77,10 @@
     <section id="interests" data-section="interests" class="mb-10 {{ '' if section == 'interests' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
-                <h2 class="text-lg font-semibold text-gray-900">Research Setup</h2>
-                <p class="text-sm text-gray-500">These signals define what lands in your inbox.</p>
+                <h2 class="text-lg font-semibold text-fg">Research Setup</h2>
+                <p class="text-sm text-fg-muted">These signals define what lands in your inbox.</p>
             </div>
-            <span class="text-xs font-medium uppercase tracking-[0.16em] text-gray-400">Core</span>
+            <span class="text-xs font-medium uppercase tracking-[0.16em] text-fg-subtle">Core</span>
         </div>
 
         <form method="POST" action="/settings" id="settings-form">
@@ -88,9 +89,9 @@
                 {{ multiline_textarea('titles', 'Title Keywords', 'Matched against titles and abstracts.', whitelists.titles) }}
                 {{ multiline_textarea('authors', 'Authors', 'One per line.', whitelists.authors) }}
                 {{ multiline_textarea('affiliations', 'Affiliations', 'Lab or institution names from PDF headers.', whitelists.affiliations) }}
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
-                    <h3 class="text-sm font-semibold text-gray-900">Tips</h3>
-                    <div class="mt-3 space-y-2 text-sm text-gray-500">
+                <div class="rounded-2xl border border-edge bg-surface p-5">
+                    <h3 class="text-sm font-semibold text-fg">Tips</h3>
+                    <div class="mt-3 space-y-2 text-sm text-fg-muted">
                         <p>Keep authors specific, labs broad, topics focused on what you actively care about.</p>
                         <p>Save strong papers and skip weak ones -- feedback compounds over time.</p>
                     </div>
@@ -99,7 +100,7 @@
 
             <div class="mt-5 flex justify-end">
                 <button type="submit" id="save-btn"
-                        class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        class="px-5 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                     Save Research Setup
                 </button>
             </div>
@@ -109,18 +110,18 @@
     <section id="controls" data-section="controls" class="mb-10 {{ '' if section == 'controls' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
-                <h2 class="text-lg font-semibold text-gray-900">Ranking And Mute Controls</h2>
-                <p class="text-sm text-gray-500">Tune how papers rank and suppress recurring noise.</p>
+                <h2 class="text-lg font-semibold text-fg">Ranking And Mute Controls</h2>
+                <p class="text-sm text-fg-muted">Tune how papers rank and suppress recurring noise.</p>
             </div>
-            <span class="text-xs font-medium uppercase tracking-[0.16em] text-gray-400">Controls</span>
+            <span class="text-xs font-medium uppercase tracking-[0.16em] text-fg-subtle">Controls</span>
         </div>
 
         <form method="POST" action="/settings/preferences" id="preferences-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
-                    <h3 class="text-sm font-semibold text-gray-900 mb-1">Ranking Priorities</h3>
-                    <p class="text-xs text-gray-500 mb-4">Drag sliders to set how much each signal matters. Higher = more influence on paper ranking.</p>
+                <div class="rounded-2xl border border-edge bg-surface p-5">
+                    <h3 class="text-sm font-semibold text-fg mb-1">Ranking Priorities</h3>
+                    <p class="text-xs text-fg-muted mb-4">Drag sliders to set how much each signal matters. Higher = more influence on paper ranking.</p>
                     {# Hidden numeric inputs carry the actual values to the backend #}
                     <input type="hidden" name="pref_author_weight" id="pref_author_weight" value="{{ preferences.ranking.author_weight }}">
                     <input type="hidden" name="pref_affiliation_weight" id="pref_affiliation_weight" value="{{ preferences.ranking.affiliation_weight }}">
@@ -144,45 +145,45 @@
                         {% for key, label, desc, value, color in sliders %}
                         <div>
                             <div class="flex items-center justify-between mb-1">
-                                <label class="text-sm font-medium text-gray-700">{{ label }}</label>
-                                <span id="slider_label_{{ key }}" class="text-xs text-gray-400 tabular-nums w-8 text-right"></span>
+                                <label class="text-sm font-medium text-fg-muted">{{ label }}</label>
+                                <span id="slider_label_{{ key }}" class="text-xs text-fg-subtle tabular-nums w-8 text-right"></span>
                             </div>
                             <input type="range" min="0" max="100" step="1" value="{{ value }}"
                                    id="slider_{{ key }}"
                                    oninput="syncSlider('{{ key }}')"
-                                   class="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900">
-                            <p class="text-xs text-gray-400 mt-0.5">{{ desc }}</p>
+                                   class="w-full h-1.5 bg-edge rounded-full appearance-none cursor-pointer accent-gray-900">
+                            <p class="text-xs text-fg-subtle mt-0.5">{{ desc }}</p>
                         </div>
                         {% endfor %}
                     </div>
 
-                    <div class="mt-5 pt-4 border-t border-gray-100">
-                        <label for="pref_freshness_half_life_days" class="block text-sm font-medium text-gray-700 mb-1">Freshness preference</label>
+                    <div class="mt-5 pt-4 border-t border-edge">
+                        <label for="pref_freshness_half_life_days" class="block text-sm font-medium text-fg-muted mb-1">Freshness preference</label>
                         <input type="range" min="1" max="60" step="1" id="freshness_slider"
                                value="{{ preferences.ranking.freshness_half_life_days|int }}"
                                oninput="document.getElementById('pref_freshness_half_life_days').value=this.value; document.getElementById('freshness_label').textContent=this.value+'d'"
-                               class="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900">
+                               class="w-full h-1.5 bg-edge rounded-full appearance-none cursor-pointer accent-gray-900">
                         <input type="hidden" name="pref_freshness_half_life_days" id="pref_freshness_half_life_days" value="{{ preferences.ranking.freshness_half_life_days }}">
-                        <div class="flex justify-between text-xs text-gray-400 mt-1">
+                        <div class="flex justify-between text-xs text-fg-subtle mt-1">
                             <span>Prefer new papers</span>
                             <span id="freshness_label">{{ preferences.ranking.freshness_half_life_days|int }}d</span>
                             <span>Keep older matches</span>
                         </div>
                     </div>
 
-                    <div class="mt-5 pt-4 border-t border-gray-100">
-                        <label for="display_summary_lines_slider" class="block text-sm font-medium text-gray-700 mb-1">Summary lines</label>
+                    <div class="mt-5 pt-4 border-t border-edge">
+                        <label for="display_summary_lines_slider" class="block text-sm font-medium text-fg-muted mb-1">Summary lines</label>
                         <input type="range" min="1" max="10" step="1" id="display_summary_lines_slider"
                                value="{{ preferences.display.summary_lines }}"
                                oninput="document.getElementById('display_summary_lines').value=this.value; document.getElementById('summary_lines_label').textContent=this.value"
-                               class="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900">
+                               class="w-full h-1.5 bg-edge rounded-full appearance-none cursor-pointer accent-gray-900">
                         <input type="hidden" name="display_summary_lines" id="display_summary_lines" value="{{ preferences.display.summary_lines }}">
-                        <div class="flex justify-between text-xs text-gray-400 mt-1">
+                        <div class="flex justify-between text-xs text-fg-subtle mt-1">
                             <span>Compact</span>
                             <span id="summary_lines_label">{{ preferences.display.summary_lines }}</span>
                             <span>Full</span>
                         </div>
-                        <p class="text-xs text-gray-400 mt-0.5">Number of TL;DR summary lines shown on each paper card.</p>
+                        <p class="text-xs text-fg-subtle mt-0.5">Number of TL;DR summary lines shown on each paper card.</p>
                     </div>
                 </div>
 
@@ -195,7 +196,7 @@
 
             <div class="mt-5 flex justify-end">
                 <button type="submit" id="preferences-save-btn"
-                        class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        class="px-5 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                     Save Ranking Controls
                 </button>
             </div>
@@ -205,10 +206,10 @@
     <section id="automation" data-section="automation" class="mb-10 {{ '' if section == 'automation' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
-                <h2 class="text-lg font-semibold text-gray-900">Automation</h2>
-                <p class="text-sm text-gray-500">Preview digests, configure Gmail, and inspect recent automation runs.</p>
+                <h2 class="text-lg font-semibold text-fg">Automation</h2>
+                <p class="text-sm text-fg-muted">Preview digests, configure Gmail, and inspect recent automation runs.</p>
             </div>
-            <span class="text-xs font-medium uppercase tracking-[0.16em] text-gray-400">Optional</span>
+            <span class="text-xs font-medium uppercase tracking-[0.16em] text-fg-subtle">Optional</span>
         </div>
 
         <div class="flex flex-wrap gap-2 mb-5">
@@ -223,14 +224,14 @@
             <p class="text-sm text-blue-800">Connect your email and reference-manager accounts here. <strong>Gmail</strong> is used to send your daily digest emails. <strong>Mendeley</strong> and <strong>Zotero</strong> let you sync papers you save in the app to your reference library. Each service requires a one-time authorization.</p>
         </div>
         <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
+                <div class="rounded-2xl border border-edge bg-surface p-5">
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <h3 class="text-base font-semibold text-gray-900">Email &amp; Gmail</h3>
-                            <p class="text-sm text-gray-500 mt-1">{{ gmail_status.message }}</p>
+                            <h3 class="text-base font-semibold text-fg">Email &amp; Gmail</h3>
+                            <p class="text-sm text-fg-muted mt-1">{{ gmail_status.message }}</p>
                         </div>
-                        <span class="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                            <span class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if gmail_status.status == 'connected' else 'bg-amber-400' if gmail_status.status in ['expired', 'no_token'] else 'bg-gray-300' if gmail_status.status == 'no_credentials' else 'bg-rose-400' }}"></span>
+                        <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted">
+                            <span class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if gmail_status.status == 'connected' else 'bg-amber-400' if gmail_status.status in ['expired', 'no_token'] else 'bg-edge-strong' if gmail_status.status == 'no_credentials' else 'bg-rose-400' }}"></span>
                             {{ gmail_status.status.replace('_', ' ').title() }}
                         </span>
                     </div>
@@ -240,13 +241,13 @@
                         <form method="POST" action="/settings/gmail-auth">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button type="submit"
-                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-gray-100 text-gray-700 hover:bg-gray-200' if gmail_status.status == 'connected' else 'bg-gray-900 text-white hover:bg-gray-800' }}">
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-surface-2 text-fg-muted hover:bg-edge' if gmail_status.status == 'connected' else 'bg-accent text-white hover:bg-accent-hover' }}">
                                 {{ 'Re-authorize Gmail' if gmail_status.status == 'connected' else 'Authorize Gmail' }}
                             </button>
                         </form>
                         {% endif %}
                         <button type="button" onclick="toggleSetupSteps()"
-                                class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                                class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-2 text-fg-muted hover:bg-edge">
                             <svg id="setup-toggle-icon" class="w-3.5 h-3.5 mr-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                             </svg>
@@ -255,7 +256,7 @@
                     </div>
 
                     <div id="setup-steps" class="mt-5 {% if gmail_status.status == 'connected' %}hidden{% endif %}">
-                        <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                        <div class="rounded-xl border border-edge bg-surface-2 p-4">
                             <div class="space-y-3">
                                 {% for step in gmail_setup_steps %}
                                 <div class="flex items-start gap-3">
@@ -266,13 +267,13 @@
                                         </svg>
                                     </span>
                                     {% else %}
-                                    <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-gray-300 text-[10px] font-bold text-gray-400">
+                                    <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-edge-strong text-[10px] font-bold text-fg-subtle">
                                         {{ step.step }}
                                     </span>
                                     {% endif %}
                                     <div class="min-w-0">
-                                        <div class="text-sm font-medium {{ 'text-emerald-700' if step.complete else 'text-gray-900' }}">{{ step.label }}</div>
-                                        <div class="text-xs text-gray-500 mt-0.5">{{ step.description }}</div>
+                                        <div class="text-sm font-medium {{ 'text-emerald-700' if step.complete else 'text-fg' }}">{{ step.label }}</div>
+                                        <div class="text-xs text-fg-muted mt-0.5">{{ step.description }}</div>
                                     </div>
                                 </div>
                                 {% endfor %}
@@ -285,11 +286,11 @@
                             {% endif %}
 
                             <div class="mt-4">
-                                <div class="text-xs font-medium text-gray-700 mb-2">Callback URI (add to Google Cloud Console):</div>
+                                <div class="text-xs font-medium text-fg-muted mb-2">Callback URI (add to Google Cloud Console):</div>
                                 <div class="flex items-center gap-2">
-                                    <code id="callback-uri" class="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700">{{ callback_uri }}</code>
+                                    <code id="callback-uri" class="flex-1 rounded-lg border border-edge bg-surface px-3 py-2 text-xs text-fg-muted">{{ callback_uri }}</code>
                                     <button type="button" onclick="copyCallbackUri()" id="copy-uri-btn"
-                                            class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                                            class="inline-flex items-center rounded-lg border border-edge bg-surface px-2.5 py-2 text-xs font-medium text-fg-muted hover:bg-surface-2">
                                         <svg id="copy-icon" class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
                                         </svg>
@@ -302,12 +303,12 @@
                             </div>
 
                             <div class="mt-4">
-                                <div class="text-xs font-medium text-gray-700 mb-2">Upload credentials.json:</div>
+                                <div class="text-xs font-medium text-fg-muted mb-2">Upload credentials.json:</div>
                                 <form method="POST" action="/settings/upload-credentials" enctype="multipart/form-data" id="upload-creds-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <label for="credentials_file" id="drop-zone"
-                                           class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-white px-4 py-4 text-center transition-colors hover:border-gray-400 hover:bg-gray-50">
-                                        <span class="text-sm text-gray-500" id="upload-label">Drop credentials.json here or browse</span>
+                                           class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-edge-strong bg-surface px-4 py-4 text-center transition-colors hover:border-edge-strong hover:bg-surface-2">
+                                        <span class="text-sm text-fg-muted" id="upload-label">Drop credentials.json here or browse</span>
                                         <input type="file" name="credentials_file" id="credentials_file" accept=".json" class="hidden">
                                     </label>
                                 </form>
@@ -323,40 +324,40 @@
                     </div>
                 </div>
 
-                <form method="POST" action="/settings/email" id="email-form" class="rounded-2xl border border-gray-200 bg-white p-5">
+                <form method="POST" action="/settings/email" id="email-form" class="rounded-2xl border border-edge bg-surface p-5">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <h3 class="text-base font-semibold text-gray-900">Email Delivery</h3>
-                    <p class="text-sm text-gray-500 mt-1">Where digest emails are sent and how the subject line appears in your inbox.</p>
+                    <h3 class="text-base font-semibold text-fg">Email Delivery</h3>
+                    <p class="text-sm text-fg-muted mt-1">Where digest emails are sent and how the subject line appears in your inbox.</p>
                     <div class="mt-4 space-y-4">
                         <div>
-                            <label for="email_recipient" class="block text-sm font-medium text-gray-700 mb-1">Recipient Email</label>
-                            <p class="text-xs text-gray-400 mb-1">The address that will receive your daily paper digest.</p>
+                            <label for="email_recipient" class="block text-sm font-medium text-fg-muted mb-1">Recipient Email</label>
+                            <p class="text-xs text-fg-subtle mb-1">The address that will receive your daily paper digest.</p>
                             <input type="email" name="email_recipient" id="email_recipient" value="{{ email_config.recipient }}" placeholder="you@example.com"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                   class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                         </div>
                         <div>
-                            <label for="email_subject_prefix" class="block text-sm font-medium text-gray-700 mb-1">Subject Prefix</label>
-                            <p class="text-xs text-gray-400 mb-1">Text prepended to the email subject, e.g. "ArXiv Digest" becomes "ArXiv Digest -- 2026-03-21".</p>
+                            <label for="email_subject_prefix" class="block text-sm font-medium text-fg-muted mb-1">Subject Prefix</label>
+                            <p class="text-xs text-fg-subtle mb-1">Text prepended to the email subject, e.g. "ArXiv Digest" becomes "ArXiv Digest -- 2026-03-21".</p>
                             <input type="text" name="email_subject_prefix" id="email_subject_prefix" value="{{ email_config.subject_prefix }}" placeholder="ArXiv Digest"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                   class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                         </div>
                     </div>
                     <div class="mt-4 flex justify-end">
                         <button type="submit" id="email-save-btn"
-                                class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                class="px-5 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                             Save Email Settings
                         </button>
                     </div>
                 </form>
 
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
+                <div class="rounded-2xl border border-edge bg-surface p-5">
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <h3 class="text-base font-semibold text-gray-900">Mendeley</h3>
-                            <p class="text-sm text-gray-500 mt-1">{{ mendeley_status.message }}</p>
+                            <h3 class="text-base font-semibold text-fg">Mendeley</h3>
+                            <p class="text-sm text-fg-muted mt-1">{{ mendeley_status.message }}</p>
                         </div>
-                        <span class="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                            <span class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if mendeley_status.status == 'connected' else 'bg-amber-400' if mendeley_status.status in ['expired', 'no_token'] else 'bg-gray-300' }}"></span>
+                        <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted">
+                            <span class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if mendeley_status.status == 'connected' else 'bg-amber-400' if mendeley_status.status in ['expired', 'no_token'] else 'bg-edge-strong' }}"></span>
                             {{ mendeley_status.status.replace('_', ' ').title() }}
                         </span>
                     </div>
@@ -366,7 +367,7 @@
                         <form method="POST" action="/settings/mendeley-auth">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button type="submit"
-                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-gray-100 text-gray-700 hover:bg-gray-200' if mendeley_status.status == 'connected' else 'bg-gray-900 text-white hover:bg-gray-800' }}">
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-surface-2 text-fg-muted hover:bg-edge' if mendeley_status.status == 'connected' else 'bg-accent text-white hover:bg-accent-hover' }}">
                                 {{ 'Re-authorize' if mendeley_status.status == 'connected' else 'Authorize Mendeley' }}
                             </button>
                         </form>
@@ -375,48 +376,48 @@
                         <form method="POST" action="/settings/mendeley-sync">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button type="submit"
-                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-2 text-fg-muted hover:bg-edge">
                                 Sync Saved Papers
                             </button>
                         </form>
                         {% endif %}
                     </div>
 
-                    <div class="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
-                        <p class="text-xs text-gray-500">Mendeley does <strong>not</strong> provide a Google-style OAuth download here. This app only needs your Mendeley app <strong>client ID</strong>, <strong>client secret</strong>, and the callback URL below.</p>
+                    <div class="mt-4 rounded-xl border border-edge bg-surface-2 p-4">
+                        <p class="text-xs text-fg-muted">Mendeley does <strong>not</strong> provide a Google-style OAuth download here. This app only needs your Mendeley app <strong>client ID</strong>, <strong>client secret</strong>, and the callback URL below.</p>
                         <div class="mt-3">
-                            <div class="text-xs font-medium text-gray-700 mb-2">Callback URI (add to the Mendeley app settings):</div>
-                            <code class="block rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 break-all">{{ mendeley_callback_uri }}</code>
+                            <div class="text-xs font-medium text-fg-muted mb-2">Callback URI (add to the Mendeley app settings):</div>
+                            <code class="block rounded-lg border border-edge bg-surface px-3 py-2 text-xs text-fg-muted break-all">{{ mendeley_callback_uri }}</code>
                         </div>
                     </div>
 
                     {% if mendeley_status.status == 'no_credentials' %}
                     <div class="mt-4 space-y-4">
-                        <form method="POST" action="/settings/mendeley-setup" class="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+                        <form method="POST" action="/settings/mendeley-setup" class="rounded-xl border border-edge bg-surface p-4 space-y-3">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <p class="text-xs text-gray-500">Paste the values from <a href="https://dev.mendeley.com/myapps.html" target="_blank" rel="noopener" class="text-blue-600 hover:text-blue-700">dev.mendeley.com</a>:</p>
+                            <p class="text-xs text-fg-muted">Paste the values from <a href="https://dev.mendeley.com/myapps.html" target="_blank" rel="noopener" class="text-blue-600 hover:text-blue-700">dev.mendeley.com</a>:</p>
                             <div>
-                                <label for="mendeley_client_id" class="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
+                                <label for="mendeley_client_id" class="block text-sm font-medium text-fg-muted mb-1">Client ID</label>
                                 <input type="text" name="mendeley_client_id" id="mendeley_client_id" placeholder="Mendeley app client ID"
-                                       class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                       class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                             </div>
                             <div>
-                                <label for="mendeley_client_secret" class="block text-sm font-medium text-gray-700 mb-1">Client Secret</label>
+                                <label for="mendeley_client_secret" class="block text-sm font-medium text-fg-muted mb-1">Client Secret</label>
                                 <input type="password" name="mendeley_client_secret" id="mendeley_client_secret" placeholder="Mendeley app client secret"
-                                       class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                       class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                             </div>
                             <button type="submit"
-                                    class="px-4 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
+                                    class="px-4 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent-hover">
                                 Save Mendeley Credentials
                             </button>
                         </form>
 
                         <form method="POST" action="/settings/upload-mendeley-credentials" enctype="multipart/form-data">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <p class="text-xs text-gray-500 mb-2">If you already created a local JSON yourself, upload it here. Expected format: <code>{"client_id":"...","client_secret":"..."}</code></p>
+                            <p class="text-xs text-fg-muted mb-2">If you already created a local JSON yourself, upload it here. Expected format: <code>{"client_id":"...","client_secret":"..."}</code></p>
                             <label for="mendeley_credentials_file"
-                                   class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-white px-4 py-3 text-center transition-colors hover:border-gray-400 hover:bg-gray-50">
-                                <span class="text-sm text-gray-500">Drop mendeley_credentials.json here or browse</span>
+                                   class="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-edge-strong bg-surface px-4 py-3 text-center transition-colors hover:border-edge-strong hover:bg-surface-2">
+                                <span class="text-sm text-fg-muted">Drop mendeley_credentials.json here or browse</span>
                                 <input type="file" name="mendeley_credentials_file" id="mendeley_credentials_file" accept=".json" class="hidden"
                                        onchange="this.form.submit()">
                             </label>
@@ -425,14 +426,14 @@
                     {% endif %}
                 </div>
 
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
+                <div class="rounded-2xl border border-edge bg-surface p-5">
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <h3 class="text-base font-semibold text-gray-900">Zotero</h3>
-                            <p class="text-sm text-gray-500 mt-1">{{ zotero_status.message }}</p>
+                            <h3 class="text-base font-semibold text-fg">Zotero</h3>
+                            <p class="text-sm text-fg-muted mt-1">{{ zotero_status.message }}</p>
                         </div>
-                        <span class="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                            <span class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if zotero_status.status == 'connected' else 'bg-gray-300' }}"></span>
+                        <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted">
+                            <span class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if zotero_status.status == 'connected' else 'bg-edge-strong' }}"></span>
                             {{ zotero_status.status.replace('_', ' ').title() }}
                         </span>
                     </div>
@@ -440,17 +441,17 @@
                     <form method="POST" action="/settings/zotero-setup" class="mt-4 space-y-3">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <div>
-                            <label for="zotero_api_key" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                            <label for="zotero_api_key" class="block text-sm font-medium text-fg-muted mb-1">API Key</label>
                             <input type="password" name="zotero_api_key" id="zotero_api_key" placeholder="From zotero.org/settings/keys"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                   class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                         </div>
                         <div>
-                            <label for="zotero_user_id" class="block text-sm font-medium text-gray-700 mb-1">User ID</label>
+                            <label for="zotero_user_id" class="block text-sm font-medium text-fg-muted mb-1">User ID</label>
                             <input type="text" name="zotero_user_id" id="zotero_user_id" placeholder="Numeric user ID"
-                                   class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                   class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                         </div>
                         <button type="submit"
-                                class="px-4 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
+                                class="px-4 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent-hover">
                             Save Zotero Credentials
                         </button>
                     </form>
@@ -460,7 +461,7 @@
                         <form method="POST" action="/settings/zotero-test">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button type="submit"
-                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-2 text-fg-muted hover:bg-edge">
                                 Test Connection
                             </button>
                         </form>
@@ -468,7 +469,7 @@
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             {% if zotero_collections %}
                             <select name="zotero_collection"
-                                    class="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700">
+                                    class="rounded-lg border border-edge bg-surface px-2 py-1.5 text-xs text-fg-muted">
                                 <option value="">My Library</option>
                                 {% for coll in zotero_collections %}
                                 <option value="{{ coll.key }}">{{ coll.name }}</option>
@@ -476,7 +477,7 @@
                             </select>
                             {% endif %}
                             <button type="submit"
-                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200">
+                                    class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-2 text-fg-muted hover:bg-edge">
                                 Sync Saved Papers
                             </button>
                         </form>
@@ -491,29 +492,29 @@
                 <div class="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
                     <p class="text-sm text-blue-800">Preview the email digest that would be sent right now, based on papers currently in your database. Use <strong>Send Test Digest</strong> to deliver a real email to your configured recipient. This does not affect scheduling -- it is a one-time manual send.</p>
                 </div>
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
+                <div class="rounded-2xl border border-edge bg-surface p-5">
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <h3 class="text-base font-semibold text-gray-900">Digest Preview</h3>
-                            <p class="text-sm text-gray-500 mt-1">{{ digest_preview.papers_count }} papers would be included right now.</p>
+                            <h3 class="text-base font-semibold text-fg">Digest Preview</h3>
+                            <p class="text-sm text-fg-muted mt-1">{{ digest_preview.papers_count }} papers would be included right now.</p>
                         </div>
                         <a href="/settings/digest-preview" target="_blank"
-                           class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                           class="inline-flex items-center rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-2">
                             Open Preview
                         </a>
                     </div>
-                    <div class="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
-                        <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Subject</div>
-                        <div class="mt-2 text-sm font-medium text-gray-900">{{ digest_preview.subject }}</div>
-                        <div class="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Top Papers</div>
+                    <div class="mt-4 rounded-xl border border-edge bg-surface-2 p-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Subject</div>
+                        <div class="mt-2 text-sm font-medium text-fg">{{ digest_preview.subject }}</div>
+                        <div class="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Top Papers</div>
                         <div class="mt-2 space-y-2">
                             {% for paper in digest_preview.papers[:3] %}
-                            <div class="rounded-lg bg-white px-3 py-2">
-                                <div class="text-sm font-medium text-gray-900">{{ paper.title }}</div>
-                                <div class="text-xs text-gray-500">{{ paper.authors }}</div>
+                            <div class="rounded-lg bg-surface px-3 py-2">
+                                <div class="text-sm font-medium text-fg">{{ paper.title }}</div>
+                                <div class="text-xs text-fg-muted">{{ paper.authors }}</div>
                             </div>
                             {% else %}
-                            <p class="text-sm text-gray-500">No new papers are ready for the next digest.</p>
+                            <p class="text-sm text-fg-muted">No new papers are ready for the next digest.</p>
                             {% endfor %}
                         </div>
                     </div>
@@ -521,7 +522,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" id="test-digest-btn"
                                 {% if gmail_status.status != 'connected' or not email_config.recipient %}disabled{% endif %}
-                                class="w-full inline-flex items-center justify-center rounded-lg border border-gray-200 bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                class="w-full inline-flex items-center justify-center rounded-lg border border-edge bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             Send Test Digest
                         </button>
                     </form>
@@ -534,64 +535,64 @@
                 <div class="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
                     <p class="text-sm text-blue-800">A dashboard showing the health of your automation pipeline. See how many papers are ready for the next digest, whether the last scrape or digest succeeded or failed, and browse the history of recent runs. Use this to troubleshoot issues or confirm everything is running smoothly.</p>
                 </div>
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
+                <div class="rounded-2xl border border-edge bg-surface p-5">
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <h3 class="text-base font-semibold text-gray-900">Automation Health</h3>
-                            <p class="text-sm text-gray-500 mt-1">Check whether digests are ready and how the last run ended.</p>
+                            <h3 class="text-base font-semibold text-fg">Automation Health</h3>
+                            <p class="text-sm text-fg-muted mt-1">Check whether digests are ready and how the last run ended.</p>
                         </div>
-                        <span class="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                        <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted">
                             {{ digest_status.papers_ready }} ready
                         </span>
                     </div>
                     <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Latest Digest</div>
+                        <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Latest Digest</div>
                             {% if digest_status.latest_run %}
-                            <div class="mt-2 text-sm font-semibold text-gray-900">{{ digest_status.latest_run.status.replace('_', ' ').title() }}</div>
-                            <div class="mt-1 text-xs text-gray-500">{{ digest_status.latest_run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC</div>
+                            <div class="mt-2 text-sm font-semibold text-fg">{{ digest_status.latest_run.status.replace('_', ' ').title() }}</div>
+                            <div class="mt-1 text-xs text-fg-muted">{{ digest_status.latest_run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC</div>
                             {% if digest_status.latest_run.error_message %}
                             <div class="mt-2 text-xs text-rose-600">{{ digest_status.latest_run.error_message }}</div>
                             {% endif %}
                             {% else %}
-                            <div class="mt-2 text-sm font-semibold text-gray-900">No digest runs yet</div>
-                            <div class="mt-1 text-xs text-gray-500">Preview or send once your inbox looks right.</div>
+                            <div class="mt-2 text-sm font-semibold text-fg">No digest runs yet</div>
+                            <div class="mt-1 text-xs text-fg-muted">Preview or send once your inbox looks right.</div>
                             {% endif %}
                         </div>
-                        <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Delivery Target</div>
-                            <div class="mt-2 text-sm font-semibold text-gray-900">{{ digest_status.recipient or 'No recipient configured' }}</div>
-                            <div class="mt-1 text-xs text-gray-500 truncate">{{ digest_status.preview_subject }}</div>
+                        <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Delivery Target</div>
+                            <div class="mt-2 text-sm font-semibold text-fg">{{ digest_status.recipient or 'No recipient configured' }}</div>
+                            <div class="mt-1 text-xs text-fg-muted truncate">{{ digest_status.preview_subject }}</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
-                    <h3 class="text-base font-semibold text-gray-900">Recent Automation Runs</h3>
+                <div class="rounded-2xl border border-edge bg-surface p-5">
+                    <h3 class="text-base font-semibold text-fg">Recent Automation Runs</h3>
                     <div class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
                         <div>
-                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400 mb-2">Scrapes</div>
+                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle mb-2">Scrapes</div>
                             <div class="space-y-2">
                                 {% for run in scrape_history %}
-                                <div class="rounded-xl border border-gray-100 px-3 py-2 text-sm">
-                                    <div class="font-medium text-gray-900">{{ run.status.replace('_', ' ').title() }}</div>
-                                    <div class="text-xs text-gray-500">{{ run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC{% if run.forced %} · forced{% endif %}</div>
+                                <div class="rounded-xl border border-edge px-3 py-2 text-sm">
+                                    <div class="font-medium text-fg">{{ run.status.replace('_', ' ').title() }}</div>
+                                    <div class="text-xs text-fg-muted">{{ run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC{% if run.forced %} · forced{% endif %}</div>
                                 </div>
                                 {% else %}
-                                <p class="text-sm text-gray-500">No scrape runs yet.</p>
+                                <p class="text-sm text-fg-muted">No scrape runs yet.</p>
                                 {% endfor %}
                             </div>
                         </div>
                         <div>
-                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400 mb-2">Digests</div>
+                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle mb-2">Digests</div>
                             <div class="space-y-2">
                                 {% for run in digest_history %}
-                                <div class="rounded-xl border border-gray-100 px-3 py-2 text-sm">
-                                    <div class="font-medium text-gray-900">{{ run.status.replace('_', ' ').title() }}{% if run.preview_only %} preview{% endif %}</div>
-                                    <div class="text-xs text-gray-500">{{ run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ run.papers_count }} papers</div>
+                                <div class="rounded-xl border border-edge px-3 py-2 text-sm">
+                                    <div class="font-medium text-fg">{{ run.status.replace('_', ' ').title() }}{% if run.preview_only %} preview{% endif %}</div>
+                                    <div class="text-xs text-fg-muted">{{ run.started_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ run.papers_count }} papers</div>
                                 </div>
                                 {% else %}
-                                <p class="text-sm text-gray-500">No digest runs yet.</p>
+                                <p class="text-sm text-fg-muted">No digest runs yet.</p>
                                 {% endfor %}
                             </div>
                         </div>
@@ -606,70 +607,70 @@
                     <p class="text-sm text-blue-800">Schedule the app to run automatically every day using your system's <strong>crontab</strong> (Linux/macOS). This installs a cron job that scrapes new papers from arXiv and optionally sends a digest email at your chosen time. The cron job runs independently of whether this web UI is open.</p>
                 </div>
 
-                <form method="POST" action="/settings/cron" id="cron-form" class="rounded-2xl border border-gray-200 bg-white p-5">
+                <form method="POST" action="/settings/cron" id="cron-form" class="rounded-2xl border border-edge bg-surface p-5">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <h3 class="text-base font-semibold text-gray-900">Daily Cron Job</h3>
-                    <p class="text-sm text-gray-500 mt-1">Install or remove a crontab entry that runs the scraper and digest pipeline daily.</p>
+                    <h3 class="text-base font-semibold text-fg">Daily Cron Job</h3>
+                    <p class="text-sm text-fg-muted mt-1">Install or remove a crontab entry that runs the scraper and digest pipeline daily.</p>
 
                     <div class="mt-4 space-y-4">
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <label for="cron_hour" class="block text-sm font-medium text-gray-700 mb-1">Hour (UTC, 0-23)</label>
+                                <label for="cron_hour" class="block text-sm font-medium text-fg-muted mb-1">Hour (UTC, 0-23)</label>
                                 <input type="number" name="cron_hour" id="cron_hour" min="0" max="23"
                                        value="{{ cron_config.hour if cron_config else 8 }}"
-                                       class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                       class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                             </div>
                             <div>
-                                <label for="cron_minute" class="block text-sm font-medium text-gray-700 mb-1">Minute (0-59)</label>
+                                <label for="cron_minute" class="block text-sm font-medium text-fg-muted mb-1">Minute (0-59)</label>
                                 <input type="number" name="cron_minute" id="cron_minute" min="0" max="59"
                                        value="{{ cron_config.minute if cron_config else 0 }}"
-                                       class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                       class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                             </div>
                         </div>
 
                         <fieldset class="space-y-2">
-                            <legend class="text-sm font-medium text-gray-700">What to run</legend>
-                            <p class="text-xs text-gray-400">Choose which pipeline steps the cron job executes each day.</p>
-                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                            <legend class="text-sm font-medium text-fg-muted">What to run</legend>
+                            <p class="text-xs text-fg-subtle">Choose which pipeline steps the cron job executes each day.</p>
+                            <label class="flex items-center gap-2 text-sm text-fg-muted">
                                 <input type="radio" name="cron_mode" value="full"
                                        {{ 'checked' if not cron_config or cron_config.mode == 'full' }}
                                        class="accent-gray-900">
                                 Scrape + Send Digest
-                                <span class="text-xs text-gray-400">(recommended)</span>
+                                <span class="text-xs text-fg-subtle">(recommended)</span>
                             </label>
-                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                            <label class="flex items-center gap-2 text-sm text-fg-muted">
                                 <input type="radio" name="cron_mode" value="scrape"
                                        {{ 'checked' if cron_config and cron_config.mode == 'scrape' }}
                                        class="accent-gray-900">
                                 Scrape only
-                                <span class="text-xs text-gray-400">(fetch papers but don't email)</span>
+                                <span class="text-xs text-fg-subtle">(fetch papers but don't email)</span>
                             </label>
-                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                            <label class="flex items-center gap-2 text-sm text-fg-muted">
                                 <input type="radio" name="cron_mode" value="digest"
                                        {{ 'checked' if cron_config and cron_config.mode == 'digest' }}
                                        class="accent-gray-900">
                                 Send Digest only
-                                <span class="text-xs text-gray-400">(email already-scraped papers)</span>
+                                <span class="text-xs text-fg-subtle">(email already-scraped papers)</span>
                             </label>
                         </fieldset>
                     </div>
 
                     <div class="mt-5 flex flex-wrap gap-2">
                         <button type="submit" name="cron_action" value="install"
-                                class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
+                                class="px-5 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors">
                             {{ 'Update Cron Job' if cron_config and cron_config.installed else 'Install Cron Job' }}
                         </button>
                         {% if cron_config and cron_config.installed %}
                         <button type="submit" name="cron_action" value="remove"
-                                class="px-5 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+                                class="px-5 py-2 bg-surface text-fg-muted text-sm font-medium rounded-lg border border-edge hover:bg-surface-2 transition-colors">
                             Remove Cron Job
                         </button>
                         {% endif %}
                     </div>
                 </form>
 
-                <div class="rounded-2xl border border-gray-200 bg-white p-5">
-                    <h3 class="text-base font-semibold text-gray-900">Current Status</h3>
+                <div class="rounded-2xl border border-edge bg-surface p-5">
+                    <h3 class="text-base font-semibold text-fg">Current Status</h3>
                     {% if cron_config and cron_config.installed %}
                     <div class="mt-3 flex items-start gap-3">
                         <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100">
@@ -679,34 +680,34 @@
                         </span>
                         <div>
                             <div class="text-sm font-medium text-emerald-700">Cron job installed</div>
-                            <div class="text-xs text-gray-500 mt-0.5">Runs daily at {{ '%02d'|format(cron_config.hour) }}:{{ '%02d'|format(cron_config.minute) }} UTC
+                            <div class="text-xs text-fg-muted mt-0.5">Runs daily at {{ '%02d'|format(cron_config.hour) }}:{{ '%02d'|format(cron_config.minute) }} UTC
                                 ({{ cron_config.mode_label }})</div>
-                            <div class="mt-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-                                <code class="text-xs text-gray-600 break-all">{{ cron_config.cron_line }}</code>
+                            <div class="mt-2 rounded-lg border border-edge bg-surface-2 px-3 py-2">
+                                <code class="text-xs text-fg-muted break-all">{{ cron_config.cron_line }}</code>
                             </div>
                         </div>
                     </div>
                     {% else %}
                     <div class="mt-3 flex items-start gap-3">
-                        <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100">
-                            <span class="h-2 w-2 rounded-full bg-gray-300"></span>
+                        <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-2">
+                            <span class="h-2 w-2 rounded-full bg-edge-strong"></span>
                         </span>
                         <div>
-                            <div class="text-sm font-medium text-gray-500">No cron job installed</div>
-                            <div class="text-xs text-gray-400 mt-0.5">Use the form above to schedule daily automation.</div>
+                            <div class="text-sm font-medium text-fg-muted">No cron job installed</div>
+                            <div class="text-xs text-fg-subtle mt-0.5">Use the form above to schedule daily automation.</div>
                         </div>
                     </div>
                     {% endif %}
                 </div>
 
-                <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400 mb-2">How it works</div>
-                    <ul class="text-xs text-gray-500 space-y-1.5 list-disc list-inside">
+                <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle mb-2">How it works</div>
+                    <ul class="text-xs text-fg-muted space-y-1.5 list-disc list-inside">
                         <li>Installs a standard Linux/macOS crontab entry for the current user.</li>
-                        <li>The cron job runs <code class="bg-white px-1 rounded">digest_cli.py</code> (scrape + email) or <code class="bg-white px-1 rounded">scrape_cli.py</code> (scrape only) from the project directory.</li>
-                        <li>Output is logged to <code class="bg-white px-1 rounded">cron.log</code> in the project root.</li>
+                        <li>The cron job runs <code class="bg-surface px-1 rounded">digest_cli.py</code> (scrape + email) or <code class="bg-surface px-1 rounded">scrape_cli.py</code> (scrape only) from the project directory.</li>
+                        <li>Output is logged to <code class="bg-surface px-1 rounded">cron.log</code> in the project root.</li>
                         <li>The web server does not need to be running for the cron job to work.</li>
-                        <li>To inspect or edit manually: run <code class="bg-white px-1 rounded">crontab -e</code> in your terminal.</li>
+                        <li>To inspect or edit manually: run <code class="bg-surface px-1 rounded">crontab -e</code> in your terminal.</li>
                     </ul>
                 </div>
         </div>
@@ -716,57 +717,57 @@
     <section id="ai" data-section="ai" class="mb-4 {{ '' if section == 'ai' else 'hidden' }}">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
-                <h2 class="text-lg font-semibold text-gray-900">LLM / AI</h2>
-                <p class="text-sm text-gray-500">Optional enrichment for TL;DR summaries and relevance scores.</p>
+                <h2 class="text-lg font-semibold text-fg">LLM / AI</h2>
+                <p class="text-sm text-fg-muted">Optional enrichment for TL;DR summaries and relevance scores.</p>
             </div>
-            <span class="text-xs font-medium uppercase tracking-[0.16em] text-gray-400">Advanced</span>
+            <span class="text-xs font-medium uppercase tracking-[0.16em] text-fg-subtle">Advanced</span>
         </div>
 
-        <form method="POST" action="/settings/llm" id="llm-form" class="rounded-2xl border border-gray-200 bg-white p-5">
+        <form method="POST" action="/settings/llm" id="llm-form" class="rounded-2xl border border-edge bg-surface p-5">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="space-y-4">
                 <label class="inline-flex items-center gap-3 cursor-pointer">
                     <input type="checkbox" name="llm_enabled" {% if llm_config.enabled %}checked{% endif %}
-                           class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                           class="rounded border-edge-strong text-fg focus:ring-accent">
                     <span>
-                        <span class="block text-sm font-semibold text-gray-900">Enable LLM summaries and relevance scoring</span>
-                        <span class="block text-xs text-gray-500 mt-0.5">Adds TL;DR summaries and a relevance estimate for each paper.</span>
+                        <span class="block text-sm font-semibold text-fg">Enable LLM summaries and relevance scoring</span>
+                        <span class="block text-xs text-fg-muted mt-0.5">Adds TL;DR summaries and a relevance estimate for each paper.</span>
                     </span>
                 </label>
 
                 <label class="inline-flex items-center gap-3 cursor-pointer">
                     <input type="checkbox" name="llm_structured_insights" {% if llm_config.structured_insights %}checked{% endif %}
-                           class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                           class="rounded border-edge-strong text-fg focus:ring-accent">
                     <span>
-                        <span class="block text-sm font-semibold text-gray-900">Structured insights</span>
-                        <span class="block text-xs text-gray-500 mt-0.5">One combined JSON call also extracts tasks, datasets, method type, backbone, and a "why this matched you" line.</span>
+                        <span class="block text-sm font-semibold text-fg">Structured insights</span>
+                        <span class="block text-xs text-fg-muted mt-0.5">One combined JSON call also extracts tasks, datasets, method type, backbone, and a "why this matched you" line.</span>
                     </span>
                 </label>
 
                 <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
                     <div>
-                        <label for="llm_provider" class="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+                        <label for="llm_provider" class="block text-sm font-medium text-fg-muted mb-1">Provider</label>
                         <select name="llm_provider" id="llm_provider"
-                                class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                             <option value="openrouter" {% if llm_config.provider == 'openrouter' %}selected{% endif %}>OpenRouter</option>
                             <option value="ollama" {% if llm_config.provider == 'ollama' %}selected{% endif %}>Ollama (local)</option>
                         </select>
-                        <p id="ollama-hint" class="text-xs text-gray-500 mt-1" style="display: none;">Make sure Ollama is running on localhost:11434.</p>
+                        <p id="ollama-hint" class="text-xs text-fg-muted mt-1" style="display: none;">Make sure Ollama is running on localhost:11434.</p>
                     </div>
 
                     <div id="llm-api-key-group">
-                        <label for="llm_api_key" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                        <label for="llm_api_key" class="block text-sm font-medium text-fg-muted mb-1">API Key</label>
                         <input type="password" name="llm_api_key" id="llm_api_key"
                                value="{{ llm_key_mask if llm_key_configured else '' }}"
                                placeholder="OpenRouter API key"
-                               class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
-                        <p class="mt-1 text-xs text-gray-500">Stored in <code>.llm_api_key</code>, not in <code>config.yaml</code>.</p>
+                               class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
+                        <p class="mt-1 text-xs text-fg-muted">Stored in <code>.llm_api_key</code>, not in <code>config.yaml</code>.</p>
                     </div>
 
                     <div>
-                        <label for="llm_model" class="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                        <label for="llm_model" class="block text-sm font-medium text-fg-muted mb-1">Model</label>
                         <select name="llm_model" id="llm_model"
-                                class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                                class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                             {% for provider_key, models in gemma_models.items() %}
                             {% for model_id, label, vram_gb in models %}
                             <option value="{{ model_id }}" data-provider="{{ provider_key }}"
@@ -778,26 +779,26 @@
                             <option value="__custom__" data-provider="all">Custom...</option>
                         </select>
                         <input type="text" id="llm_model_custom" placeholder="Enter custom model identifier"
-                               class="w-full mt-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900 hidden">
+                               class="w-full mt-2 rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent hidden">
                     </div>
 
                     <div>
-                        <label for="llm_base_url" class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+                        <label for="llm_base_url" class="block text-sm font-medium text-fg-muted mb-1">Base URL</label>
                         <input type="text" name="llm_base_url" id="llm_base_url" value="{{ llm_config.base_url }}"
-                               class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                               class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                     </div>
 
                     <div>
-                        <label for="llm_max_concurrent" class="block text-sm font-medium text-gray-700 mb-1">Max Concurrent Requests</label>
+                        <label for="llm_max_concurrent" class="block text-sm font-medium text-fg-muted mb-1">Max Concurrent Requests</label>
                         <input type="number" min="1" name="llm_max_concurrent" id="llm_max_concurrent" value="{{ llm_config.max_concurrent }}"
-                               class="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-white focus:ring-2 focus:ring-gray-900">
+                               class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
                     </div>
                 </div>
             </div>
 
             <div class="mt-4 flex justify-end">
                 <button type="submit" id="llm-save-btn"
-                        class="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        class="px-5 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                     Save LLM Settings
                 </button>
             </div>
@@ -815,8 +816,9 @@
         });
         document.querySelectorAll(".settings-tab").forEach(function(btn) {
             var isActive = btn.dataset.tab === target;
+            btn.dataset.active = isActive ? "true" : "";
             btn.className = "settings-tab px-3 py-1.5 rounded-full text-sm font-medium transition-colors " +
-                (isActive ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200");
+                (isActive ? "bg-accent text-white" : "bg-surface-2 text-fg-muted hover:bg-edge");
         });
         history.replaceState(null, "", "/settings?section=" + target);
         if (target === "automation") {
@@ -833,7 +835,7 @@
         document.querySelectorAll(".auto-subtab").forEach(function(btn) {
             var isActive = btn.dataset.autoTab === target;
             btn.className = "auto-subtab px-3 py-1.5 rounded-full text-xs font-medium transition-colors " +
-                (isActive ? "bg-gray-700 text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200");
+                (isActive ? "bg-accent text-white" : "bg-surface-2 text-fg-muted hover:bg-edge");
         });
         localStorage.setItem("settings_auto_tab", target);
     }
@@ -888,14 +890,14 @@
                 if (originalValues[key] !== value) dirty = true;
             });
             if (dirty) {
-                button.classList.remove("bg-gray-900", "hover:bg-gray-800");
+                button.classList.remove("bg-accent", "hover:bg-accent-hover");
                 button.classList.add("bg-amber-600", "hover:bg-amber-700");
                 if (!button.textContent.trim().startsWith("*")) {
                     button.textContent = "* " + originalLabel;
                 }
             } else {
                 button.classList.remove("bg-amber-600", "hover:bg-amber-700");
-                button.classList.add("bg-gray-900", "hover:bg-gray-800");
+                button.classList.add("bg-accent", "hover:bg-accent-hover");
                 button.textContent = originalLabel;
             }
         }
@@ -1068,14 +1070,14 @@
         ["dragenter", "dragover"].forEach(function(evt) {
             dropZone.addEventListener(evt, function(e) {
                 e.preventDefault();
-                dropZone.classList.add("border-gray-500", "bg-gray-50");
+                dropZone.classList.add("border-edge-strong", "bg-surface-2");
             });
         });
 
         ["dragleave", "drop"].forEach(function(evt) {
             dropZone.addEventListener(evt, function(e) {
                 e.preventDefault();
-                dropZone.classList.remove("border-gray-500", "bg-gray-50");
+                dropZone.classList.remove("border-edge-strong", "bg-surface-2");
             });
         });
 

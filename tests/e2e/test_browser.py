@@ -240,12 +240,12 @@ def test_settings_tab_navigation(e2e_page):
 
     # Default tab should be "interests"
     interests_tab = page.locator('[data-tab="interests"]')
-    expect(interests_tab).to_have_class(re.compile(r"bg-gray-900"))
+    expect(interests_tab).to_have_attribute("data-active", "true")
 
     # Click "Ranking" tab (controls)
     controls_tab = page.locator('[data-tab="controls"]')
     controls_tab.click()
 
     # Verify tab switched
-    expect(controls_tab).to_have_class(re.compile(r"bg-gray-900"))
-    expect(interests_tab).not_to_have_class(re.compile(r"bg-gray-900"))
+    expect(controls_tab).to_have_attribute("data-active", "true")
+    expect(interests_tab).to_have_attribute("data-active", "")
