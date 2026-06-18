@@ -321,13 +321,22 @@ def main() -> None:
 
     arxiv_ids = _seed(app)
 
-    # Pre-render placeholder thumbnails/teasers so image routes never hit the network.
-    written: list[Path] = []
+    # Pre-render placeholder thumbnails/teasers so image routes never hit the
+    # network. The demo arXiv ids are realistic, so a real cached thumbnail may
+    # already live at the same path in the shared static dir — snapshot it into
+    # tmp so the finally block restores it instead of deleting the user's file.
+    backups_dir = tmp / "thumb_backups"
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    placeholders: list[tuple[Path, Path | None]] = []  # (target, backup or None)
     for arxiv_id in arxiv_ids:
         for suffix in ("", "_teaser"):
             path = THUMBS_DIR / f"{arxiv_id}{suffix}.png"
+            backup: Path | None = None
+            if path.exists():
+                backup = backups_dir / f"{arxiv_id}{suffix}.png"
+                shutil.copy2(path, backup)
             _placeholder_image(path, arxiv_id)
-            written.append(path)
+            placeholders.append((path, backup))
 
     server = make_server("127.0.0.1", 0, app)
     port = server.socket.getsockname()[1]
@@ -337,8 +346,11 @@ def main() -> None:
         _capture(f"http://127.0.0.1:{port}", args.headed)
     finally:
         server.shutdown()
-        for path in written:
-            path.unlink(missing_ok=True)
+        for path, backup in placeholders:
+            if backup is not None:
+                shutil.move(str(backup), str(path))  # restore the real thumbnail
+            else:
+                path.unlink(missing_ok=True)
         shutil.rmtree(tmp, ignore_errors=True)
 
     print("Done. Screenshots written to", STATIC_HELP)
