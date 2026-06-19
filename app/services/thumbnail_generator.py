@@ -10,10 +10,14 @@ import pdfplumber
 import requests
 
 from app.services.http_client import request_with_backoff
+from app.services.subprocess_runner import run_isolated
 
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_THUMBNAIL_DPI = 150
+
+# Wall-clock budget for rendering one PDF in an isolated process before giving up.
+_RENDER_TIMEOUT = 120.0
 
 # A teaser figure must dominate the page: at least 15% of the page area,
 # reasonably wide, and not a thin rule or sidebar logo.
@@ -156,14 +160,18 @@ def generate_thumbnail(
             try:
                 if not _looks_like_pdf(pdf_content):
                     raise ValueError("Provided PDF bytes were not a valid PDF")
-                _write_missing_renders(pdf_content, out_path, teaser_path, resolution)
+                # Render in a child process: a native crash in pdfplumber/Pillow then
+                # fails this paper instead of taking down the whole server.
+                run_isolated(
+                    _write_missing_renders, pdf_content, out_path, teaser_path, resolution, timeout=_RENDER_TIMEOUT
+                )
                 LOGGER.info("Successfully generated thumbnail for %s", arxiv_id)
                 return True
             except Exception as exc:
                 LOGGER.debug("Retrying thumbnail generation for %s with a fresh PDF download: %s", arxiv_id, exc)
 
         content_to_use = _download_pdf(pdf_link, session=session)
-        _write_missing_renders(content_to_use, out_path, teaser_path, resolution)
+        run_isolated(_write_missing_renders, content_to_use, out_path, teaser_path, resolution, timeout=_RENDER_TIMEOUT)
         LOGGER.info("Successfully generated thumbnail for %s", arxiv_id)
         return True
     except Exception as exc:

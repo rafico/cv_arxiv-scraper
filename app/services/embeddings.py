@@ -338,6 +338,20 @@ class EmbeddingService:
     def index_count(self) -> int:
         return self._index.ntotal
 
+    @property
+    def index_dir(self) -> Path:
+        return self._index_dir
+
+
+def add_papers_to_index(index_dir: str, paper_ids: list[int], texts: list[str], vectors: list | None = None) -> int:
+    """Load the on-disk index, add papers, and persist. Importable + dependency-free
+    (no Flask/DB) so it can run in an isolated subprocess via run_isolated()."""
+    service = EmbeddingService(index_dir)
+    added = service.add_papers(paper_ids, texts, vectors=vectors)
+    if added:
+        service.save()
+    return added
+
 
 def get_embedding_service(app=None) -> EmbeddingService:
     """Return the singleton EmbeddingService, creating it if needed."""

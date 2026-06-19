@@ -10,6 +10,7 @@ from app.models import Paper, db
 from app.services.embeddings import EmbeddingService, reset_embedding_service
 from app.services.ranking import compute_paper_score
 from backfill_cli import (
+    backfill_abstracts,
     backfill_citations,
     backfill_github,
     backfill_openalex,
@@ -41,6 +42,22 @@ class BackfillCliTests(FlaskDBTestCase):
     def tearDown(self):
         reset_embedding_service()
         super().tearDown()
+
+    def test_backfill_abstracts_strips_rss_boilerplate_and_is_idempotent(self):
+        dirty = _paper("2601.00010")
+        dirty.abstract_text = "arXiv:2601.00010v1 Announce Type: new Abstract: The real body."
+        clean = _paper("2601.00011")
+        clean.abstract_text = "Already clean abstract."
+        db.session.add_all([dirty, clean])
+        db.session.commit()
+
+        updated = backfill_abstracts(self.app, batch_size=10, emit=lambda _msg: None)
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(Paper.query.filter_by(arxiv_id="2601.00010").one().abstract_text, "The real body.")
+        self.assertEqual(Paper.query.filter_by(arxiv_id="2601.00011").one().abstract_text, "Already clean abstract.")
+        # Idempotent: a second pass changes nothing.
+        self.assertEqual(backfill_abstracts(self.app, batch_size=10, emit=lambda _msg: None), 0)
 
     @patch("app.services.embed_backfill.backfill_embeddings", return_value=3)
     def test_run_embeddings_backfill_wraps_service(self, mock_backfill):
@@ -244,6 +261,7 @@ class BackfillCliTests(FlaskDBTestCase):
         repos = mock_provider_cls.return_value.fetch_batch.call_args.kwargs["repos_by_arxiv_id"]
         self.assertEqual(repos, {"2601.00009": "lab/model"})
 
+    @patch("backfill_cli.backfill_abstracts", return_value=7)
     @patch("backfill_cli.backfill_thumbnails", return_value=4)
     @patch("backfill_cli.backfill_github", return_value=5)
     @patch("backfill_cli.backfill_comments", return_value=6)
@@ -251,13 +269,21 @@ class BackfillCliTests(FlaskDBTestCase):
     @patch("backfill_cli.backfill_citations", return_value=2)
     @patch("backfill_cli.run_embeddings_backfill", return_value=1)
     def test_run_all_backfills_runs_each_task(
-        self, mock_embeddings, mock_citations, mock_openalex, mock_comments, mock_github, mock_thumbnails
+        self,
+        mock_embeddings,
+        mock_citations,
+        mock_openalex,
+        mock_comments,
+        mock_github,
+        mock_thumbnails,
+        mock_abstracts,
     ):
         result = run_all_backfills(self.app, batch_size=25, delay_seconds=0, emit=lambda _: None)
 
         self.assertEqual(
             result,
             {
+                "abstracts": 7,
                 "embeddings": 1,
                 "citations": 2,
                 "openalex": 3,
@@ -272,6 +298,7 @@ class BackfillCliTests(FlaskDBTestCase):
         mock_comments.assert_called_once()
         mock_github.assert_called_once()
         mock_thumbnails.assert_called_once()
+        mock_abstracts.assert_called_once()
 
     @patch("backfill_cli.rebuild_semantic_index", return_value=2)
     @patch("backfill_cli.create_app")

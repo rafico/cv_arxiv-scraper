@@ -600,13 +600,16 @@ class PostScrapePipelineTests(FlaskDBTestCase):
 
         mock_service = MagicMock()
         mock_service.has_paper.return_value = False
-        mock_service.add_papers.return_value = 1
 
-        with patch("app.services.embeddings.get_embedding_service", return_value=mock_service):
+        with (
+            patch("app.services.embeddings.get_embedding_service", return_value=mock_service),
+            patch("app.services.embeddings.add_papers_to_index", return_value=1) as mock_index,
+        ):
             _generate_embeddings(self.app, results)
 
-        mock_service.add_papers.assert_called_once()
-        mock_service.save.assert_called_once()
+        # The new paper id is forwarded to the (isolated) indexer worker.
+        mock_index.assert_called_once()
+        self.assertIn(paper.id, mock_index.call_args.args[1])
 
     def test_generate_embeddings_skips_already_indexed_papers(self):
         from app.services.scrape_engine import _generate_embeddings
@@ -620,10 +623,13 @@ class PostScrapePipelineTests(FlaskDBTestCase):
         mock_service = MagicMock()
         mock_service.has_paper.return_value = True
 
-        with patch("app.services.embeddings.get_embedding_service", return_value=mock_service):
+        with (
+            patch("app.services.embeddings.get_embedding_service", return_value=mock_service),
+            patch("app.services.embeddings.add_papers_to_index") as mock_index,
+        ):
             _generate_embeddings(self.app, results)
 
-        mock_service.add_papers.assert_not_called()
+        mock_index.assert_not_called()
 
 
 class SaveConfigTests(TestCase):

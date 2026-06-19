@@ -516,6 +516,36 @@ def backfill_interest(app, *, emit: Emit = print) -> int:
     return updated
 
 
+def backfill_abstracts(app, *, batch_size: int = 200, emit: Emit = print) -> int:
+    """Re-clean stored abstracts so rows ingested before the clean_abstract fix lose
+    the arXiv RSS 'arXiv:<id> Announce Type: <x> Abstract:' boilerplate. Idempotent."""
+    from app.services.ingest.base import clean_abstract
+
+    updated = 0
+    with app.app_context():
+        total = Paper.query.count()
+        emit(f"Scanning {total} papers for abstract cleanup...")
+        offset = 0
+        while True:
+            papers = Paper.query.order_by(Paper.id).offset(offset).limit(batch_size).all()
+            if not papers:
+                break
+            changed = 0
+            for paper in papers:
+                original = paper.abstract_text or ""
+                cleaned = clean_abstract(original)
+                if cleaned != original:
+                    paper.abstract_text = cleaned
+                    changed += 1
+            if changed:
+                db.session.commit()
+                updated += changed
+            offset += batch_size
+            emit(f"  processed {min(offset, total)}/{total} (updated {updated})")
+    emit(f"Abstract cleanup complete: {updated} papers updated")
+    return updated
+
+
 def run_all_backfills(
     app,
     *,
@@ -524,6 +554,7 @@ def run_all_backfills(
     emit: Emit = print,
 ) -> dict[str, int]:
     results = {
+        "abstracts": backfill_abstracts(app, emit=emit),
         "embeddings": run_embeddings_backfill(app, batch_size=EMBEDDINGS_BATCH_SIZE, emit=emit),
         "citations": backfill_citations(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "openalex": backfill_openalex(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
@@ -533,6 +564,7 @@ def run_all_backfills(
     }
     emit(
         "All backfills complete: "
+        f"abstracts={results['abstracts']}, "
         f"embeddings={results['embeddings']}, "
         f"citations={results['citations']}, "
         f"openalex={results['openalex']}, "
@@ -551,6 +583,8 @@ def build_parser() -> argparse.ArgumentParser:
     embeddings.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
     index_rebuild = subparsers.add_parser("index-rebuild", help="Rebuild the semantic paper index from the DB")
     index_rebuild.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
+    abstracts = subparsers.add_parser("abstracts", help="Re-clean stored abstracts (strip arXiv RSS boilerplate)")
+    abstracts.add_argument("--batch-size", type=int, default=200)
     subparsers.add_parser("interest", help="Recompute learned-interest similarities from feedback")
     insights = subparsers.add_parser("insights", help="Run structured LLM extraction for papers without insights")
     insights.add_argument("--limit", type=int, default=200, help="Max papers to analyze (one LLM call each)")
@@ -575,6 +609,8 @@ def main(argv: list[str] | None = None) -> int:
             run_embeddings_backfill(app, batch_size=args.batch_size)
         elif args.command == "index-rebuild":
             rebuild_semantic_index(app, batch_size=args.batch_size)
+        elif args.command == "abstracts":
+            backfill_abstracts(app, batch_size=args.batch_size)
         elif args.command == "citations":
             backfill_citations(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "openalex":
