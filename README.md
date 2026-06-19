@@ -25,7 +25,9 @@ cp config.example.yaml config.yaml
 python run.py --debug
 ```
 
-Open **http://127.0.0.1:5000**, click **Run Scrape**, and you're done.
+Open **http://127.0.0.1:5000**, click **Run Scrape** (top bar), and you're done.
+
+The interface is a left **sidebar** (Inbox and Saved with counts, your collections, saved searches, and filter groups) plus a **top bar** (search, sort, density toggle, and Run Scrape). The inbox is a dense, keyboard-driven triage list by default — save or skip with `s`/`x`, expand a row with `d` — and you can switch to a **Visual grid** that browses papers by their first-page teaser figure.
 
 If you skip the copy step, the app will run from `config.example.yaml` defaults and create `instance/config.yaml` only after your first saved change.
 
@@ -70,7 +72,7 @@ whitelists:
 - AI relevance scoring (optional, requires LLM setup)
 
 **TL;DR summaries**
-- Every paper card shows a short summary below the title and authors
+- Expand any paper (More details, or press `d`) to read a short summary
 - Without LLM: extractive summary from the abstract (no API needed)
 - With LLM enabled: AI-generated plain-language TL;DR describing what the paper does and why it matters
 - Configurable number of visible lines via Settings (default: 3)

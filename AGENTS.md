@@ -87,8 +87,25 @@ run.py / wsgi.py ── create_app() ── blueprints (app/routes/*) ── ser
 - **app/models.py** — SQLAlchemy models (`Paper`, `Collection`, feedback, etc.).
 - **app/cli/** — installable console scripts (`cv-arxiv-scrape`, `-sync`,
   `-backfill`, `-digest`); see `[project.scripts]` in `pyproject.toml`.
-- **app/templates/**, **app/static/** — Jinja templates + assets (Tailwind CLI
-  binary is `./tailwindcss`).
+- **app/templates/**, **app/static/** — Jinja templates + assets. The shell
+  (sidebar + top bar) lives in `base.html`; page-specific chrome fills the
+  `page_title` / `topbar_tools` / `sidebar_filters` / `sidebar_extra` blocks.
+  Reusable fragments are in `app/templates/partials/` (paper row/card/details,
+  scrape progress, shell scripts). Styling is **token-based**: semantic CSS
+  custom properties + component classes are defined in `app/static/src.css`,
+  compiled to the **committed** `app/static/style.css` via `./tailwindcss`
+  (`make tailwind`) — rerun it after any template class change. Dark mode is
+  driven entirely by the tokens (`html[data-theme="dark"]`); do not reintroduce
+  raw `gray-*` utilities. Regenerate help/README screenshots with
+  `make screenshots`.
+- **Classic UI toggle.** The pre-redesign UI is preserved under
+  `app/templates/classic/` (styled by the precompiled
+  `app/static/style.classic.css`, *not* the Tailwind build — `src.css` excludes
+  that folder via `@source not`). The modern UI is the default; the `ui_mode`
+  cookie (set by `app/routes/ui.py`, `/ui/<mode>`) opts into classic. Page routes
+  render via `render_ui()` ([app/ui.py](app/ui.py)) which picks the `classic/`
+  variant when the cookie is set. The classic templates are a frozen escape
+  hatch — keep new UI work in the modern templates.
 
 ### Semantic re-export packages
 

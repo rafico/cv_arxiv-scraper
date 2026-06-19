@@ -39,6 +39,11 @@ you touched, then the full suite once before committing.
   call args — it catches more (see `test_settings.py::test_upload_saves_valid_json`).
 - **e2e/** holds Playwright browser tests (`pytest-playwright`); they need browsers
   installed (`playwright install`) and are excluded with `-m "not e2e"`.
+- **Assert on semantic hooks, not styling.** UI tests target stable ids/classes
+  and `data-*` attributes (`#paper-list`, `.feedback-btn[data-action]` +
+  `data-active`, `#theme-toggle`, settings tabs' `data-active`), never Tailwind
+  utility classes — restyling must not break the suite. See the hook list in
+  [app/routes/AGENTS.md](../app/routes/AGENTS.md).
 
 When adding a test, place it next to its peers (a `tests/test_<area>.py` already
 exists for most areas) and prefer the existing `FlaskDBTestCase` base.

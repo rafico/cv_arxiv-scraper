@@ -1,0 +1,19 @@
+{# Feedback buttons + reading status. Shared by list rows and visual cards.
+   Context: `paper`, `FEEDBACK` (from dashboard.html). #}
+{% for action, meta in FEEDBACK.items() %}
+<button type="button"
+        onclick="sendFeedback({{ paper.id }}, '{{ action }}', this)"
+        data-action="{{ action }}"
+        data-active="{{ 'true' if action in paper.active_actions else '' }}"
+        class="feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border transition-opacity
+               {{ meta.active if action in paper.active_actions else 'bg-surface text-fg-muted border-edge hover:bg-surface-2' }}">
+    {{ meta.label }} <span class="count">{{ paper.feedback_counts[action] }}</span>
+</button>
+{% endfor %}
+<select onchange="setReadingStatus({{ paper.id }}, this.value, this)"
+        class="reading-status-select px-2 py-1 text-[11px] rounded border border-edge bg-surface text-fg-muted cursor-pointer">
+    <option value="" {{ 'selected' if not paper.reading_status }}>Status</option>
+    <option value="to_read" {{ 'selected' if paper.reading_status == 'to_read' }}>To Read</option>
+    <option value="reading" {{ 'selected' if paper.reading_status == 'reading' }}>Reading</option>
+    <option value="read" {{ 'selected' if paper.reading_status == 'read' }}>Read</option>
+</select>

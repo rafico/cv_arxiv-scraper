@@ -3,93 +3,87 @@
 {% block doc_content %}
 <!-- UI Guide -->
 <section id="ui-guide" class="scroll-mt-6">
-    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">UI Guide</h2>
-    <p class="text-sm text-gray-600 mb-6">The Papers view is where you spend most of your time. Think of it as a triage queue: review new matches in the inbox, then keep the important ones in Saved.</p>
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">UI Guide</h2>
+    <p class="text-sm text-fg-muted mb-6">The Papers view is where you spend most of your time. Think of it as a triage queue: review new matches in the inbox, then keep the important ones in Saved.</p>
 
-    <figure class="mb-8 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <img src="{{ url_for('static', filename='help/dashboard_summary.webp') }}" alt="Paper cards showing TL;DR summaries" class="w-full rounded-lg border border-gray-100" onerror="handleImgError(this)">
-        <figcaption class="mt-3 text-center text-sm text-gray-600">Each paper card shows a TL;DR summary below the authors, followed by action buttons and topic tags.</figcaption>
+    <figure class="mb-8 rounded-xl border border-edge bg-surface p-4 shadow-sm">
+        <img src="{{ url_for('static', filename='help/dashboard_summary.webp') }}" alt="An expanded paper row showing the TL;DR and details" class="w-full rounded-lg border border-edge" onerror="handleImgError(this)">
+        <figcaption class="mt-3 text-center text-sm text-fg-muted">Each row shows the title, one match-type chip, venue, authors, and inline actions. Expand a row for the TL;DR, datasets, score breakdown, notes, and links.</figcaption>
     </figure>
 
-    <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 mb-8">
-        <p class="text-sm text-gray-700"><strong>TL;DR summaries:</strong> The gray text below the authors is a short summary of the paper. Without LLM enabled, this is extracted from the abstract. With <a href="{{ url_for('settings.view_settings', section='ai') }}" class="font-medium text-blue-600 hover:text-blue-800">LLM enabled</a>, it becomes an AI-generated plain-language description. Adjust the number of visible lines in <strong>Settings &rarr; Ranking &rarr; Summary lines</strong> (default: 3).</p>
+    <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3 mb-8">
+        <p class="text-sm text-fg-muted"><strong>TL;DR summaries:</strong> Expand a paper with <strong>More details</strong> (or press <kbd class="px-1.5 py-0.5 bg-surface rounded border border-edge-strong font-mono text-xs">d</kbd>) to read its short summary. Without LLM enabled, this is extracted from the abstract. With <a href="{{ url_for('settings.view_settings', section='ai') }}" class="font-medium text-blue-600 hover:text-blue-800">LLM enabled</a>, it becomes an AI-generated plain-language description. Adjust the number of visible lines in <strong>Settings &rarr; Ranking &rarr; Summary lines</strong> (default: 3).</p>
     </div>
 
-    <h3 class="text-lg font-bold text-gray-900 mb-3">Navigation</h3>
+    <h3 class="text-lg font-bold text-fg mb-3">Layout</h3>
     <div class="grid gap-4 md:grid-cols-3 mb-8">
-        <div class="rounded-xl bg-gray-50 p-4 border border-gray-100">
-            <h4 class="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <span class="px-2 py-0.5 bg-gray-900 text-white rounded text-xs">Run Scrape</span>
-            </h4>
-            <p class="mt-2 text-sm text-gray-600">Fetches recent papers from your enabled feeds and refreshes the inbox with anything worth reviewing.</p>
+        <div class="rounded-xl bg-surface-2 p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg">Left sidebar</h4>
+            <p class="mt-2 text-sm text-fg-muted"><strong>Inbox</strong> and <strong>Saved</strong> (with counts), your collections and saved searches, and the filter groups (match type, venue, category, resources, reading status).</p>
         </div>
-        <div class="rounded-xl bg-gray-50 p-4 border border-gray-100">
-            <h4 class="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <span class="px-2 py-0.5 bg-gray-900 text-white rounded-full text-xs">Inbox</span>
-            </h4>
-            <p class="mt-2 text-sm text-gray-600">New matches that still need a decision. This is your daily review queue.</p>
+        <div class="rounded-xl bg-surface-2 p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg">Top bar</h4>
+            <p class="mt-2 text-sm text-fg-muted">Search, sort, the <strong>Visual grid</strong> / <strong>List view</strong> density toggle, <strong>Select</strong> for bulk actions, and the <strong>Run Scrape</strong> button.</p>
         </div>
-        <div class="rounded-xl bg-gray-50 p-4 border border-gray-100">
-            <h4 class="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-xs">Saved</span>
-            </h4>
-            <p class="mt-2 text-sm text-gray-600">Your keep list. Use it for papers you may cite, share, read later, or export.</p>
+        <div class="rounded-xl bg-surface-2 p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg">Paper list</h4>
+            <p class="mt-2 text-sm text-fg-muted">A dense, keyboard-friendly triage queue by default. Switch to <strong>Visual grid</strong> to browse by first-page teaser figures instead.</p>
         </div>
     </div>
-    <p class="text-sm text-gray-600 mb-8">Most day-to-day use is just this: run a scrape, review Inbox, and keep your shortlist in Saved.</p>
+    <p class="text-sm text-fg-muted mb-8">Most day-to-day use is just this: run a scrape, review Inbox, and keep your shortlist in Saved.</p>
 
-    <h3 class="text-lg font-bold text-gray-900 mb-3">Paper Actions</h3>
+    <h3 class="text-lg font-bold text-fg mb-3">Paper Actions</h3>
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <div class="rounded-xl bg-white p-4 border border-gray-200">
-            <h4 class="text-sm font-bold text-gray-900"><span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs">Save</span></h4>
-            <p class="mt-2 text-sm text-gray-600">Keeps the paper in your shortlist and tells the ranking system to show you more like it.</p>
+        <div class="rounded-xl bg-surface p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs">Save</span></h4>
+            <p class="mt-2 text-sm text-fg-muted">Keeps the paper in your shortlist and tells the ranking system to show you more like it.</p>
         </div>
-        <div class="rounded-xl bg-white p-4 border border-gray-200">
-            <h4 class="text-sm font-bold text-gray-900"><span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs text-rose-600">Not Interested</span></h4>
-            <p class="mt-2 text-sm text-gray-600">Hides the paper and teaches the app to show fewer papers with similar signals.</p>
+        <div class="rounded-xl bg-surface p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs text-rose-600">Not Interested</span></h4>
+            <p class="mt-2 text-sm text-fg-muted">Hides the paper and teaches the app to show fewer papers with similar signals.</p>
         </div>
-        <div class="rounded-xl bg-white p-4 border border-gray-200">
-            <h4 class="text-sm font-bold text-gray-900"><span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs text-amber-600">Priority</span></h4>
-            <p class="mt-2 text-sm text-gray-600">Marks a must-read. Use it sparingly for the papers you want to surface above normal saves.</p>
+        <div class="rounded-xl bg-surface p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs text-amber-600">Priority</span></h4>
+            <p class="mt-2 text-sm text-fg-muted">Marks a must-read. Use it sparingly for the papers you want to surface above normal saves.</p>
         </div>
-        <div class="rounded-xl bg-white p-4 border border-gray-200">
-            <h4 class="text-sm font-bold text-gray-900"><span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs">BibTeX</span></h4>
-            <p class="mt-2 text-sm text-gray-600">Copies one citation entry. The toolbar BibTeX button exports all currently visible papers.</p>
+        <div class="rounded-xl bg-surface p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs">BibTeX</span></h4>
+            <p class="mt-2 text-sm text-fg-muted">Copies one citation entry. The sidebar <strong>Export</strong> group exports all currently visible papers as BibTeX or an HTML report.</p>
         </div>
-        <div class="rounded-xl bg-white p-4 border border-gray-200">
-            <h4 class="text-sm font-bold text-gray-900"><span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs">Select</span></h4>
-            <p class="mt-2 text-sm text-gray-600">Enters bulk mode so you can save, skip, or export multiple papers at once.</p>
+        <div class="rounded-xl bg-surface p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs">Select</span></h4>
+            <p class="mt-2 text-sm text-fg-muted">Enters bulk mode so you can save, skip, or export multiple papers at once.</p>
         </div>
-        <div class="rounded-xl bg-white p-4 border border-gray-200">
-            <h4 class="text-sm font-bold text-gray-900"><span class="px-2 py-1 bg-white border border-gray-200 rounded shadow-sm text-xs">More details</span></h4>
-            <p class="mt-2 text-sm text-gray-600">Expands the abstract, notes, related papers, follow/mute controls, and other metadata for that paper.</p>
+        <div class="rounded-xl bg-surface p-4 border border-edge">
+            <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs">More details</span></h4>
+            <p class="mt-2 text-sm text-fg-muted">Expands the abstract, notes, related papers, follow/mute controls, and other metadata for that paper.</p>
         </div>
     </div>
-    <div class="mt-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-        <p class="text-sm text-gray-700"><strong>Rule of thumb:</strong> if you ignore every other control, <strong>Save</strong> and <strong>Not Interested</strong> are enough to make the app useful.</p>
+    <div class="mt-4 rounded-xl border border-edge bg-surface-2 px-4 py-3">
+        <p class="text-sm text-fg-muted"><strong>Rule of thumb:</strong> if you ignore every other control, <strong>Save</strong> and <strong>Not Interested</strong> are enough to make the app useful.</p>
     </div>
 </section>
 
 <!-- Keyboard Shortcuts -->
 <section id="shortcuts" class="scroll-mt-6 pt-12">
-    <h2 class="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-100">Keyboard Shortcuts</h2>
-    <p class="text-sm text-gray-600 mb-4">Click the floating <strong>?</strong> button, or press <kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">?</kbd>, to open the in-app shortcut overlay.</p>
-    <div class="overflow-x-auto rounded-xl border border-gray-200">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Keyboard Shortcuts</h2>
+    <p class="text-sm text-fg-muted mb-4">Click the floating <strong>?</strong> button, or press <kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">?</kbd>, to open the in-app shortcut overlay.</p>
+    <div class="overflow-x-auto rounded-xl border border-edge">
+        <table class="min-w-full divide-y divide-edge">
+            <thead class="bg-surface-2">
                 <tr>
-                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shortcut</th>
-                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-fg-muted uppercase tracking-wider">Shortcut</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-fg-muted uppercase tracking-wider">Action</th>
                 </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">j</kbd> / <kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">k</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Navigate between papers</td></tr>
-                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">s</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Save paper</td></tr>
-                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">x</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Skip (Not Interested)</td></tr>
-                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">!</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Mark as Priority</td></tr>
-                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">o</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Open on arXiv</td></tr>
-                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">p</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Open PDF</td></tr>
-                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-gray-100 rounded border border-gray-300 font-mono text-gray-700">d</kbd></td><td class="px-6 py-3 text-sm text-gray-600">Toggle details</td></tr>
+            <tbody class="bg-surface divide-y divide-edge">
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">j</kbd> / <kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">k</kbd></td><td class="px-6 py-3 text-sm text-fg-muted">Navigate between papers</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">s</kbd></td><td class="px-6 py-3 text-sm text-fg-muted">Save paper</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">x</kbd></td><td class="px-6 py-3 text-sm text-fg-muted">Skip (Not Interested)</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">!</kbd></td><td class="px-6 py-3 text-sm text-fg-muted">Mark as Priority</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">o</kbd></td><td class="px-6 py-3 text-sm text-fg-muted">Open on arXiv</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">p</kbd></td><td class="px-6 py-3 text-sm text-fg-muted">Open PDF</td></tr>
+                <tr><td class="px-6 py-3 text-sm font-medium"><kbd class="px-2 py-1 bg-surface-2 rounded border border-edge-strong font-mono text-fg-muted">d</kbd></td><td class="px-6 py-3 text-sm text-fg-muted">Toggle details</td></tr>
             </tbody>
         </table>
     </div>

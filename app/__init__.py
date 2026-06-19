@@ -236,17 +236,22 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
 
 
 def _register_blueprints(app: Flask) -> None:
+    from app.routes._shell import register_shell_context
     from app.routes.api import api_bp
     from app.routes.dashboard import dashboard_bp
     from app.routes.discover import discover_bp
     from app.routes.help import help_bp
     from app.routes.settings import settings_bp
+    from app.routes.ui import ui_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(discover_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(help_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(ui_bp)
+
+    register_shell_context(app)
 
 
 def _ensure_secret_key(instance_path: Path) -> str:

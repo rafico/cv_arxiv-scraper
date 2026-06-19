@@ -1,0 +1,462 @@
+<script>
+    /* ── Filter navigation (URL-param based; controls live across sidebar + topbar) ── */
+    function applyFilters(updates) {
+        const params = new URLSearchParams(window.location.search);
+        for (const [key, value] of Object.entries(updates)) {
+            if (value === null || value === undefined || value === "") {
+                params.delete(key);
+            } else {
+                params.set(key, value);
+            }
+        }
+        params.delete("page");
+        window.location.search = params.toString();
+    }
+
+    function toggleSummary(container) {
+        const summary = container.querySelector('.summary-text');
+        const abstract = container.querySelector('.summary-abstract');
+        const hint = container.querySelector('.summary-toggle-hint');
+        const isClamped = summary.style.webkitLineClamp !== 'unset';
+        if (isClamped) {
+            summary.style.webkitLineClamp = 'unset';
+            summary.style.display = 'block';
+            if (abstract) abstract.classList.remove('hidden');
+            if (hint) hint.textContent = '▾ collapse';
+        } else {
+            summary.style.webkitLineClamp = summary.dataset.clamp;
+            summary.style.display = '-webkit-box';
+            if (abstract) abstract.classList.add('hidden');
+            if (hint) hint.textContent = '▸ full abstract';
+        }
+    }
+
+    function toggleCardDetails(button) {
+        const card = button.closest('.paper-card');
+        const details = card ? card.querySelector('[data-card-details]') : null;
+        if (!details) return;
+        const hidden = details.classList.toggle("hidden");
+        button.textContent = hidden ? "More details" : "Less";
+    }
+
+    let searchTimeout;
+    const searchInput = document.getElementById("q");
+    if (searchInput) {
+        const submitSearch = () => applyFilters({ q: searchInput.value, search_mode: document.getElementById("search_mode")?.value });
+        searchInput.addEventListener("input", () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(submitSearch, 450);
+        });
+        searchInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                clearTimeout(searchTimeout);
+                submitSearch();
+            }
+        });
+    }
+
+    /* ── Feedback buttons ── */
+    const FEEDBACK_STYLES = {
+        save:     { active: ["bg-save-soft", "text-save", "border-save"] },
+        priority: { active: ["bg-priority-soft", "text-priority", "border-priority"] },
+        skip:     { active: ["bg-skip-soft", "text-skip", "border-skip"] },
+        shared:   { active: ["bg-info-soft", "text-info", "border-info"] },
+    };
+    const DEFAULT_ACTIVE_STYLE = ["bg-accent-soft", "text-accent", "border-accent"];
+    const INACTIVE_STYLES = ["bg-surface", "text-fg-muted", "border-edge", "hover:bg-surface-2"];
+
+    function updateFeedbackButton(button, isActive, action, count) {
+        const countEl = button.querySelector(".count");
+        if (countEl) countEl.textContent = String(count);
+
+        const styles = FEEDBACK_STYLES[action] || { active: DEFAULT_ACTIVE_STYLE };
+        button.className = "feedback-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border transition-opacity";
+        button.classList.add(...(isActive ? styles.active : INACTIVE_STYLES));
+        button.dataset.active = isActive ? "true" : "";
+    }
+
+    function setFeedbackLoading(button, loading) {
+        button.disabled = loading;
+        button.style.opacity = loading ? "0.5" : "";
+        button.style.pointerEvents = loading ? "none" : "";
+    }
+
+    async function sendFeedback(paperId, action, button) {
+        const card = button.closest(".paper-card");
+        if (!card) return;
+
+        setFeedbackLoading(button, true);
+
+        try {
+            const response = await fetch(`/api/papers/${paperId}/feedback`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCsrfToken(),
+                },
+                body: JSON.stringify({ action }),
+            });
+            const data = await response.json();
+            if (!response.ok) { setFeedbackLoading(button, false); return; }
+
+            card.querySelectorAll(".feedback-btn").forEach((btn) => {
+                const btnAction = btn.dataset.action;
+                updateFeedbackButton(btn, (data.active_actions || []).includes(btnAction), btnAction, data.counts[btnAction] || 0);
+            });
+
+            const currentView = new URLSearchParams(window.location.search).get("view") || "inbox";
+            const includeHidden = document.getElementById("include_hidden_toggle")?.checked || false;
+            const activeActions = data.active_actions || [];
+            const isSaved = activeActions.includes("save");
+            const isHidden = activeActions.includes("skip");
+
+            if ((currentView === "saved" && !isSaved) || (isHidden && !includeHidden)) {
+                card.remove();
+                if (!document.querySelector(".paper-card")) {
+                    window.location.reload();
+                }
+            }
+        } catch (error) {
+            console.error("Feedback request failed", error);
+        } finally {
+            setFeedbackLoading(button, false);
+        }
+    }
+
+    async function sendRecommendation(paperId, action, button) {
+        button.disabled = true;
+        button.style.opacity = "0.5";
+
+        try {
+            const response = await fetch(`/api/papers/${paperId}/${action}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCsrfToken(),
+                },
+                body: JSON.stringify({}),
+            });
+            const data = await response.json();
+            if (!response.ok) { button.disabled = false; button.style.opacity = ""; return; }
+            button.textContent = data.added ? data.message : `${data.term} already configured`;
+            button.classList.add("opacity-60", "cursor-not-allowed");
+            if (action === "mute") {
+                const card = button.closest(".paper-card");
+                if (card) {
+                    card.remove();
+                }
+            }
+        } catch (error) {
+            console.error("Recommendation request failed", error);
+            button.disabled = false;
+            button.style.opacity = "";
+        }
+    }
+
+    /* ── Reading status ── */
+    async function setReadingStatus(paperId, status, select) {
+        try {
+            const response = await fetch(`/api/papers/${paperId}/reading-status`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ status: status || null }),
+            });
+            if (!response.ok) select.value = "";
+        } catch (error) { console.error("Reading status failed", error); }
+    }
+
+    /* ── User notes ── */
+    const notesTimers = {};
+    function debounceSaveNotes(paperId, textarea) {
+        clearTimeout(notesTimers[paperId]);
+        notesTimers[paperId] = setTimeout(async () => {
+            try {
+                await fetch(`/api/papers/${paperId}/notes`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                    body: JSON.stringify({ notes: textarea.value }),
+                });
+            } catch (error) { console.error("Save notes failed", error); }
+        }, 600);
+    }
+
+    /* ── User tags ── */
+    function promptAddTag(paperId, button) {
+        const existing = button.parentElement.querySelector('.tag-input');
+        if (existing) { existing.focus(); return; }
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'tag name';
+        input.className = 'tag-input text-[11px] border border-accent rounded px-1.5 py-0.5 w-20 outline-none focus:ring-1 focus:ring-accent bg-surface text-fg';
+        input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && input.value.trim()) {
+                e.preventDefault();
+                await addTag(paperId, input.value.trim(), button);
+                input.remove();
+            } else if (e.key === 'Escape') { input.remove(); }
+        });
+        input.addEventListener('blur', () => setTimeout(() => input.remove(), 200));
+        button.parentElement.insertBefore(input, button);
+        input.focus();
+    }
+
+    async function addTag(paperId, tag, button) {
+        try {
+            const response = await fetch(`/api/papers/${paperId}/tags`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ tag }),
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const container = button.parentElement;
+            container.querySelectorAll('.user-tag').forEach(el => el.remove());
+            data.user_tags.forEach(t => {
+                const span = document.createElement('span');
+                span.className = 'user-tag inline-flex items-center gap-0.5 badge badge-accent cursor-pointer hover:bg-accent-soft';
+                span.dataset.tag = t;
+                span.textContent = t + ' ×';
+                span.onclick = () => removeTag(paperId, t, span);
+                container.insertBefore(span, button);
+            });
+        } catch (error) { console.error("Add tag failed", error); }
+    }
+
+    async function removeTag(paperId, tag, element) {
+        try {
+            const response = await fetch(`/api/papers/${paperId}/tags`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ tag }),
+            });
+            if (response.ok) element.remove();
+        } catch (error) { console.error("Remove tag failed", error); }
+    }
+
+    /* ── Collections ── */
+    function toggleCollectionDropdown(button) {
+        const menu = button.nextElementSibling;
+        document.querySelectorAll('.collection-menu').forEach(m => { if (m !== menu) m.classList.add('hidden'); });
+        menu.classList.toggle('hidden');
+    }
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-collection-dropdown]')) {
+            document.querySelectorAll('.collection-menu').forEach(m => m.classList.add('hidden'));
+        }
+    });
+
+    async function togglePaperCollection(paperId, collectionId, button) {
+        try {
+            const response = await fetch(`/api/collections/${collectionId}/papers`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ paper_id: paperId }),
+            });
+            if (response.ok) {
+                button.classList.add('text-accent', 'font-semibold');
+                setTimeout(() => {
+                    button.closest('.collection-menu').classList.add('hidden');
+                }, 300);
+            }
+        } catch (error) { console.error("Collection add failed", error); }
+    }
+
+    /* ── Saved searches (serialized from the current URL params) ── */
+    function promptSaveSearch() {
+        const name = prompt("Name for this saved search:");
+        if (!name || !name.trim()) return;
+        const filters = {};
+        new URLSearchParams(window.location.search).forEach((value, key) => {
+            if (value && key !== "page") filters[key] = value;
+        });
+        fetch('/api/saved-searches', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+            body: JSON.stringify({ name: name.trim(), filters }),
+        }).then(r => { if (r.ok) window.location.reload(); });
+    }
+
+    /* ── Bulk selection ── */
+    let bulkMode = false;
+    const selectedPapers = new Set();
+
+    function toggleBulkMode() {
+        bulkMode = !bulkMode;
+        const toggle = document.getElementById('bulk-mode-toggle');
+        toggle.textContent = bulkMode ? 'Cancel Select' : 'Select';
+        toggle.classList.toggle('text-accent', bulkMode);
+        document.querySelectorAll('.paper-card').forEach(card => {
+            let cb = card.querySelector('.bulk-checkbox');
+            if (bulkMode && !cb) {
+                cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'bulk-checkbox absolute top-2 right-2 w-4 h-4 rounded border-edge-strong text-accent focus:ring-accent z-10';
+                cb.addEventListener('change', () => {
+                    const id = parseInt(card.dataset.paperId);
+                    if (cb.checked) selectedPapers.add(id); else selectedPapers.delete(id);
+                    updateBulkBar();
+                });
+                card.style.position = 'relative';
+                card.prepend(cb);
+            } else if (!bulkMode && cb) {
+                cb.remove();
+            }
+        });
+        if (!bulkMode) { selectedPapers.clear(); updateBulkBar(); }
+    }
+
+    function updateBulkBar() {
+        let bar = document.getElementById('bulk-action-bar');
+        if (selectedPapers.size === 0) { if (bar) bar.remove(); return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'bulk-action-bar';
+            bar.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-overlay border border-edge text-fg rounded-xl px-5 py-3 shadow-xl flex items-center gap-3 z-50';
+            document.body.appendChild(bar);
+        }
+        bar.innerHTML = `
+            <span class="text-sm font-medium">${selectedPapers.size} selected</span>
+            <button onclick="bulkAction('save')" class="px-3 py-1 text-xs rounded-lg bg-save text-white hover:opacity-90">Save All</button>
+            <button onclick="bulkAction('skip')" class="px-3 py-1 text-xs rounded-lg bg-skip text-white hover:opacity-90">Skip All</button>
+            <button onclick="bulkExportBibtex()" class="px-3 py-1 text-xs rounded-lg bg-surface-2 text-fg-muted hover:bg-edge">BibTeX</button>
+        `;
+    }
+
+    async function bulkAction(action) {
+        const ids = Array.from(selectedPapers);
+        try {
+            await fetch('/api/papers/bulk-feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+                body: JSON.stringify({ paper_ids: ids, action }),
+            });
+            window.location.reload();
+        } catch (error) { console.error('Bulk action failed', error); }
+    }
+
+    function bulkExportBibtex() {
+        const ids = Array.from(selectedPapers).join(',');
+        window.open(`/api/papers/bulk-bibtex?ids=${ids}`, '_blank');
+    }
+
+    /* ── Single-paper Mendeley export ── */
+    async function sendToMendeley(paperId, button) {
+        if (!button || button.dataset.state === "loading" || button.dataset.state === "done") return;
+
+        const originalMarkup = button.innerHTML;
+        button.dataset.state = "loading";
+        button.disabled = true;
+        button.style.opacity = "0.6";
+
+        try {
+            const response = await fetch(`/api/papers/${paperId}/mendeley`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCsrfToken(),
+                },
+                body: JSON.stringify({}),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to send paper to Mendeley");
+            }
+
+            button.dataset.state = "done";
+            button.classList.remove("bg-surface");
+            button.classList.add("bg-skip-soft");
+            button.title = data.message || "Added to Mendeley";
+            button.innerHTML = `
+                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true">
+                    <path d="M4.5 10.5l3.5 3.5l7.5-8" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+            `;
+        } catch (error) {
+            console.error("Mendeley export failed", error);
+            button.dataset.state = "";
+            button.disabled = false;
+            button.style.opacity = "";
+            button.title = error.message || "Failed to send to Mendeley";
+            button.innerHTML = originalMarkup;
+        }
+    }
+
+    /* ── Keyboard shortcuts ── */
+    let focusedCardIndex = -1;
+
+    function getCards() {
+        return Array.from(document.querySelectorAll(".paper-card"));
+    }
+
+    function focusCard(index) {
+        const cards = getCards();
+        if (!cards.length) return;
+        focusedCardIndex = Math.max(0, Math.min(index, cards.length - 1));
+        const card = cards[focusedCardIndex];
+        card.focus();
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        cards.forEach((c, i) => {
+            c.classList.toggle("ring-2", i === focusedCardIndex);
+            c.classList.toggle("ring-accent", i === focusedCardIndex);
+        });
+    }
+
+    function clickCardFeedback(action) {
+        const cards = getCards();
+        if (focusedCardIndex < 0 || focusedCardIndex >= cards.length) return;
+        const btn = cards[focusedCardIndex].querySelector(`.feedback-btn[data-action="${action}"]`);
+        if (btn) btn.click();
+    }
+
+    document.addEventListener("keydown", (e) => {
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        const cards = getCards();
+        if (!cards.length) return;
+
+        switch (e.key) {
+            case "j":
+                e.preventDefault();
+                focusCard(focusedCardIndex + 1);
+                break;
+            case "k":
+                e.preventDefault();
+                focusCard(focusedCardIndex - 1);
+                break;
+            case "s":
+                e.preventDefault();
+                clickCardFeedback("save");
+                break;
+            case "x":
+                e.preventDefault();
+                clickCardFeedback("skip");
+                break;
+            case "o":
+                e.preventDefault();
+                if (focusedCardIndex >= 0 && focusedCardIndex < cards.length) {
+                    const link = cards[focusedCardIndex].querySelector(".paper-link");
+                    if (link) window.open(link.href, "_blank");
+                }
+                break;
+            case "p":
+                e.preventDefault();
+                if (focusedCardIndex >= 0 && focusedCardIndex < cards.length) {
+                    const pdf = cards[focusedCardIndex].querySelector(".paper-pdf-link");
+                    if (pdf) window.open(pdf.href, "_blank");
+                }
+                break;
+            case "d":
+                e.preventDefault();
+                if (focusedCardIndex >= 0 && focusedCardIndex < cards.length) {
+                    const toggle = cards[focusedCardIndex].querySelector(".card-toggle");
+                    if (toggle) toggle.click();
+                }
+                break;
+            case "?":
+                e.preventDefault();
+                toggleShortcutHelp();
+                break;
+        }
+    });
+</script>

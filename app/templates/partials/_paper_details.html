@@ -1,0 +1,193 @@
+{# Expandable paper body + footer, shared by list rows and visual cards.
+   Lives inside a `.card-details` wrapper that the row/card provides.
+   Context: `paper`, `shell`, `mendeley_connected`, `preferences`. #}
+
+{# ── TL;DR / abstract (click to expand) ── #}
+<div class="cursor-pointer group/summary mb-3" onclick="toggleSummary(this)">
+    <span class="text-[11px] font-medium text-fg-subtle">TL;DR</span>
+    <p class="summary-text text-xs text-fg-muted leading-relaxed mb-1"
+       data-clamp="{{ preferences.display.summary_lines }}"
+       style="-webkit-line-clamp: {{ preferences.display.summary_lines }}; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;">
+        {{ paper.summary_text }}
+    </p>
+    {% if paper.abstract_text and paper.abstract_text != paper.summary_text %}
+    <p class="summary-abstract hidden text-xs text-fg-muted leading-relaxed mt-2 pt-2 border-t border-edge">
+        <span class="font-medium text-fg-subtle text-[11px]">Abstract:</span><br>
+        {{ paper.abstract_text }}
+    </p>
+    {% endif %}
+    <span class="summary-toggle-hint text-[11px] text-fg-subtle group-hover/summary:text-fg-muted transition-colors">&#9656; full abstract</span>
+</div>
+
+{# ── Structured LLM insights ── #}
+{% set insights = paper.llm_insights or {} %}
+{% if insights.get('why_matched') %}
+<p class="text-[11px] text-fg-muted mb-2">
+    <span class="font-medium text-fg">Why for you:</span> {{ insights['why_matched'] }}
+</p>
+{% endif %}
+{% if insights.get('datasets') %}
+<div class="flex flex-wrap items-center gap-1 mb-2">
+    {% for dataset in insights['datasets'][:6] %}
+    <a href="{{ url_for('dashboard.index', dataset=dataset, timeframe='all') }}"
+       onclick="event.stopPropagation()"
+       class="badge badge-neutral hover:bg-edge transition-colors">
+        {{ dataset }}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# ── Full topic tags + arXiv categories ── #}
+{% if paper.topic_tags_list %}
+<div class="flex flex-wrap gap-1 mb-2">
+    {% for tag in paper.topic_tags_list %}
+    <span class="badge badge-neutral">{{ tag }}</span>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if paper.categories_list %}
+<div class="flex flex-wrap gap-1 mb-2">
+    {% for category in paper.categories_list[:4] %}
+    <span class="badge badge-neutral">{{ category }}</span>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if paper.resource_links_list %}
+<div class="flex flex-wrap gap-1.5 mb-3">
+    {% for resource in paper.resource_links_list[:4] %}
+    <a href="{{ resource.url }}" target="_blank"
+       class="badge badge-outline hover:bg-surface-2">
+        {{ resource.label or resource.type|title }}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# ── User tags ── #}
+<div class="flex flex-wrap gap-1 mb-3 user-tags-container" data-paper-id="{{ paper.id }}">
+    {% for tag in paper.user_tags_list %}
+    <span class="user-tag inline-flex items-center gap-0.5 badge badge-accent cursor-pointer hover:bg-accent-soft"
+          data-tag="{{ tag }}" onclick="removeTag({{ paper.id }}, this.dataset.tag, this)">{{ tag }} &times;</span>
+    {% endfor %}
+    <button type="button" onclick="promptAddTag({{ paper.id }}, this)"
+            class="text-[11px] text-accent hover:text-accent-hover px-1 py-0.5">+ tag</button>
+</div>
+
+{# ── Score breakdown ── #}
+<details class="mb-3 rounded-xl border border-edge bg-surface-2 px-3 py-2">
+    <summary class="cursor-pointer list-none flex items-center justify-between gap-3 text-[11px] font-medium text-fg-muted">
+        <span>Score {{ '%.1f'|format(paper.rank_score_value) }} · Why this ranked here</span>
+        <span class="text-fg-subtle">Details</span>
+    </summary>
+    <div class="mt-2 grid grid-cols-2 gap-2 text-[11px] text-fg-muted">
+        <div class="rounded-lg bg-surface px-2 py-1.5">Match signals: {{ '%.1f'|format(paper.score_breakdown.match_score) }}</div>
+        <div class="rounded-lg bg-surface px-2 py-1.5">Term matches: {{ '%.1f'|format(paper.score_breakdown.term_score) }}</div>
+        <div class="rounded-lg bg-surface px-2 py-1.5">Resources: {{ '%.1f'|format(paper.score_breakdown.resource_score) }}</div>
+        <div class="rounded-lg bg-surface px-2 py-1.5">AI boost: {{ '%.1f'|format(paper.score_breakdown.ai_bonus) }}</div>
+        <div class="rounded-lg bg-surface px-2 py-1.5">Citations: {{ '%.1f'|format(paper.score_breakdown.citation_bonus|default(0.0)) }}</div>
+        <div class="rounded-lg bg-surface px-2 py-1.5">Venue: {{ '%.1f'|format(paper.score_breakdown.venue_bonus|default(0.0)) }}</div>
+        <div class="rounded-lg bg-surface px-2 py-1.5">For you: {{ '%.1f'|format(paper.score_breakdown.interest_bonus|default(0.0)) }}</div>
+        <div class="rounded-lg bg-surface px-2 py-1.5">Freshness x{{ '%.2f'|format(paper.score_breakdown.recency_multiplier) }}</div>
+        <div class="rounded-lg bg-surface px-2 py-1.5">Feedback: {{ '%.1f'|format(paper.score_breakdown.feedback_bonus) }}</div>
+    </div>
+    {% if paper.ranking_explanations %}
+    <div class="mt-2 space-y-0.5">
+        {% for explanation in paper.ranking_explanations %}
+        <div class="text-[11px] text-fg-muted flex items-center gap-1">
+            <span class="text-priority text-xs">*</span> {{ explanation }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</details>
+
+{# ── User notes ── #}
+<div class="mb-3">
+    <textarea data-paper-id="{{ paper.id }}"
+              oninput="debounceSaveNotes({{ paper.id }}, this)"
+              placeholder="Add a note..."
+              class="notes-textarea input-base w-full text-xs resize-none"
+              rows="2">{{ paper.user_notes or '' }}</textarea>
+</div>
+
+{% if paper.follow_recommendation.available or paper.mute_recommendation.available %}
+<div class="flex flex-wrap items-center gap-2 mb-3">
+    {% if paper.follow_recommendation.available %}
+    <button type="button"
+            onclick="sendRecommendation({{ paper.id }}, 'follow', this)"
+            class="badge badge-outline hover:bg-surface-2">
+        Follow {{ paper.follow_recommendation.label }}
+    </button>
+    {% endif %}
+    {% if paper.mute_recommendation.available %}
+    <button type="button"
+            onclick="sendRecommendation({{ paper.id }}, 'mute', this)"
+            class="badge badge-warn hover:opacity-80">
+        Mute {{ paper.mute_recommendation.label }}
+    </button>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if paper.related_papers %}
+<div class="mb-3">
+    <div class="text-[11px] text-fg-muted mb-1">Related</div>
+    <div class="space-y-1">
+        {% for related in paper.related_papers %}
+        <a href="{{ related.link }}" target="_blank" class="block text-[11px] text-fg-muted hover:text-accent line-clamp-1">
+            {{ related.title }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# ── Footer links ── #}
+<div class="pt-3 border-t border-edge flex items-center gap-2">
+    {% if shell.collections %}
+    <div class="relative" data-collection-dropdown>
+        <button type="button" onclick="toggleCollectionDropdown(this)"
+                class="btn-ghost px-2 py-1.5 text-xs">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        </button>
+        <div class="collection-menu hidden absolute bottom-full left-0 mb-1 w-40 rounded-lg border border-edge bg-overlay shadow-lg z-10 py-1">
+            {% for col in shell.collections %}
+            <button type="button" onclick="togglePaperCollection({{ paper.id }}, {{ col.id }}, this)"
+                    class="block w-full text-left px-3 py-1.5 text-xs text-fg-muted hover:bg-surface-2">{{ col.name }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    {% if mendeley_connected %}
+    {% if paper.mendeley_doc_id %}
+    <button type="button"
+            data-state="done"
+            disabled
+            class="mendeley-sync-btn inline-flex items-center justify-center rounded-lg border border-skip bg-skip-soft px-2.5 py-1.5 text-skip transition-colors"
+            title="Added to Mendeley"
+            aria-label="Added to Mendeley">
+        <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true">
+            <path d="M4.5 10.5l3.5 3.5l7.5-8" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+    </button>
+    {% else %}
+    <button type="button"
+            onclick="sendToMendeley({{ paper.id }}, this)"
+            class="mendeley-sync-btn inline-flex items-center justify-center rounded-lg border border-skip bg-surface px-2.5 py-1.5 text-skip hover:bg-skip-soft transition-colors"
+            title="Send to Mendeley"
+            aria-label="Send to Mendeley">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12.0037 9.1684h.019a2.355 2.355 0 011.5038 4.1655 1.8076 1.8076 0 01-.8561.452 2.348 2.348 0 01-.6487.0923h-.019c-.2246 0-.4421-.033-.6487-.0922a1.8126 1.8126 0 01-.8561-.4521 2.346 2.346 0 01-.8511-1.8106 2.358 2.358 0 012.3569-2.355m-9.9731 9.474c1.2652.1583 2.388-.762 2.5073-2.0573a2.4442 2.4442 0 00-.2136-1.236c-1.7724-3.8889 6.9726-3.978 5.4949-.3078l-.01.016c-.6988 1.1178-.3198 2.5695.841 3.2402.4272.2486.9003.3508 1.3625.3308.4622.02.9354-.0822 1.3624-.3308 1.161-.6717 1.54-2.1224.8412-3.2402l-.01-.016c-1.4778-3.6703 7.2682-3.581 5.4938.3077a2.4462 2.4462 0 00-.2126 1.2361c.1203 1.2953 1.2422 2.2156 2.5083 2.0572a2.345 2.345 0 001.4246-.7368s.5885-.4883.5795-1.7334c-.008-1.0156-.5795-1.578-.5795-1.578a2.2116 2.2116 0 00-1.8145-.6456c-1.6231-.036-1.8637-1.3073-1.4056-3.7033.1685-.4251.2416-.8802.2266-1.3354a3.4166 3.4166 0 00-2.1304-3.2953c-.039-.017-.0782-.03-.1183-.0461a1.5138 1.5138 0 00-.1343-.0461 3.4156 3.4156 0 00-4.004 1.4526c-.8171.8973-1.187 1.4417-2.0272 1.4417-.799 0-1.211-.5444-2.0271-1.4417a3.4126 3.4126 0 00-4.1374-1.4075c-.0401.016-.0792.029-.1193.0461a3.4156 3.4156 0 00-2.1294 3.2953c-.016.4552.0582.9103.2256 1.3354.4581 2.397.2175 3.6672-1.4045 3.7033-.795-.0852-1.3885.2426-1.988.8431-.6016.5995-.5514 2.2056 0 2.9063.4.5103.9423.8632 1.598.9454"></path>
+        </svg>
+    </button>
+    {% endif %}
+    {% endif %}
+    <a href="{{ paper.link }}" target="_blank"
+       class="btn-ghost flex-1 justify-center py-1.5 text-xs">arXiv</a>
+    <a href="/api/papers/{{ paper.id }}/bibtex"
+       class="btn-ghost flex-1 justify-center py-1.5 text-xs">BibTeX</a>
+    <a href="{{ paper.pdf_link }}" target="_blank" class="paper-pdf-link btn-primary flex-1 justify-center py-1.5 text-xs">PDF</a>
+</div>

@@ -1,6 +1,129 @@
 @import "tailwindcss";
 
 @source "../../app/templates/**/*.html";
+/* The classic UI (templates/classic/) is styled by the precompiled
+   style.classic.css, not this Tailwind build — don't scan its legacy classes. */
+@source not "../../app/templates/classic/**/*.html";
+
+/* `dark:` keys off the user-controlled data-theme attribute, not prefers-color-scheme */
+@custom-variant dark (&:where(html[data-theme="dark"], html[data-theme="dark"] *));
+
+/*
+ * Design tokens. Semantic CSS custom properties resolved at use-site, so the
+ * whole UI re-themes when html[data-theme] flips. Utilities below come from
+ * the @theme inline mapping (bg-canvas, text-fg-muted, border-edge, ...).
+ */
+:root {
+    /* surfaces */
+    --canvas:    #f6f7f9;
+    --surface:   #ffffff;
+    --surface-2: #f1f5f9;
+    --overlay:   #ffffff;
+    /* text */
+    --fg:        #0f172a;
+    --fg-muted:  #475569;
+    --fg-subtle: #94a3b8;
+    /* borders */
+    --edge:        #e2e8f0;
+    --edge-strong: #cbd5e1;
+    /* single accent */
+    --accent:       #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-fg:    #ffffff;
+    --accent-soft:  #eef2ff;
+    /* triage semantics */
+    --save:        #059669;
+    --save-soft:   #ecfdf5;
+    --priority:      #d97706;
+    --priority-soft: #fffbeb;
+    --skip:        #e11d48;
+    --skip-soft:   #fff1f2;
+    --info:        #2563eb;
+    --info-soft:   #eff6ff;
+}
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --canvas:    #0b1220;
+    --surface:   #111a2c;
+    --surface-2: #1b2334;
+    --overlay:   #1e293b;
+    --fg:        #f1f5f9;
+    --fg-muted:  #b6c2d4;
+    --fg-subtle: #7c8aa0;
+    --edge:        #283449;
+    --edge-strong: #3b4961;
+    --accent:       #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-fg:    #101426;
+    --accent-soft:  #272c4a;
+    --save:        #34d399;
+    --save-soft:   #0c2a22;
+    --priority:      #fbbf24;
+    --priority-soft: #2c2210;
+    --skip:        #fb7185;
+    --skip-soft:   #34141c;
+    --info:        #60a5fa;
+    --info-soft:   #14233c;
+}
+
+@theme inline {
+    --color-canvas: var(--canvas);
+    --color-surface: var(--surface);
+    --color-surface-2: var(--surface-2);
+    --color-overlay: var(--overlay);
+    --color-fg: var(--fg);
+    --color-fg-muted: var(--fg-muted);
+    --color-fg-subtle: var(--fg-subtle);
+    --color-edge: var(--edge);
+    --color-edge-strong: var(--edge-strong);
+    --color-accent: var(--accent);
+    --color-accent-hover: var(--accent-hover);
+    --color-accent-fg: var(--accent-fg);
+    --color-accent-soft: var(--accent-soft);
+    --color-save: var(--save);
+    --color-save-soft: var(--save-soft);
+    --color-priority: var(--priority);
+    --color-priority-soft: var(--priority-soft);
+    --color-skip: var(--skip);
+    --color-skip-soft: var(--skip-soft);
+    --color-info: var(--info);
+    --color-info-soft: var(--info-soft);
+}
+
+@layer components {
+    /* Badge hierarchy: one tinted chip per row (badge-accent for match type);
+       venue/neutral facts use outline/neutral; warnings (Dup, matched terms)
+       use badge-warn; numeric stats are quiet text (stat-quiet), not pills. */
+    .badge {
+        @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap;
+    }
+    .badge-accent  { @apply bg-accent-soft text-accent; }
+    .badge-neutral { @apply bg-surface-2 text-fg-muted; }
+    .badge-outline { @apply border border-edge bg-surface text-fg-muted; }
+    .badge-warn    { @apply bg-priority-soft text-priority; }
+    .stat-quiet {
+        @apply inline-flex items-center gap-1 text-[11px] text-fg-subtle tabular-nums whitespace-nowrap;
+    }
+    .btn-primary {
+        @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50;
+    }
+    .btn-ghost {
+        @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-edge bg-surface px-3 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg;
+    }
+    .input-base {
+        @apply rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-transparent focus:ring-2 focus:ring-accent;
+    }
+    .side-link {
+        @apply flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg;
+    }
+    .side-link-active {
+        @apply bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent;
+    }
+    .side-heading {
+        @apply px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-fg-subtle;
+    }
+}
 
 @keyframes slideUp {
     from { opacity: 0; transform: translateY(12px); }
