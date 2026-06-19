@@ -29,6 +29,8 @@ Open **http://127.0.0.1:5000**, click **Run Scrape** (top bar), and you're done.
 
 The interface is a left **sidebar** (Inbox and Saved with counts, your collections, saved searches, and filter groups) plus a **top bar** (search, sort, density toggle, and Run Scrape). The inbox is a dense, keyboard-driven triage list by default — save or skip with `s`/`x`, expand a row with `d` — and you can switch to a **Visual grid** that browses papers by their first-page teaser figure.
 
+Prefer the older look? A **Classic UI** link at the bottom of the sidebar switches the whole app back to the pre-redesign interface; a **New UI** link in the classic top bar switches back. The choice is remembered per browser.
+
 If you skip the copy step, the app will run from `config.example.yaml` defaults and create `instance/config.yaml` only after your first saved change.
 
 > **Note:** this app has **no authentication** and is designed for single-user localhost use. It refuses to bind to a non-loopback address unless you pass `--expose`, which should only be used behind a reverse-proxy that adds its own auth.
