@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Blueprint, current_app, render_template, request, send_file
+from flask import Blueprint, current_app, request, send_file
 from flask_sqlalchemy.query import Query
 
 from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
@@ -17,6 +18,7 @@ from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_sc
 from app.services.related import build_vector, top_related_papers
 from app.services.text import now_utc
 from app.services.thumbnail_generator import generate_thumbnail
+from app.ui import render_ui
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -30,6 +32,26 @@ TIMEFRAME_DAYS = {
 VIEW_OPTIONS = {"inbox", "saved"}
 SORT_OPTIONS = {option.value for option in SortOption}
 RESOURCE_FILTER_OPTIONS = {"all", "available", "missing"}
+
+# Mendeley connectivity only gates a decorative "send to Mendeley" affordance, but
+# check_connection() hits the network when a token exists — too costly to run on
+# every dashboard navigation. Cache the boolean briefly so it stays snappy. The
+# cache lives on the app (not module-global) so it resets per app instance and
+# never leaks status across tests.
+_MENDELEY_STATUS_TTL = 60.0
+
+
+def _mendeley_connected() -> bool:
+    from app.services.mendeley import MendeleyClient
+
+    cache = current_app.extensions.setdefault("mendeley_status_cache", {"ts": 0.0, "connected": False})
+    now = time.monotonic()
+    if now - float(cache["ts"]) < _MENDELEY_STATUS_TTL:
+        return bool(cache["connected"])
+    connected = MendeleyClient().check_connection().get("status") == "connected"
+    cache["ts"] = now
+    cache["connected"] = connected
+    return connected
 
 
 def _parse_page(raw_value: str | None) -> int:
@@ -306,8 +328,6 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
 
 @dashboard_bp.route("/")
 def index():
-    from app.services.mendeley import MendeleyClient
-
     config = current_app.config["SCRAPER_CONFIG"]
     view = request.args.get("view", "inbox")
     if view not in VIEW_OPTIONS:
@@ -473,9 +493,9 @@ def index():
         .all()
     )
     _enrich_cards_with_feedback_and_related(papers, candidate_pool, config)
-    mendeley_connected = MendeleyClient().check_connection().get("status") == "connected"
+    mendeley_connected = _mendeley_connected()
 
-    return render_template(
+    return render_ui(
         "dashboard.html",
         papers=papers,
         pagination=pagination,

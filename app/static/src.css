@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 @source "../../app/templates/**/*.html";
+/* The classic UI (templates/classic/) is styled by the precompiled
+   style.classic.css, not this Tailwind build — don't scan its legacy classes. */
+@source not "../../app/templates/classic/**/*.html";
 
 /* `dark:` keys off the user-controlled data-theme attribute, not prefers-color-scheme */
 @custom-variant dark (&:where(html[data-theme="dark"], html[data-theme="dark"] *));

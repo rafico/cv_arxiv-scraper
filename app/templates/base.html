@@ -102,6 +102,10 @@
                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     Help
                 </a>
+                <a href="/ui/classic" class="side-link" title="Switch to the previous interface">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l2-3h14l2 3M3 7h18M9 11h6"/></svg>
+                    Classic UI
+                </a>
                 <button id="theme-toggle" type="button" onclick="toggleTheme()"
                         class="side-link w-full" aria-label="Toggle dark mode" title="Toggle dark mode">
                     <span id="theme-toggle-icon" aria-hidden="true">◐</span>
@@ -112,7 +116,7 @@
 
         <div class="flex flex-1 flex-col min-w-0">
             {# ── Top bar ── #}
-            <header class="sticky top-0 z-20 flex items-center gap-3 h-14 px-4 sm:px-6 border-b border-edge bg-surface/95 backdrop-blur">
+            <header class="sticky top-0 z-20 flex items-center gap-3 h-14 px-4 sm:px-6 border-b border-edge bg-surface">
                 <button onclick="toggleSidebar()" class="lg:hidden p-1.5 rounded-md text-fg-muted hover:bg-surface-2" aria-label="Open menu">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                 </button>
