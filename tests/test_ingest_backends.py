@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from app.services.arxiv_adapter import result_to_entry
 from app.services.enrichment import parse_feed_entries, query_arxiv_api
 from app.services.ingest import ArxivApiBackend, PaperCandidate, RssFeedBackend
+from app.services.ingest.base import clean_abstract, parse_publication_dt
 
 RSS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -72,6 +73,36 @@ ARXIV_API_XML_RESUME_SECOND_PAGE = """<?xml version="1.0" encoding="UTF-8"?>
   </entry>
 </feed>
 """
+
+
+class IngestBaseHelperTests(TestCase):
+    def test_parse_publication_dt_handles_rfc2822_rss_dates(self):
+        self.assertEqual(
+            parse_publication_dt("Wed, 01 Apr 2026 12:34:56 GMT"),
+            (date(2026, 4, 1), "2026-04-01"),
+        )
+
+    def test_parse_publication_dt_handles_iso8601_api_dates(self):
+        # The arXiv API (Atom) uses ISO-8601, which email.utils cannot parse.
+        self.assertEqual(parse_publication_dt("2024-01-01T18:59:59Z"), (date(2024, 1, 1), "2024-01-01"))
+        self.assertEqual(parse_publication_dt("2024-01-01T18:59:59-05:00"), (date(2024, 1, 1), "2024-01-01"))
+
+    def test_parse_publication_dt_returns_unknown_for_garbage(self):
+        self.assertEqual(parse_publication_dt("not a date"), (None, "Date Unknown"))
+        self.assertEqual(parse_publication_dt(None), (None, "Date Unknown"))
+
+    def test_clean_abstract_strips_arxiv_rss_announce_prefix(self):
+        raw = "arXiv:2511.20302v3 Announce Type: replace Abstract: The real abstract body."
+        self.assertEqual(clean_abstract(raw), "The real abstract body.")
+        for announce in ("new", "cross", "replace-cross"):
+            self.assertEqual(
+                clean_abstract(f"arXiv:2604.00001v1 Announce Type: {announce} Abstract: Body text."),
+                "Body text.",
+            )
+
+    def test_clean_abstract_leaves_normal_abstract_and_strips_html(self):
+        self.assertEqual(clean_abstract("<p>Plain abstract.</p>"), "Plain abstract.")
+        self.assertEqual(clean_abstract("A study of arXiv usage patterns."), "A study of arXiv usage patterns.")
 
 
 class PaperCandidateTests(TestCase):
@@ -140,6 +171,9 @@ class ArxivApiBackendTests(TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].arxiv_id, "2604.00002")
         self.assertEqual(candidates[0].doi, "10.48550/arXiv.2604.00002")
+        # The API returns ISO-8601 <published>; it must still yield a real date.
+        self.assertEqual(candidates[0].publication_dt, date(2026, 4, 1))
+        self.assertEqual(candidates[0].publication_date, "2026-04-01")
         self.assertEqual(
             mock_request.call_args.kwargs["params"]["search_query"],
             "(cat:cs.CV OR cat:cs.LG) AND submittedDate:[202604010000 TO 202604022359]",

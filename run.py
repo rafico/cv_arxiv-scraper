@@ -121,6 +121,10 @@ def main(argv=None, *, app_factory=create_app, timer_factory=Timer, browser_open
         "workers": args.workers,
         "worker_class": "gthread",
         "threads": args.threads,
+        # Historical/backfill scrapes run synchronously and can take minutes;
+        # the gunicorn default (30s) would kill the worker mid-request (502).
+        "timeout": int(os.environ.get("GUNICORN_TIMEOUT", "600")),
+        "graceful_timeout": int(os.environ.get("GUNICORN_GRACEFUL_TIMEOUT", "30")),
     }
     _create_gunicorn_application(app, options).run()
     return 0

@@ -38,6 +38,8 @@ class RunEntryPointTests(unittest.TestCase):
                 "workers": 4,
                 "worker_class": "gthread",
                 "threads": 8,
+                "timeout": 600,
+                "graceful_timeout": 30,
             },
         )
         fake_runner.run.assert_called_once_with()

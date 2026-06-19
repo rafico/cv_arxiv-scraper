@@ -208,7 +208,11 @@ class DigestServiceQaTests(FlaskDBTestCase):
         response = self.client.get("/settings/digest-preview")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["X-Digest-Subject"], preview["subject"])
+        header_value = response.headers["X-Digest-Subject"]
+        # The real WSGI server encodes headers as latin-1; a raw unicode subject
+        # (the em-dash separator) would crash it, so the header must stay latin-1 safe.
+        header_value.encode("latin-1")
+        self.assertEqual(str(make_header(decode_header(header_value))), preview["subject"])
         self.assertEqual(response.get_data(as_text=True), preview["html"])
 
     def test_get_email_config_defaults_and_custom_values(self):
