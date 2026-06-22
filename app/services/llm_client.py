@@ -10,7 +10,7 @@ from pathlib import Path
 try:  # pragma: no cover - exercised indirectly in integration paths
     from openai import OpenAI
 except ImportError:  # pragma: no cover - depends on local environment
-    OpenAI = None  # type: ignore[assignment]
+    OpenAI = None
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_KEY_PATH = _PROJECT_ROOT / ".llm_api_key"

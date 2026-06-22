@@ -44,7 +44,7 @@ class OpenAlexProvider(EnrichmentProvider):
         self.ttl_hours = ttl_hours
         self._request_fn = request_fn
 
-    def fetch_batch(
+    def fetch_batch(  # type: ignore[override]  # provider-specific kwargs; base Protocol uses **kwargs
         self,
         arxiv_ids: list[str],
         session=None,

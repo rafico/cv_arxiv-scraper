@@ -13,7 +13,7 @@ import yaml
 # Module-level lock to serialize config read-modify-write cycles.
 _CONFIG_LOCK = threading.Lock()
 
-DEFAULT_PREFERENCES = {
+DEFAULT_PREFERENCES: dict[str, dict] = {
     "ranking": {
         "author_weight": 44.0,
         "affiliation_weight": 26.0,

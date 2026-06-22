@@ -335,11 +335,10 @@ def _reclaim_orphaned_scrape_runs(app, *, stale_after_hours: int = 2) -> None:
 def create_app(config_overrides: dict | None = None) -> Flask:
     overrides = dict(config_overrides or {})
     instance_path_override = overrides.pop("INSTANCE_PATH", None)
-    flask_kwargs = {"instance_relative_config": True}
-    if instance_path_override is not None:
-        flask_kwargs["instance_path"] = str(Path(instance_path_override).expanduser().resolve())
-
-    app = Flask(__name__, **flask_kwargs)
+    resolved_instance_path = (
+        str(Path(instance_path_override).expanduser().resolve()) if instance_path_override is not None else None
+    )
+    app = Flask(__name__, instance_relative_config=True, instance_path=resolved_instance_path)
     instance_path = Path(app.instance_path)
     instance_path.mkdir(parents=True, exist_ok=True)
     app.config.update(
