@@ -185,3 +185,34 @@ def test_extract_teaser_handles_invalid_bytes(tmp_path):
 
     assert extract_teaser_image(b"not a pdf", out_path) is False
     assert not out_path.exists()
+
+
+def test_thumbnail_warmer_dedupes_in_flight_keys(monkeypatch):
+    """A burst of requests for the same paper triggers only one generation while
+    the first is still running (so lazy <img> floods don't fan out into N renders)."""
+    import threading
+
+    from app.services import thumbnail_warmer as tw
+
+    calls: list[str] = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_generate(storage_key, pdf_link, static_dir):
+        calls.append(storage_key)
+        started.set()
+        release.wait(timeout=2)
+        return True
+
+    monkeypatch.setattr(tw, "generate_thumbnail", fake_generate)
+    warmer = tw.ThumbnailWarmer(max_workers=1)
+    try:
+        warmer.warm("1234.5678", "http://example/pdf", "/tmp")
+        assert started.wait(timeout=2)  # first job is running, key is in-flight
+        warmer.warm("1234.5678", "http://example/pdf", "/tmp")  # deduped
+        release.set()
+        warmer._executor.shutdown(wait=True)
+    finally:
+        release.set()
+
+    assert calls == ["1234.5678"]

@@ -39,7 +39,16 @@ def build_parser(default_port=DEFAULT_PORT, default_workers=DEFAULT_WORKERS):
         default=default_workers,
         help=("Number of gunicorn workers. Defaults to 1 because scrape progress events are stored in process memory."),
     )
-    parser.add_argument("--threads", type=int, default=2, help="Number of threads per worker")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=6,
+        help=(
+            "Number of threads per worker. Defaults to 6 so an open scrape SSE stream "
+            "(which pins one thread) plus slow requests can't starve the UI; workers "
+            "must stay 1 because scrape job state lives in process memory."
+        ),
+    )
     parser.add_argument("--no-browser", action="store_true", help="Don't open browser on start")
     parser.add_argument(
         "--expose",

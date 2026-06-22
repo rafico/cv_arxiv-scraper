@@ -293,31 +293,69 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertEqual(response.mimetype, "image/png")
         self.assertEqual(response.get_data(), b"png-bytes")
 
-    def test_paper_thumbnail_route_generates_missing_thumbnail(self):
+    def test_paper_thumbnail_route_warms_in_background_when_missing(self):
         paper = Paper.query.filter_by(title="Paper 0").one()
 
-        def _fake_generate_thumbnail(arxiv_id, pdf_link, static_root, session=None, pdf_content=None):
-            thumbnail_path = Path(static_root) / "thumbnails" / f"{arxiv_id}.png"
-            thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
-            thumbnail_path.write_bytes(b"generated-png")
-            return True
-
-        with patch("app.routes.dashboard.generate_thumbnail", side_effect=_fake_generate_thumbnail) as mock_generate:
-            response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.mimetype, "image/png")
-        self.assertEqual(response.get_data(), b"generated-png")
-        mock_generate.assert_called_once_with(paper.arxiv_id, paper.pdf_link, Path(self.app.static_folder))
-
-    def test_paper_thumbnail_route_returns_404_when_thumbnail_cannot_be_generated(self):
-        paper = Paper.query.filter_by(title="Paper 0").one()
-
-        with patch("app.routes.dashboard.generate_thumbnail", return_value=False) as mock_generate:
+        # A missing thumbnail must NOT be generated inline (a PDF download + render
+        # would block the worker thread and freeze the UI). The route returns an
+        # uncacheable placeholder and enqueues a background warm instead.
+        with patch("app.routes.dashboard.THUMBNAIL_WARMER.warm") as mock_warm:
             response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
 
         self.assertEqual(response.status_code, 404)
-        mock_generate.assert_called_once_with(paper.arxiv_id, paper.pdf_link, Path(self.app.static_folder))
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+        mock_warm.assert_called_once_with(paper.arxiv_id, paper.pdf_link, Path(self.app.static_folder))
+
+    def test_teaser_route_warms_in_background_when_both_missing(self):
+        paper = Paper.query.filter_by(title="Paper 0").one()
+
+        with patch("app.routes.dashboard.THUMBNAIL_WARMER.warm") as mock_warm:
+            response = self.client.get(f"/papers/{paper.id}/teaser.png")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+        mock_warm.assert_called_once_with(paper.arxiv_id, paper.pdf_link, Path(self.app.static_folder))
+
+    def test_mendeley_status_stale_refreshes_off_request_thread(self):
+        import threading
+        import time as _time
+
+        from app.routes import dashboard as dash
+
+        cache = self.app.extensions.setdefault(
+            "mendeley_status_cache", {"ts": 0.0, "connected": False, "refreshing": False}
+        )
+        # Warm-but-stale: a connected value cached just past the TTL.
+        cache["ts"] = _time.monotonic() - (dash._MENDELEY_STATUS_TTL + 1)
+        cache["connected"] = True
+        cache["refreshing"] = False
+
+        # Gate the probe so it can't finish until after we observe the immediate
+        # return — proving the request thread does not wait on the network.
+        release = threading.Event()
+
+        def _blocking_check():
+            release.wait(timeout=5)
+            return {"status": "no_token"}
+
+        with self.app.test_request_context("/"):
+            with patch(
+                "app.services.mendeley.MendeleyClient.check_connection",
+                side_effect=_blocking_check,
+            ) as mock_check:
+                result = dash._mendeley_connected()
+                # Stale cached value served immediately, while the slow probe is
+                # still blocked on the background thread.
+                self.assertTrue(result)
+                self.assertTrue(cache["refreshing"])
+                release.set()
+                # Drain the single-thread refresh pool (FIFO) so the refresh has
+                # finished before asserting its effect.
+                dash._MENDELEY_EXECUTOR.submit(lambda: None).result(timeout=5)
+
+        mock_check.assert_called_once()
+        self.assertFalse(cache["connected"])
+        self.assertFalse(cache["refreshing"])
 
     def test_paper_thumbnail_route_rejects_traversal_arxiv_id(self):
         paper = Paper(
@@ -344,11 +382,11 @@ class DashboardRouteTests(FlaskDBTestCase):
         db.session.add(paper)
         db.session.commit()
 
-        with patch("app.routes.dashboard.generate_thumbnail") as mock_generate:
+        with patch("app.routes.dashboard.THUMBNAIL_WARMER.warm") as mock_warm:
             response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
 
         self.assertEqual(response.status_code, 404)
-        mock_generate.assert_not_called()
+        mock_warm.assert_not_called()
 
     def test_paper_thumbnail_route_rejects_absolute_path_arxiv_id(self):
         paper = Paper(
@@ -375,11 +413,11 @@ class DashboardRouteTests(FlaskDBTestCase):
         db.session.add(paper)
         db.session.commit()
 
-        with patch("app.routes.dashboard.generate_thumbnail") as mock_generate:
+        with patch("app.routes.dashboard.THUMBNAIL_WARMER.warm") as mock_warm:
             response = self.client.get(f"/papers/{paper.id}/thumbnail.png")
 
         self.assertEqual(response.status_code, 404)
-        mock_generate.assert_not_called()
+        mock_warm.assert_not_called()
 
     def test_paper_thumbnail_route_accepts_legacy_arxiv_id_with_slash(self):
         paper = Paper(
