@@ -8,7 +8,16 @@ import os
 import threading
 from pathlib import Path
 
-import numpy as np
+# faiss-cpu and torch each bundle their own copy of libgomp (GNU OpenMP). Loading
+# two OpenMP runtimes into one process corrupts the heap (observed as SIGSEGV /
+# "malloc(): unaligned tcache chunk detected" during the scrape embedding stage).
+# Pin OpenMP to a single thread before faiss/torch (imported lazily below) load.
+# Overridable via the env var; the thread count is also applied programmatically
+# in _load_index()/_load_model() as defence in depth.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+_OMP_THREADS = max(1, int(os.environ.get("OMP_NUM_THREADS", "1") or "1"))
+
+import numpy as np  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +61,12 @@ class EmbeddingService:
     def _load_index(self) -> None:
         import faiss
 
+        # Keep faiss' OpenMP pool single-threaded to avoid the dual-libgomp crash.
+        try:
+            faiss.omp_set_num_threads(_OMP_THREADS)
+        except Exception:  # pragma: no cover - older faiss builds
+            pass
+
         if self._index_path.exists() and self._id_map_path.exists():
             self._index = faiss.read_index(str(self._index_path))
             with open(self._id_map_path) as f:
@@ -66,6 +81,13 @@ class EmbeddingService:
     def _load_model(self):
         if self._model is not None:
             return
+        try:
+            import torch
+
+            # Match torch' OpenMP pool to faiss' so the two libgomp copies don't race.
+            torch.set_num_threads(_OMP_THREADS)
+        except Exception:  # pragma: no cover - torch optional/absent
+            pass
         from sentence_transformers import SentenceTransformer
 
         last_exc: Exception | None = None
@@ -315,6 +337,20 @@ class EmbeddingService:
 
     def index_count(self) -> int:
         return self._index.ntotal
+
+    @property
+    def index_dir(self) -> Path:
+        return self._index_dir
+
+
+def add_papers_to_index(index_dir: str, paper_ids: list[int], texts: list[str], vectors: list | None = None) -> int:
+    """Load the on-disk index, add papers, and persist. Importable + dependency-free
+    (no Flask/DB) so it can run in an isolated subprocess via run_isolated()."""
+    service = EmbeddingService(index_dir)
+    added = service.add_papers(paper_ids, texts, vectors=vectors)
+    if added:
+        service.save()
+    return added
 
 
 def get_embedding_service(app=None) -> EmbeddingService:

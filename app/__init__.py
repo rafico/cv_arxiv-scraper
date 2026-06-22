@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 from flask import Flask
+from sqlalchemy import event
 
 from app.models import db
 from app.rank import get_preferences
@@ -275,6 +276,26 @@ def _ensure_secret_key(instance_path: Path) -> str:
     return key
 
 
+def _configure_sqlite_pragmas(engine) -> None:
+    """Enable WAL + a generous busy timeout for SQLite so dashboard reads don't
+    stall on (or error behind) scrape/feedback write commits. No-op for other
+    backends. Registered as a ``connect`` listener so every pooled connection —
+    across the gthread worker threads — gets the per-connection PRAGMAs; WAL is a
+    persistent DB property set on the first connect."""
+    if engine.dialect.name != "sqlite":
+        return
+
+    @event.listens_for(engine, "connect")
+    def _set_pragmas(dbapi_connection, _record):  # pragma: no cover - runs on real connects
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cursor.close()
+
+
 def create_app(config_overrides: dict | None = None) -> Flask:
     overrides = dict(config_overrides or {})
     instance_path_override = overrides.pop("INSTANCE_PATH", None)
@@ -288,6 +309,10 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     app.config.update(
         SQLALCHEMY_DATABASE_URI=DEFAULT_DATABASE_URI,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        # Wait up to 30s for a lock instead of pysqlite's 5s default so a dashboard
+        # read never errors out behind a scrape's write commit (WAL set below makes
+        # the wait rare to begin with).
+        SQLALCHEMY_ENGINE_OPTIONS={"connect_args": {"timeout": 30}},
         SECRET_KEY=_ensure_secret_key(instance_path),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -314,6 +339,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
 
     db.init_app(app)
     with app.app_context():
+        _configure_sqlite_pragmas(db.engine)
         db.create_all()
         ensure_schema()
 

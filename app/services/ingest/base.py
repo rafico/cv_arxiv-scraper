@@ -6,7 +6,7 @@ import email.utils
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Protocol
 
@@ -27,19 +27,38 @@ def parse_publication_dt(published: str | None) -> tuple[date | None, str]:
     if not published:
         return None, "Date Unknown"
 
+    parsed_date: date | None = None
+    # RSS feeds use RFC 2822 ("Mon, 01 Jan 2024 18:59:59 GMT").
     try:
-        parsed = email.utils.parsedate_to_datetime(published)
-        parsed_date = parsed.date()
-        return parsed_date, parsed_date.isoformat()
-    except Exception:
+        parsed_date = email.utils.parsedate_to_datetime(published).date()
+    except (TypeError, ValueError):
+        parsed_date = None
+
+    # The arXiv API (Atom) uses ISO 8601 ("2024-01-01T18:59:59Z"), which
+    # email.utils cannot parse — fall back so backfilled papers keep their date.
+    if parsed_date is None:
+        try:
+            parsed_date = datetime.fromisoformat(published.strip().replace("Z", "+00:00")).date()
+        except (AttributeError, ValueError):
+            parsed_date = None
+
+    if parsed_date is None:
         return None, "Date Unknown"
+    return parsed_date, parsed_date.isoformat()
+
+
+# The arXiv RSS feed wraps each abstract with a boilerplate header, e.g.
+# "arXiv:2511.20302v3 Announce Type: replace Abstract: <real abstract>".
+# Announce types include new / cross / replace / replace-cross, hence [\w-]+.
+_ANNOUNCE_PREFIX_RE = re.compile(r"^arXiv:\S+\s+Announce Type:\s+[\w-]+\s+Abstract:\s*", re.IGNORECASE)
 
 
 def clean_abstract(summary: str | None) -> str:
     if not summary:
         return ""
     no_html = re.sub(r"<[^>]+>", " ", summary)
-    return clean_whitespace(no_html)
+    cleaned = clean_whitespace(no_html)
+    return _ANNOUNCE_PREFIX_RE.sub("", cleaned, count=1)
 
 
 def extract_author_names(entry: feedparser.FeedParserDict) -> list[str]:

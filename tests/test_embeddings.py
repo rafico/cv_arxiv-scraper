@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from app.services.embeddings import EmbeddingService, reset_embedding_service
+
+
+def test_importing_embeddings_pins_openmp_to_avoid_dual_libgomp_crash():
+    # faiss-cpu and torch each bundle libgomp; loading both with multithreaded
+    # OpenMP corrupts the heap. Importing the module must pin OMP to a thread count.
+    from app.services import embeddings
+
+    assert os.environ.get("OMP_NUM_THREADS")
+    assert embeddings._OMP_THREADS >= 1
 
 
 @pytest.fixture(autouse=True)

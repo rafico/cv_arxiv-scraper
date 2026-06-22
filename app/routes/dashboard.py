@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from app.services.preferences import first_author_name, get_preferences
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score, generate_ranking_explanation
 from app.services.related import build_vector, top_related_papers
 from app.services.text import now_utc
-from app.services.thumbnail_generator import generate_thumbnail
+from app.services.thumbnail_warmer import THUMBNAIL_WARMER
 from app.ui import render_ui
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -34,24 +35,49 @@ SORT_OPTIONS = {option.value for option in SortOption}
 RESOURCE_FILTER_OPTIONS = {"all", "available", "missing"}
 
 # Mendeley connectivity only gates a decorative "send to Mendeley" affordance, but
-# check_connection() hits the network when a token exists — too costly to run on
-# every dashboard navigation. Cache the boolean briefly so it stays snappy. The
-# cache lives on the app (not module-global) so it resets per app instance and
-# never leaks status across tests.
+# check_connection() hits the network when a token exists — up to ~40s (a 10s GET
+# plus a 30s token refresh) which, on the 1-2 thread worker, freezes the whole UI.
+# A short TTL cache alone still pays that stall once per TTL on the request thread,
+# so we refresh OFF the request thread (stale-while-revalidate): the handler reads
+# the last known boolean and never blocks. The cache lives on the app (not
+# module-global) so it resets per app instance and never leaks status across tests.
 _MENDELEY_STATUS_TTL = 60.0
+
+# Dedicated single-thread pool for the background connectivity refresh. Kept off
+# the thumbnail-warmer pool (whose renders can run for minutes) so a quick network
+# probe is never queued behind a slow PDF render.
+_MENDELEY_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mendeley")
+
+
+def _refresh_mendeley_status(cache: dict) -> None:
+    from app.services.mendeley import MendeleyClient
+
+    try:
+        connected = MendeleyClient().check_connection().get("status") == "connected"
+    except Exception:  # pragma: no cover - defensive: never let a probe failure crash the worker
+        connected = False
+    cache["connected"] = connected
+    cache["ts"] = time.monotonic()
+    cache["refreshing"] = False
 
 
 def _mendeley_connected() -> bool:
-    from app.services.mendeley import MendeleyClient
-
-    cache = current_app.extensions.setdefault("mendeley_status_cache", {"ts": 0.0, "connected": False})
-    now = time.monotonic()
-    if now - float(cache["ts"]) < _MENDELEY_STATUS_TTL:
+    cache = current_app.extensions.setdefault(
+        "mendeley_status_cache", {"ts": 0.0, "connected": False, "refreshing": False}
+    )
+    if cache["ts"] == 0.0:
+        # Cold cache: populate it synchronously once (bounded by the lowered Mendeley
+        # timeouts) so the button is correct on first load. After this the handler
+        # never blocks on the network again.
+        _refresh_mendeley_status(cache)
         return bool(cache["connected"])
-    connected = MendeleyClient().check_connection().get("status") == "connected"
-    cache["ts"] = now
-    cache["connected"] = connected
-    return connected
+
+    now = time.monotonic()
+    if now - float(cache["ts"]) >= _MENDELEY_STATUS_TTL and not cache.get("refreshing"):
+        # Stale: kick a background refresh and serve the last known value meanwhile.
+        cache["refreshing"] = True
+        _MENDELEY_EXECUTOR.submit(_refresh_mendeley_status, cache)
+    return bool(cache["connected"])
 
 
 def _parse_page(raw_value: str | None) -> int:
@@ -527,6 +553,14 @@ def index():
     )
 
 
+def _missing_thumbnail_response():
+    # Don't generate inline — a PDF download + subprocess render can hold a worker
+    # thread for minutes and freeze the UI. The <img onerror> handler shows a
+    # placeholder now; `no-store` makes the browser re-request on the next
+    # navigation, by which point the background warm has cached the PNG.
+    return ("", 404, {"Cache-Control": "no-store"})
+
+
 @dashboard_bp.route("/papers/<int:paper_id>/thumbnail.png")
 def paper_thumbnail(paper_id: int):
     paper = Paper.query.get_or_404(paper_id)
@@ -541,17 +575,16 @@ def paper_thumbnail(paper_id: int):
         return ("", 404)
 
     if not thumbnail_path.exists():
-        generate_thumbnail(storage_key, paper.pdf_link, static_root)
-
-    if not thumbnail_path.exists():
-        return ("", 404)
+        THUMBNAIL_WARMER.warm(storage_key, paper.pdf_link, static_root)
+        return _missing_thumbnail_response()
 
     return send_file(thumbnail_path, mimetype="image/png", conditional=True, max_age=86400)
 
 
 @dashboard_bp.route("/papers/<int:paper_id>/teaser.png")
 def paper_teaser(paper_id: int):
-    """Teaser figure extracted from the PDF; falls back to the page-1 thumbnail."""
+    """Teaser figure extracted from the PDF (the warmer writes it alongside the
+    page-1 thumbnail from a single download)."""
     paper = Paper.query.get_or_404(paper_id)
     storage_key = _thumbnail_storage_key(paper)
     if not storage_key or not paper.pdf_link:
@@ -565,4 +598,6 @@ def paper_teaser(paper_id: int):
 
     if teaser_path.exists():
         return send_file(teaser_path, mimetype="image/png", conditional=True, max_age=86400)
+    # Serve the page-1 thumbnail if it's already cached (instant); otherwise
+    # paper_thumbnail enqueues a background warm and returns a placeholder.
     return paper_thumbnail(paper_id)

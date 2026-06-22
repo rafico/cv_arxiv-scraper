@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
@@ -30,6 +31,10 @@ from app.services.summary import extract_topic_tags, generate_llm_summary, gener
 from app.services.text import now_utc
 
 LOGGER = logging.getLogger(__name__)
+
+# Wall-clock budget for an isolated native stage (embeddings / PDF render) before the
+# child is terminated and the stage is skipped as non-fatal.
+_NATIVE_STAGE_TIMEOUT = float(os.environ.get("CV_ARXIV_NATIVE_STAGE_TIMEOUT", "900"))
 
 
 EventCallback = Callable[[str, dict], None] | None
@@ -348,9 +353,11 @@ def _generate_embeddings(app, results: list[dict]) -> None:
     """Generate SPECTER2 embeddings for newly scraped papers and add to the FAISS index."""
     try:
         from app.models import Paper
-        from app.services.embeddings import get_embedding_service
+        from app.services.embeddings import add_papers_to_index, get_embedding_service, reset_embedding_service
+        from app.services.subprocess_runner import run_isolated
 
         service = get_embedding_service(app)
+        index_dir = str(service.index_dir)
         with app.app_context():
             paper_ids = []
             texts = []
@@ -363,10 +370,15 @@ def _generate_embeddings(app, results: list[dict]) -> None:
                     # Reuse the vector computed during interest scoring, if any.
                     vectors.append(result.get("embedding"))
 
-            if paper_ids:
-                added = service.add_papers(paper_ids, texts, vectors=vectors)
-                service.save()
-                LOGGER.info("Generated embeddings for %d papers", added)
+        if paper_ids:
+            # The faiss + torch work is the confirmed native-crash site; run it in a
+            # child process so a SIGSEGV/abort there can't take down the server, then
+            # reload the singleton from the index the child persisted.
+            added = run_isolated(
+                add_papers_to_index, index_dir, paper_ids, texts, vectors, timeout=_NATIVE_STAGE_TIMEOUT
+            )
+            reset_embedding_service()
+            LOGGER.info("Generated embeddings for %d papers", added)
     except Exception:
         LOGGER.warning("Embedding generation failed (non-fatal)", exc_info=True)
 

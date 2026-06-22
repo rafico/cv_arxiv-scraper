@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from copy import deepcopy
+from email.header import Header
 from pathlib import Path
 from secrets import token_urlsafe
 
@@ -404,7 +405,9 @@ def digest_preview():
 
     preview = build_digest_preview(current_app._get_current_object())
     response = current_app.response_class(preview["html"], mimetype="text/html")
-    response.headers["X-Digest-Subject"] = preview["subject"]
+    # HTTP headers are latin-1 on the wire; the subject can contain non-latin-1
+    # characters (em-dash, unicode subject prefixes), so RFC 2047-encode it.
+    response.headers["X-Digest-Subject"] = Header(preview["subject"], "utf-8").encode()
     return response
 
 

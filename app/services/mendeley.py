@@ -99,7 +99,7 @@ class MendeleyClient:
                 "client_id": creds["client_id"],
                 "client_secret": creds["client_secret"],
             },
-            timeout=30,
+            timeout=5,
         )
         resp.raise_for_status()
         refreshed = resp.json()
@@ -137,7 +137,7 @@ class MendeleyClient:
             resp = requests.get(
                 f"{MENDELEY_API_BASE}/profiles/me",
                 headers={"Authorization": f"Bearer {token['access_token']}"},
-                timeout=10,
+                timeout=3,
             )
             if resp.status_code == 401:
                 try:
@@ -150,7 +150,7 @@ class MendeleyClient:
                 resp = requests.get(
                     f"{MENDELEY_API_BASE}/profiles/me",
                     headers={"Authorization": f"Bearer {refreshed['access_token']}"},
-                    timeout=10,
+                    timeout=3,
                 )
             if resp.status_code == 200:
                 return {
