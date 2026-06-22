@@ -112,6 +112,19 @@ disable_error_code = [
   "misc",             # legacy backlog: Flask/Jinja decorator plumbing
 ]
 
+[[tool.mypy.overrides]]
+# numpy 2.x ships PEP 695 `type` aliases in its stubs. mypy rejects those as a
+# syntax error whenever python_version < 3.12 (our 3.10 floor), which aborts the
+# whole run before any app code is checked. Stop following numpy so it degrades
+# to `Any` instead of crashing; `follow_imports_for_stubs` is required because
+# the offending syntax lives in numpy's bundled `.pyi` stubs, which mypy parses
+# even under `follow_imports = skip` unless this is set. Scoped to numpy only so
+# every other dependency's stubs are still type-checked normally. Version-proof
+# regardless of which numpy CI resolves; revisit if the floor moves to 3.12.
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"
