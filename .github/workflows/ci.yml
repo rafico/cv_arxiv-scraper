@@ -149,5 +149,26 @@ jobs:
       # package, which `--strict` then treats as an un-auditable dependency and
       # fails on — the two flags can never both be satisfied. Auditing the lock
       # is reproducible and avoids the editable package entirely.
+      #
+      # The three ignored advisories below were each researched and verified
+      # UNREACHABLE in this app, and are either unfixable or fixable only via a
+      # breaking major upgrade. Re-evaluate (and drop the ignore) when the noted
+      # condition changes:
+      #   - CVE-2025-3000  (torch): NO upstream fix exists — GHSA-rrmf-rvhw-rf47
+      #       lists first_patched_version=None and pytorch/pytorch#149623 is open.
+      #       Local-only segfault in torch.jit.script; this app only runs
+      #       sentence-transformers inference and never scripts untrusted classes.
+      #       Drop once a patched torch release ships.
+      #   - PYSEC-2025-217 (transformers): RCE via torch.load in the X-CLIP
+      #       conversion script, which is stripped from the published PyPI dist
+      #       (verified absent from 4.57.6) — not shipped, not importable.
+      #   - CVE-2026-1839  (transformers): insecure torch.load in Trainer; this app
+      #       uses sentence-transformers inference, not Trainer. Fixed only in
+      #       transformers 5.0, a breaking major that violates the
+      #       sentence-transformers<4 pin. Drop when we can move to transformers>=5.
       - name: Audit resolved environment
-        run: python -m pip_audit -r requirements.lock --strict
+        run: >-
+          python -m pip_audit -r requirements.lock --strict
+          --ignore-vuln CVE-2025-3000
+          --ignore-vuln PYSEC-2025-217
+          --ignore-vuln CVE-2026-1839
