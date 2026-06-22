@@ -125,6 +125,15 @@ module = ["numpy", "numpy.*"]
 follow_imports = "skip"
 follow_imports_for_stubs = true
 
+[[tool.mypy.overrides]]
+# Flask-SQLAlchemy assembles the declarative base `db.Model` dynamically, so mypy
+# cannot resolve it as a name when used as a class base and reports a false
+# `name-defined` on every model. Scoped to app.models (the only declarative
+# module); pairs with the global `attr-defined` suppression for dynamic
+# SQLAlchemy/Flask-SQLAlchemy attributes.
+module = ["app.models"]
+disable_error_code = ["name-defined"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"

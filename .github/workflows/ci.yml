@@ -34,9 +34,13 @@ jobs:
             requirements.lock
 
       - name: Install dependencies
+        # Single-version (3.12) jobs install with the lockfile as a constraints
+        # file (-c) so they run against the exact pinned runtime deps that ship
+        # in the Docker image — reproducible, and immune to a new transitive
+        # release breaking the check (see the Test job for why the matrix differs).
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -c requirements.lock -e ".[dev]"
 
       # pre-commit owns lint (ruff + format + standard hygiene hooks).
       # Contributors who ran `pre-commit install` locally will have already
@@ -67,7 +71,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -c requirements.lock -e ".[dev]"
 
       - name: mypy
         run: python -m mypy app
@@ -93,6 +97,11 @@ jobs:
             requirements.lock
 
       - name: Install dependencies
+        # The matrix stays UNPINNED on purpose: requirements.lock targets
+        # Python >=3.11 (numpy/scipy/networkx pins) and cannot install on the
+        # 3.10 leg. The matrix validates the supported version range against
+        # era-appropriate resolutions; reproducibility is enforced where it ships
+        # (the Dockerfile installs from the lockfile) and in the 3.12 jobs above.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
@@ -142,7 +151,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -c requirements.lock -e ".[dev]"
 
       # Audit the pinned runtime deps from the lockfile rather than the live
       # editable env: `--skip-editable` always skips the local `cv-arxiv-scraper`

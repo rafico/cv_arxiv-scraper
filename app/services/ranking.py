@@ -94,7 +94,7 @@ def resolve_ranking_weight_snapshot(config: dict | None = None, *, ranking_confi
 
 def build_ranking_config_snapshot(config: dict | None = None, *, ranking_config=None) -> dict:
     active_config = ranking_config if ranking_config is not None else get_active_ranking_config()
-    snapshot = {
+    snapshot: dict[str, object] = {
         "source": "db" if active_config is not None else "config",
         "weights": resolve_ranking_weight_snapshot(config, ranking_config=ranking_config),
     }

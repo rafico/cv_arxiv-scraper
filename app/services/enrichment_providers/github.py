@@ -67,7 +67,7 @@ class GitHubProvider(EnrichmentProvider):
         self.max_fetches = max_fetches
         self.token = token
 
-    def fetch_batch(
+    def fetch_batch(  # type: ignore[override]  # provider-specific kwargs; base Protocol uses **kwargs
         self,
         arxiv_ids: list[str],
         repos_by_arxiv_id: dict[str, str] | None = None,

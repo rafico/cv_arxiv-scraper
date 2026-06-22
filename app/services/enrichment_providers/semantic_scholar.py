@@ -24,7 +24,7 @@ class SemanticScholarProvider(EnrichmentProvider):
         self.ttl_hours = ttl_hours
         self._request_fn = request_fn
 
-    def fetch_batch(self, arxiv_ids: list[str], session=None) -> dict[str, dict[str, Any]]:
+    def fetch_batch(self, arxiv_ids: list[str], session=None) -> dict[str, dict[str, Any]]:  # type: ignore[override]  # provider-specific kwargs; base Protocol uses **kwargs
         from app.services.http_client import request_with_backoff
 
         if not arxiv_ids:

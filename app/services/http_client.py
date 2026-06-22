@@ -118,7 +118,7 @@ def request_with_backoff(
             )
             time.sleep(delay)
 
-    raise last_exc  # type: ignore[misc]  # guaranteed non-None by loop logic
+    raise last_exc  # guaranteed non-None by loop logic
 
 
 def create_session(

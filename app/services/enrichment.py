@@ -140,7 +140,7 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
         if start > 0:
             time.sleep(_ARXIV_API_DELAY)
 
-        params = {
+        params: dict[str, str | int] = {
             "search_query": f"cat:{category} AND submittedDate:[{from_ts} TO {to_ts}]",
             "sortBy": "submittedDate",
             "sortOrder": "descending",
@@ -346,7 +346,7 @@ def _fetch_api_metadata_batch(
     if not arxiv_ids:
         return
 
-    params = {"id_list": ",".join(arxiv_ids), "max_results": len(arxiv_ids)}
+    params: dict[str, str | int] = {"id_list": ",".join(arxiv_ids), "max_results": len(arxiv_ids)}
     try:
         response = _request_arxiv_api(params, session=session)
     except Exception as exc:
