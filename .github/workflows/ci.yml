@@ -144,5 +144,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # Audit the pinned runtime deps from the lockfile rather than the live
+      # editable env: `--skip-editable` always skips the local `cv-arxiv-scraper`
+      # package, which `--strict` then treats as an un-auditable dependency and
+      # fails on — the two flags can never both be satisfied. Auditing the lock
+      # is reproducible and avoids the editable package entirely.
       - name: Audit resolved environment
-        run: python -m pip_audit --skip-editable --strict
+        run: python -m pip_audit -r requirements.lock --strict
