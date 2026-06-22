@@ -47,6 +47,8 @@ preferences:
     authors: []
     affiliations: []
     topics: []
+# These are computer-vision examples — replace them with YOUR own interests
+# (or edit them later in the UI under Settings > Research Setup).
 whitelists:
   titles:
     - Few Shot
