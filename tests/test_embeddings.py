@@ -8,7 +8,26 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from app.services.embeddings import EmbeddingService, reset_embedding_service
+from app.services.embeddings import EmbeddingService, add_sections_to_index, reset_embedding_service
+
+
+def _fake_encode(texts, **kwargs):
+    vecs = np.random.default_rng(7).random((len(texts), 768)).astype(np.float32)
+    return vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
+
+
+def test_add_sections_to_index_persists_round_trip(tmp_path):
+    """The isolated section-embedding helper must persist to disk so the parent can
+    reload the singleton after the subprocess writes it (mirrors add_papers_to_index)."""
+    index_dir = tmp_path / "faiss_index"
+    entries = [(1, "method", "a method section"), (2, "results", "the results")]
+    with patch.object(EmbeddingService, "encode", side_effect=_fake_encode):
+        added = add_sections_to_index(str(index_dir), entries)
+        assert added == 2
+        # A fresh service must read the section index the helper persisted.
+        reloaded = EmbeddingService(str(index_dir))
+        hits = reloaded.search_sections("method", top_k=5)
+    assert hits  # non-empty: the persisted sections are searchable
 
 
 def test_importing_embeddings_pins_openmp_to_avoid_dual_libgomp_crash():

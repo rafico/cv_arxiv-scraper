@@ -132,6 +132,30 @@ def extract_sections(pdf_content: bytes) -> list[ExtractedSection]:
     return sections
 
 
+def extract_sections_batch(
+    pdf_contents: list[bytes | None],
+) -> list[list[tuple[str, str, int]]]:
+    """Batch-parse many PDFs into plain ``(section_type, text, order_index)`` tuples.
+
+    Module-level and picklable (plain tuples, no ``ExtractedSection``/ORM) so the whole
+    pdfplumber pass runs in one isolated subprocess via ``run_isolated()`` — a native
+    crash there is contained instead of killing the scrape. Aligns 1:1 with the input;
+    a missing or unparseable PDF yields ``[]``.
+    """
+    out: list[list[tuple[str, str, int]]] = []
+    for pdf in pdf_contents:
+        if not pdf:
+            out.append([])
+            continue
+        try:
+            sections = extract_sections(pdf)
+        except Exception:
+            LOGGER.warning("Section extraction failed for a PDF", exc_info=True)
+            sections = []
+        out.append([(s.section_type, s.text, s.order_index) for s in sections])
+    return out
+
+
 def extract_and_store_sections(
     paper_id: int,
     pdf_content: bytes,

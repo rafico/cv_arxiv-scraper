@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -13,6 +14,8 @@ from sqlalchemy import event
 from app.models import db
 from app.rank import get_preferences
 from app.schema import ensure_schema
+
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_DATABASE_URI = "sqlite:///arxiv_papers.db"
 DEFAULT_CONFIG_FILENAME = "config.yaml"
@@ -296,6 +299,39 @@ def _configure_sqlite_pragmas(engine) -> None:
             cursor.close()
 
 
+def _reclaim_orphaned_scrape_runs(app, *, stale_after_hours: int = 2) -> None:
+    """Close out scrape runs stuck in ``running`` on startup.
+
+    A native crash (SIGSEGV/SIGABRT from faiss/torch/pdfplumber) takes down the whole
+    process, bypassing the ``except``/``finally`` that would mark the run ``error`` — so
+    the row stays ``running`` forever and the dashboard shows a perpetual "running…".
+    Since the crash always forces a restart, startup is the natural place to reconcile.
+    The single-worker, in-process model means any ``running`` row at startup is orphaned;
+    the staleness threshold only guards against a restart racing a genuinely live run.
+    """
+    from app.models import ScrapeRun, db
+    from app.services.text import now_utc
+
+    with app.app_context():
+        cutoff = now_utc() - timedelta(hours=stale_after_hours)
+        orphaned = ScrapeRun.query.filter(
+            ScrapeRun.status == "running",
+            ScrapeRun.started_at < cutoff,
+        ).all()
+        if not orphaned:
+            return
+        finished = now_utc()
+        for run in orphaned:
+            run.status = "error"
+            run.finished_at = finished
+            LOGGER.warning(
+                "Reclaimed orphaned scrape run %s (started %s, never finished)",
+                run.id,
+                run.started_at,
+            )
+        db.session.commit()
+
+
 def create_app(config_overrides: dict | None = None) -> Flask:
     overrides = dict(config_overrides or {})
     instance_path_override = overrides.pop("INSTANCE_PATH", None)
@@ -342,6 +378,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         _configure_sqlite_pragmas(db.engine)
         db.create_all()
         ensure_schema()
+    _reclaim_orphaned_scrape_runs(app)
 
     _register_blueprints(app)
 

@@ -3,7 +3,10 @@ email:
   subject_prefix: ArXiv Digest
 scraper:
   feed_url: https://rss.arxiv.org/rss/cs.CV
-  rolling_window_days: 2
+  # How many days back the arXiv-API fallback fetches when the daily RSS feed is
+  # thin/empty. 4 keeps the window overlapping the previous announcement even across
+  # a long holiday weekend (e.g. Juneteenth + Sat/Sun); dedup prevents re-ingesting.
+  rolling_window_days: 4
   max_workers: 8
   pdf_attempts: 2
   pdf_lines_start: 2

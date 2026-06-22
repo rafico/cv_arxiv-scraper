@@ -8,8 +8,42 @@ from app.services.pipeline import (
     FeatureVector,
     ScoredCandidate,
     WeightedSumRanker,
+    WhitelistCandidateGenerator,
 )
 from app.services.ranking import compute_paper_score
+
+
+class TestCheckAffiliations:
+    """_check_affiliations reads prefetched data only — no network, no native code."""
+
+    def _generator(self):
+        return WhitelistCandidateGenerator(
+            whitelists={"authors": [], "titles": [], "affiliations": ["MIT"]},
+            scraper_config={},
+        )
+
+    def test_matches_from_stashed_pdf_text(self):
+        entry = {
+            "link": "https://arxiv.org/abs/1",
+            "api_affiliations": "",
+            "pdf_affiliation_text": "MIT CSAIL",
+            "pdf_content": b"%PDF",
+        }
+        matches, pdf_content = self._generator()._check_affiliations(entry)
+        assert matches == ["MIT"]
+        assert pdf_content == b"%PDF"  # bytes flow through for thumbnails/sections
+
+    def test_api_affiliation_match_short_circuits(self):
+        entry = {"link": "https://arxiv.org/abs/2", "api_affiliations": "MIT", "pdf_content": None}
+        matches, pdf_content = self._generator()._check_affiliations(entry)
+        assert matches == ["MIT"]
+        assert pdf_content is None
+
+    def test_no_match_returns_empty(self):
+        entry = {"link": "https://arxiv.org/abs/3", "api_affiliations": "", "pdf_affiliation_text": "Acme Corp"}
+        matches, pdf_content = self._generator()._check_affiliations(entry)
+        assert matches == []
+        assert pdf_content is None
 
 
 def _make_candidate(

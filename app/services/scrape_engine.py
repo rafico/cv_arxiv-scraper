@@ -15,15 +15,17 @@ from sqlalchemy.exc import IntegrityError
 from app.constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_WORKERS
 from app.services.enrichment import (
     enrich_entries_with_api_metadata,
-    extract_pdf_resource_links,
+    extract_affiliation_text_batch,
+    extract_pdf_resource_links_batch,
     fetch_recent_papers,
     merge_resource_links,
     parse_feed_entries,
 )
-from app.services.http_client import create_session, resolve_user_agent
+from app.services.http_client import create_session, request_with_backoff, resolve_user_agent
 from app.services.ingest import IngestMode, IngestOrchestrator, PaperCandidate
 from app.services.interest_model import build_interest_profile
 from app.services.llm_client import LLMClient, resolve_api_key
+from app.services.matching import check_author_match, check_whitelist_match
 from app.services.pipeline import WeightedSumRanker, WhitelistCandidateGenerator
 from app.services.preferences import get_preferences
 from app.services.ranking import compute_paper_score
@@ -384,47 +386,67 @@ def _generate_embeddings(app, results: list[dict]) -> None:
 
 
 def _extract_sections(app, results: list[dict]) -> None:
-    """Optionally extract PDF sections and generate section-level embeddings."""
+    """Optionally extract PDF sections and generate section-level embeddings.
+
+    Both the pdfplumber parse and the torch/faiss section-embedding are native-crash
+    sites, so each runs in an isolated subprocess; a crash degrades to skipping sections
+    (non-fatal) instead of taking down the scrape.
+    """
     scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {})
     if not scraper_config.get("extract_sections", False):
         return
 
-    from app.models import Paper
-    from app.services.pdf_extraction import extract_and_store_sections
+    from app.models import Paper, PaperSection, db
+    from app.services.pdf_extraction import extract_sections_batch
+    from app.services.subprocess_runner import run_isolated
+
+    targets = [(res["link"], res["pdf_content"]) for res in results if res.get("pdf_content")]
+    if not targets:
+        return
+
+    # Parse all PDFs in one isolated child, then write rows in the parent (child is DB-free).
+    try:
+        sections_per_target = run_isolated(
+            extract_sections_batch, [pdf for _, pdf in targets], timeout=_NATIVE_STAGE_TIMEOUT
+        )
+    except Exception:
+        LOGGER.warning("Section extraction failed (non-fatal)", exc_info=True)
+        return
 
     total_sections = 0
     with app.app_context():
-        for result in results:
-            pdf_content = result.get("pdf_content")
-            if not pdf_content:
+        for (link, _pdf), sections in zip(targets, sections_per_target):
+            if not sections:
                 continue
-            paper = Paper.query.filter_by(link=result["link"]).first()
+            paper = Paper.query.filter_by(link=link).first()
             if not paper:
                 continue
-            try:
-                count = extract_and_store_sections(paper.id, pdf_content)
-                total_sections += count
-            except Exception:
-                LOGGER.warning("Section extraction failed for %s", result.get("link"), exc_info=True)
+            PaperSection.query.filter_by(paper_id=paper.id).delete()
+            for section_type, text, order_index in sections:
+                db.session.add(
+                    PaperSection(paper_id=paper.id, section_type=section_type, text=text, order_index=order_index)
+                )
+            total_sections += len(sections)
+        db.session.commit()
 
-    if total_sections > 0:
-        LOGGER.info("Extracted %d sections from matched papers", total_sections)
+    if total_sections <= 0:
+        return
+    LOGGER.info("Extracted %d sections from matched papers", total_sections)
 
-        # Generate section-level embeddings.
-        try:
-            from app.models import PaperSection
-            from app.services.embeddings import get_embedding_service
+    # Generate section-level embeddings in an isolated child (torch/faiss crash site).
+    try:
+        from app.services.embeddings import add_sections_to_index, get_embedding_service, reset_embedding_service
 
-            service = get_embedding_service(app)
-            with app.app_context():
-                sections = PaperSection.query.join(Paper).filter(Paper.link.in_([r["link"] for r in results])).all()
-                entries = [(s.paper_id, s.section_type, s.text) for s in sections if s.text]
-                if entries:
-                    added = service.add_sections(entries)
-                    service.save_sections()
-                    LOGGER.info("Generated section embeddings for %d sections", added)
-        except Exception:
-            LOGGER.warning("Section embedding generation failed (non-fatal)", exc_info=True)
+        index_dir = str(get_embedding_service(app).index_dir)
+        with app.app_context():
+            sections = PaperSection.query.join(Paper).filter(Paper.link.in_([link for link, _ in targets])).all()
+            entries = [(s.paper_id, s.section_type, s.text) for s in sections if s.text]
+        if entries:
+            added = run_isolated(add_sections_to_index, index_dir, entries, timeout=_NATIVE_STAGE_TIMEOUT)
+            reset_embedding_service()
+            LOGGER.info("Generated section embeddings for %d sections", added)
+    except Exception:
+        LOGGER.warning("Section embedding generation failed (non-fatal)", exc_info=True)
 
 
 def _build_summary(new_count: int, skipped: int, total_matched: int, total_in_feed: int) -> dict:
@@ -689,15 +711,110 @@ def _enrich_results_with_github(app, results: list[dict], session: requests.Sess
 
 def _enrich_results_with_pdf_links(results: list[dict], config: dict | None) -> None:
     """Merge code/project links found in PDF front matter into resource_links (in-place)."""
-    for res in results:
-        # .get(), not .pop(): pdf_content is still needed by thumbnails/sections.
-        pdf_links = extract_pdf_resource_links(res.get("pdf_content"))
+    if not results:
+        return
+    # .get(), not .pop(): pdf_content is still needed by thumbnails/sections.
+    pdf_contents = [res.get("pdf_content") for res in results]
+    if not any(pdf_contents):
+        return
+    try:
+        from app.services.subprocess_runner import run_isolated
+
+        # pdfplumber is a native-crash site; parse all PDFs in one child process so a
+        # SIGSEGV/abort (or timeout) can't take down the scrape — degrade non-fatally.
+        links_per_result = run_isolated(extract_pdf_resource_links_batch, pdf_contents, timeout=_NATIVE_STAGE_TIMEOUT)
+    except Exception:
+        LOGGER.warning("PDF resource-link extraction failed (non-fatal)", exc_info=True)
+        return
+    for res, pdf_links in zip(results, links_per_result):
         if not pdf_links:
             continue
         merged = merge_resource_links(res.get("resource_links"), pdf_links)
         if len(merged) != len(res.get("resource_links") or []):
             res["resource_links"] = merged
             _rescore_result(res, config)
+
+
+# Bound how many PDFs are downloaded + held in memory at once during the affiliation
+# pre-pass; each chunk is parsed in one isolated subprocess.
+_AFFILIATION_PREFETCH_CHUNK = 64
+
+
+def _entry_has_match_signal(entry: dict, whitelists: dict, affiliation_text: str) -> bool:
+    """Cheap, network-free check of whether an entry could still become a candidate.
+
+    Used by the affiliation pre-pass to decide whether to retain an entry's (large)
+    ``pdf_content`` bytes: an entry that matches no whitelist can never be a candidate, so
+    its PDF is never needed downstream and can be dropped to bound peak memory.
+    """
+    affiliations = whitelists.get("affiliations", [])
+    return bool(
+        check_author_match(entry.get("authors_list", []), whitelists.get("authors", []))
+        or check_whitelist_match([entry.get("title", ""), entry.get("abstract", "")], whitelists.get("titles", []))
+        or check_whitelist_match([entry.get("api_affiliations", "")], affiliations)
+        or (affiliation_text and check_whitelist_match([affiliation_text], affiliations))
+    )
+
+
+def _prefetch_affiliation_text(entries: list[dict], whitelists: dict, scraper_config: dict, session) -> None:
+    """Download PDFs and extract affiliation-header text for entries whose API
+    affiliations didn't already match — once per scrape, isolated.
+
+    This moves the native pdfplumber parse out of the per-paper ranking worker (where a
+    SIGSEGV would kill the whole scrape) into a single isolated subprocess. Network stays
+    in the parent (threaded). Results are stashed on each entry as ``pdf_affiliation_text``
+    and ``pdf_content``; PDF bytes are kept only for entries that can still match (see
+    :func:`_entry_has_match_signal`), so peak memory ≈ candidate count.
+    """
+    affiliations = whitelists.get("affiliations", [])
+    targets = [
+        entry
+        for entry in entries
+        if not (entry.get("api_affiliations") and check_whitelist_match([entry["api_affiliations"]], affiliations))
+    ]
+    if not targets:
+        return
+
+    max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
+    attempts = int(scraper_config.get("pdf_attempts", 2))
+    extract_kwargs = {
+        "lines_start": scraper_config.get("pdf_lines_start", 2),
+        "max_header_lines": scraper_config.get("pdf_max_header_lines", scraper_config.get("pdf_lines_end", 50)),
+        "smart_header": scraper_config.get("pdf_smart_header", True),
+    }
+
+    def _download(entry: dict) -> bytes | None:
+        pdf_url = entry["link"].replace("/abs/", "/pdf/")
+        try:
+            response = request_with_backoff(
+                "GET", pdf_url, timeout=30, attempts=attempts, base_delay=1.0, session=session
+            )
+            return response.content
+        except Exception as exc:
+            LOGGER.warning("Error fetching PDF for %s: %s", entry.get("link"), exc)
+            return None
+
+    for start in range(0, len(targets), _AFFILIATION_PREFETCH_CHUNK):
+        chunk = targets[start : start + _AFFILIATION_PREFETCH_CHUNK]
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            pdf_contents = list(executor.map(_download, chunk))
+
+        if any(pdf_contents):
+            try:
+                from app.services.subprocess_runner import run_isolated
+
+                texts = run_isolated(
+                    extract_affiliation_text_batch, pdf_contents, timeout=_NATIVE_STAGE_TIMEOUT, **extract_kwargs
+                )
+            except Exception:
+                LOGGER.warning("Affiliation text extraction failed (non-fatal)", exc_info=True)
+                texts = ["" for _ in pdf_contents]
+        else:
+            texts = ["" for _ in pdf_contents]
+
+        for entry, pdf_content, text in zip(chunk, pdf_contents, texts):
+            entry["pdf_affiliation_text"] = text
+            entry["pdf_content"] = pdf_content if _entry_has_match_signal(entry, whitelists, text) else None
 
 
 def _collect_matched_results(
@@ -850,6 +967,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             {"phase": "affiliations", "message": "Fetching metadata from arXiv API..."},
         )
         enrich_entries_with_api_metadata(entries, session=session)
+        _prefetch_affiliation_text(entries, whitelists, scraper_config, session)
 
         _emit(
             event_callback,
@@ -946,6 +1064,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
         llm_client, interests_text = _create_llm_client(app)
         interest_profile = build_interest_profile(app)
         enrich_entries_with_api_metadata(entries, session=session)
+        _prefetch_affiliation_text(entries, whitelists, scraper_config, session)
 
         results = _collect_matched_results(
             entries,
