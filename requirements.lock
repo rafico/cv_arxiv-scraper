@@ -25,7 +25,7 @@ charset-normalizer==3.4.7
     #   requests
 click==8.3.2
     # via flask
-cryptography==46.0.7
+cryptography==49.0.0
     # via
     #   google-auth
     #   pdfminer-six
@@ -96,7 +96,7 @@ huggingface-hub==0.36.2
     #   sentence-transformers
     #   tokenizers
     #   transformers
-idna==3.11
+idna==3.18
     # via
     #   anyio
     #   httpx
@@ -273,7 +273,7 @@ typing-inspection==0.4.2
     # via pydantic
 uritemplate==4.2.0
     # via google-api-python-client
-urllib3==2.6.3
+urllib3==2.7.0
     # via requests
 werkzeug==3.1.8
     # via flask
