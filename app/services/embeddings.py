@@ -353,6 +353,17 @@ def add_papers_to_index(index_dir: str, paper_ids: list[int], texts: list[str], 
     return added
 
 
+def add_sections_to_index(index_dir: str, entries: list[tuple[int, str, str]]) -> int:
+    """Load the on-disk section index, add section embeddings, and persist. Importable +
+    dependency-free (no Flask/DB) so it can run in an isolated subprocess via
+    run_isolated() — mirrors add_papers_to_index for the torch/faiss section path."""
+    service = EmbeddingService(index_dir)
+    added = service.add_sections(entries)
+    if added:
+        service.save_sections()
+    return added
+
+
 def get_embedding_service(app=None) -> EmbeddingService:
     """Return the singleton EmbeddingService, creating it if needed."""
     global _service_instance

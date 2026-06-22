@@ -8,7 +8,6 @@ from typing import Any, Protocol
 
 import requests
 
-from app.services.http_client import request_with_backoff
 from app.services.matching import (
     check_author_match,
     check_whitelist_match,
@@ -69,44 +68,24 @@ class WhitelistCandidateGenerator:
         }
 
     def _check_affiliations(self, entry_data: dict) -> tuple[list[str], bytes | None]:
-        """Check affiliation matches from API metadata and PDF headers."""
+        """Check affiliation matches from API metadata and prefetched PDF header text.
+
+        The PDF download and native pdfplumber parse happen once per scrape, isolated, in
+        ``_prefetch_affiliation_text`` — this per-paper worker only reads the stashed
+        ``pdf_affiliation_text`` / ``pdf_content``, doing no network or native work.
+        """
         affiliation_matches: list[str] = []
-        pdf_content: bytes | None = None
 
         api_affiliations = entry_data.get("api_affiliations", "")
         if api_affiliations:
             affiliation_matches = check_whitelist_match([api_affiliations], self.whitelists["affiliations"])
 
         if not affiliation_matches:
-            link = entry_data["link"]
-            pdf_url = link.replace("/abs/", "/pdf/")
-            try:
-                from app.services.enrichment import extract_affiliation_text
+            affiliation_text = entry_data.get("pdf_affiliation_text", "")
+            if affiliation_text:
+                affiliation_matches = check_whitelist_match([affiliation_text], self.whitelists["affiliations"])
 
-                pdf_response = request_with_backoff(
-                    "GET",
-                    pdf_url,
-                    timeout=30,
-                    attempts=self.scraper_config.get("pdf_attempts", 2),
-                    base_delay=1.0,
-                    session=self.session,
-                )
-                pdf_content = pdf_response.content
-                affiliation_text = extract_affiliation_text(
-                    pdf_content,
-                    lines_start=self.scraper_config.get("pdf_lines_start", 2),
-                    max_header_lines=self.scraper_config.get(
-                        "pdf_max_header_lines",
-                        self.scraper_config.get("pdf_lines_end", 50),
-                    ),
-                    smart_header=self.scraper_config.get("pdf_smart_header", True),
-                )
-                if affiliation_text:
-                    affiliation_matches = check_whitelist_match([affiliation_text], self.whitelists["affiliations"])
-            except Exception as exc:
-                LOGGER.warning("Error fetching PDF for %s: %s", entry_data.get("link"), exc)
-
-        return affiliation_matches, pdf_content
+        return affiliation_matches, entry_data.get("pdf_content")
 
     def _is_muted(self, entry_data: dict) -> bool:
         """Check if a paper should be suppressed by mute filters."""

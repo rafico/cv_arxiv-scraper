@@ -6,7 +6,9 @@ from unittest.mock import Mock, patch
 
 from app.services.enrichment import (
     _fetch_api_metadata,
+    extract_affiliation_text_batch,
     extract_pdf_resource_links,
+    extract_pdf_resource_links_batch,
     fetch_recent_papers,
     merge_resource_links,
 )
@@ -33,6 +35,37 @@ def _make_pdf(pages: list[list[str]]) -> bytes:
         return pathlib.Path(tmp.name).read_bytes()
     finally:
         os.unlink(tmp.name)
+
+
+class ExtractPdfResourceLinksBatchTests(unittest.TestCase):
+    def test_batch_aligns_with_inputs_and_handles_none(self):
+        with patch(
+            "app.services.enrichment.extract_pdf_resource_links",
+            side_effect=lambda pdf, max_pages=2: [{"url": pdf.decode()}] if pdf else [],
+        ):
+            out = extract_pdf_resource_links_batch([b"a", None, b"b"])
+        self.assertEqual(out, [[{"url": "a"}], [], [{"url": "b"}]])
+
+
+class ExtractAffiliationTextBatchTests(unittest.TestCase):
+    def test_batch_aligns_and_maps_none_to_empty(self):
+        with patch(
+            "app.services.enrichment.extract_affiliation_text",
+            side_effect=lambda pdf, **kw: pdf.decode(),
+        ):
+            out = extract_affiliation_text_batch([b"MIT", None, b"Stanford"])
+        self.assertEqual(out, ["MIT", "", "Stanford"])
+
+    def test_kwargs_are_forwarded(self):
+        captured = {}
+
+        def fake(pdf, *, lines_start, max_header_lines, smart_header):
+            captured.update(lines_start=lines_start, max_header_lines=max_header_lines, smart_header=smart_header)
+            return "x"
+
+        with patch("app.services.enrichment.extract_affiliation_text", side_effect=fake):
+            extract_affiliation_text_batch([b"a"], lines_start=3, max_header_lines=10, smart_header=False)
+        self.assertEqual(captured, {"lines_start": 3, "max_header_lines": 10, "smart_header": False})
 
 
 class FetchRecentPapersTests(unittest.TestCase):

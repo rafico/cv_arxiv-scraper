@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from app.services.pdf_extraction import (
     ExtractedSection,
     _normalize_section_type,
     extract_sections,
+    extract_sections_batch,
 )
+
+
+class TestExtractSectionsBatch:
+    def test_aligns_and_returns_plain_tuples(self):
+        secs = [ExtractedSection(section_type="method", text="m", order_index=0)]
+        with patch("app.services.pdf_extraction.extract_sections", side_effect=lambda pdf: secs):
+            out = extract_sections_batch([b"pdf", None])
+        # None input -> []; real input -> picklable (type, text, order) tuples.
+        assert out == [[("method", "m", 0)], []]
+
+    def test_per_pdf_parse_error_is_contained(self):
+        with patch("app.services.pdf_extraction.extract_sections", side_effect=RuntimeError("boom")):
+            out = extract_sections_batch([b"pdf"])
+        assert out == [[]]
 
 
 class TestNormalizeSectionType:

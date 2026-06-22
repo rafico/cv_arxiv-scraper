@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.models import Paper, ScrapeRun, db
 from app.services.ranking import compute_paper_score
@@ -555,7 +555,7 @@ class VenuePersistenceTests(FlaskDBTestCase):
 
 
 class PdfLinkEnrichmentTests(FlaskDBTestCase):
-    @patch("app.services.scrape_engine.extract_pdf_resource_links")
+    @patch("app.services.scrape_engine.extract_pdf_resource_links_batch")
     def test_pdf_links_merged_and_rescored(self, mock_extract):
         from app.services.scrape_engine import _enrich_results_with_pdf_links
 
@@ -563,7 +563,8 @@ class PdfLinkEnrichmentTests(FlaskDBTestCase):
         result["publication_dt"] = date(2026, 1, 1)
         result["pdf_content"] = b"%PDF-fake"
         baseline_score = result["paper_score"]
-        mock_extract.return_value = [{"type": "code", "label": "Code", "url": "https://github.com/lab/repo"}]
+        # Batch fn returns one list of links per input PDF (aligned to results).
+        mock_extract.return_value = [[{"type": "code", "label": "Code", "url": "https://github.com/lab/repo"}]]
 
         _enrich_results_with_pdf_links([result], self.app.config["SCRAPER_CONFIG"])
 
@@ -595,7 +596,7 @@ class PdfLinkEnrichmentTests(FlaskDBTestCase):
         self.assertEqual(result["resource_links"], [])
         self.assertEqual(result["paper_score"], baseline_score)
 
-    @patch("app.services.scrape_engine.extract_pdf_resource_links")
+    @patch("app.services.scrape_engine.extract_pdf_resource_links_batch")
     def test_duplicate_links_do_not_trigger_rescore(self, mock_extract):
         from app.services.scrape_engine import _enrich_results_with_pdf_links
 
@@ -604,12 +605,100 @@ class PdfLinkEnrichmentTests(FlaskDBTestCase):
         result["resource_links"] = [existing]
         result["pdf_content"] = b"%PDF-fake"
         baseline_score = result["paper_score"]
-        mock_extract.return_value = [dict(existing)]
+        mock_extract.return_value = [[dict(existing)]]
 
         _enrich_results_with_pdf_links([result], self.app.config["SCRAPER_CONFIG"])
 
         self.assertEqual(result["resource_links"], [existing])
         self.assertEqual(result["paper_score"], baseline_score)
+
+    @patch("app.services.scrape_engine.extract_pdf_resource_links_batch", side_effect=RuntimeError("native boom"))
+    def test_extraction_crash_is_non_fatal(self, _mock):
+        from app.services.scrape_engine import _enrich_results_with_pdf_links
+
+        result = _make_result("https://arxiv.org/abs/0011")
+        result["pdf_content"] = b"%PDF-fake"
+        baseline_score = result["paper_score"]
+
+        # Must not raise — degrade to no link enrichment, preserve pdf_content + score.
+        _enrich_results_with_pdf_links([result], self.app.config["SCRAPER_CONFIG"])
+
+        self.assertEqual(result["resource_links"], [])
+        self.assertEqual(result["pdf_content"], b"%PDF-fake")
+        self.assertEqual(result["paper_score"], baseline_score)
+
+
+class PrefetchAffiliationTextTests(unittest.TestCase):
+    WHITELISTS = {"authors": [], "titles": ["Vision"], "affiliations": ["MIT"]}
+
+    @staticmethod
+    def _entry(suffix: str, *, title: str, api_affiliations: str) -> dict:
+        return {
+            "link": f"https://arxiv.org/abs/{suffix}",
+            "title": title,
+            "authors_list": [],
+            "abstract": "",
+            "api_affiliations": api_affiliations,
+        }
+
+    def test_skips_api_matched_and_prunes_non_candidate_bytes(self):
+        from app.services import scrape_engine
+
+        api_matched = self._entry("1", title="X", api_affiliations="MIT")  # skip: no download
+        candidate = self._entry("2", title="A Vision Paper", api_affiliations="")  # title match: keep bytes
+        non_match = self._entry("3", title="Unrelated", api_affiliations="")  # no match: drop bytes
+        entries = [api_matched, candidate, non_match]
+
+        with (
+            patch.object(scrape_engine, "request_with_backoff", return_value=Mock(content=b"%PDF")),
+            patch.object(scrape_engine, "extract_affiliation_text_batch", return_value=["", ""]) as mock_batch,
+        ):
+            scrape_engine._prefetch_affiliation_text(entries, self.WHITELISTS, {"max_workers": 1}, session=None)
+
+        # Only the two non-api-matched entries are parsed (one isolated batch call).
+        mock_batch.assert_called_once()
+        self.assertNotIn("pdf_affiliation_text", api_matched)
+        self.assertEqual(candidate["pdf_affiliation_text"], "")
+        self.assertEqual(candidate["pdf_content"], b"%PDF")
+        self.assertIsNone(non_match["pdf_content"])
+
+    def test_extraction_crash_degrades_non_fatally(self):
+        from app.services import scrape_engine
+
+        candidate = self._entry("4", title="A Vision Paper", api_affiliations="")
+        with (
+            patch.object(scrape_engine, "request_with_backoff", return_value=Mock(content=b"%PDF")),
+            patch.object(scrape_engine, "extract_affiliation_text_batch", side_effect=RuntimeError("boom")),
+        ):
+            scrape_engine._prefetch_affiliation_text([candidate], self.WHITELISTS, {"max_workers": 1}, session=None)
+
+        # No exception escapes; title-matched entry keeps its bytes for downstream use.
+        self.assertEqual(candidate["pdf_affiliation_text"], "")
+        self.assertEqual(candidate["pdf_content"], b"%PDF")
+
+
+class OrphanedScrapeRunReclaimTests(FlaskDBTestCase):
+    def test_stale_running_runs_are_marked_error_on_startup(self):
+        import app as app_pkg
+
+        stale = ScrapeRun(status="running", forced=False, started_at=now_utc() - timedelta(hours=3))
+        fresh = ScrapeRun(status="running", forced=False, started_at=now_utc())
+        done = ScrapeRun(
+            status="success", forced=False, started_at=now_utc() - timedelta(hours=5), finished_at=now_utc()
+        )
+        db.session.add_all([stale, fresh, done])
+        db.session.commit()
+        stale_id, fresh_id, done_id = stale.id, fresh.id, done.id
+
+        app_pkg._reclaim_orphaned_scrape_runs(self.app)
+
+        db.session.expire_all()
+        reclaimed = db.session.get(ScrapeRun, stale_id)
+        self.assertEqual(reclaimed.status, "error")
+        self.assertIsNotNone(reclaimed.finished_at)
+        # A genuinely fresh run and an already-finished run are untouched.
+        self.assertEqual(db.session.get(ScrapeRun, fresh_id).status, "running")
+        self.assertEqual(db.session.get(ScrapeRun, done_id).status, "success")
 
 
 class HistoricalScrapeTests(FlaskDBTestCase):

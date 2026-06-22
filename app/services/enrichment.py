@@ -274,6 +274,18 @@ def extract_pdf_resource_links(pdf_content: bytes | None, max_pages: int = 2) ->
     return links
 
 
+def extract_pdf_resource_links_batch(
+    pdf_contents: list[bytes | None], max_pages: int = 2
+) -> list[list[dict[str, str]]]:
+    """Batch wrapper for :func:`extract_pdf_resource_links`.
+
+    Module-level and picklable so the whole pdfplumber pass over many PDFs can run in a
+    single isolated subprocess via ``run_isolated()`` — a native crash there is contained
+    instead of taking down the scrape. The output aligns 1:1 with ``pdf_contents``.
+    """
+    return [extract_pdf_resource_links(pdf, max_pages=max_pages) for pdf in pdf_contents]
+
+
 def merge_resource_links(
     existing: list[dict[str, str]] | None,
     new: list[dict[str, str]] | None,
@@ -436,3 +448,29 @@ def extract_affiliation_text(
 
     lines = page_text.splitlines()
     return "\n".join(lines[lines_start:max_header_lines])
+
+
+def extract_affiliation_text_batch(
+    pdf_contents: list[bytes | None],
+    *,
+    lines_start: int = 2,
+    max_header_lines: int = 50,
+    smart_header: bool = True,
+) -> list[str]:
+    """Batch wrapper for :func:`extract_affiliation_text`.
+
+    Module-level and picklable so all affiliation-header parses run in one isolated
+    subprocess via ``run_isolated()``. The output aligns 1:1 with ``pdf_contents``;
+    ``None``/empty inputs map to ``""``.
+    """
+    return [
+        extract_affiliation_text(
+            pdf,
+            lines_start=lines_start,
+            max_header_lines=max_header_lines,
+            smart_header=smart_header,
+        )
+        if pdf
+        else ""
+        for pdf in pdf_contents
+    ]
