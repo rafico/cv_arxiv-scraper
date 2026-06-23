@@ -49,7 +49,12 @@ def has_api_key(key_path: Path | None = None) -> bool:
 
 def write_api_key(api_key: str, key_path: Path | None = None) -> Path:
     path = key_path or _DEFAULT_KEY_PATH
-    path.write_text(api_key.strip(), encoding="utf-8")
+    # Create with 0600 from the start so the key is never briefly world-readable
+    # (avoids a write-then-chmod TOCTOU window); the trailing chmod also tightens
+    # an already-existing file whose mode may be looser.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(api_key.strip())
     os.chmod(path, 0o600)
     return path
 

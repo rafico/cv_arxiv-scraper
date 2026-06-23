@@ -103,6 +103,29 @@ class FeedbackActionTests(FlaskDBTestCase):
         self.assertEqual(result["counts"]["priority"], 1)
         self.assertEqual(result["counts"]["save"], 1)
 
+    def test_unprioritizing_removes_the_implied_save(self):
+        p = _make_paper(0)
+        db.session.add(p)
+        db.session.commit()
+
+        apply_feedback_action(p.id, "priority")  # implies save
+        result = apply_feedback_action(p.id, "priority")  # toggle priority off
+
+        self.assertEqual(result["counts"]["priority"], 0)
+        self.assertEqual(result["counts"]["save"], 0)
+
+    def test_unprioritizing_keeps_an_explicit_save(self):
+        p = _make_paper(0)
+        db.session.add(p)
+        db.session.commit()
+
+        apply_feedback_action(p.id, "save")  # explicit save
+        apply_feedback_action(p.id, "priority")  # save already present; not implied
+        result = apply_feedback_action(p.id, "priority")  # toggle priority off
+
+        self.assertEqual(result["counts"]["priority"], 0)
+        self.assertEqual(result["counts"]["save"], 1)
+
     def test_shared_is_additive(self):
         p = _make_paper(0)
         db.session.add(p)

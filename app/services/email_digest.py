@@ -608,9 +608,11 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
         _finish_digest_run(app, digest_run_id, status="preview")
         return {"papers_count": len(papers), "sent": False, "recipient": recipient}
 
-    creds = _load_gmail_credentials()
-
     try:
+        # Inside the try so a missing/expired token (the most common real-world
+        # failure) is recorded as an errored DigestRun instead of leaving the row
+        # stuck in "running" forever.
+        creds = _load_gmail_credentials()
         service = _build_gmail_service(creds)
         raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
         service.users().messages().send(

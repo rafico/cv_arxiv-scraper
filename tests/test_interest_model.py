@@ -45,6 +45,9 @@ class _FakeEmbeddingService:
     def __init__(self, vectors_by_id: dict[int, np.ndarray]):
         self.vectors_by_id = vectors_by_id
 
+    def index_size(self) -> int:
+        return len(self.vectors_by_id)
+
     def get_paper_vectors(self, paper_ids):
         found = [pid for pid in paper_ids if pid in self.vectors_by_id]
         if not found:
@@ -121,6 +124,21 @@ class InterestProfileTests(FlaskDBTestCase):
             saved = self._add_feedback("save", MIN_POSITIVE_FEEDBACK, axis=0)
             for paper in saved:
                 service.vectors_by_id[paper.id] = _basis_vector(0)
+
+            self.assertIsNotNone(build_interest_profile(self.app))
+
+    def test_cache_invalidates_when_backlog_papers_get_indexed(self):
+        # 5 saved papers but only 4 embedded at first → profile reads as disabled.
+        # When the 5th embeds later (no new feedback), the feedback-only cache key
+        # wouldn't change; keying on index size too must force the recompute.
+        saved = self._add_feedback("save", MIN_POSITIVE_FEEDBACK, axis=0)
+        service = self._fake_service({0: saved[:-1]})  # only 4 of 5 vectors indexed
+
+        with patch("app.services.embeddings.get_embedding_service", return_value=service):
+            self.assertIsNone(build_interest_profile(self.app))
+
+            # The 5th paper gets embedded by a later scrape — no new feedback.
+            service.vectors_by_id[saved[-1].id] = _basis_vector(0)
 
             self.assertIsNotNone(build_interest_profile(self.app))
 

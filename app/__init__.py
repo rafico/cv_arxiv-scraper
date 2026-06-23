@@ -272,7 +272,12 @@ def _ensure_secret_key(instance_path: Path) -> str:
     key = os.urandom(32).hex()
     try:
         key_path.parent.mkdir(parents=True, exist_ok=True)
-        key_path.write_text(key, encoding="utf-8")
+        # Create with 0600 from the start so the session-signing key is never
+        # briefly world-readable (write-then-chmod TOCTOU); trailing chmod also
+        # tightens an already-existing file.
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(key)
         os.chmod(key_path, 0o600)
     except OSError:
         pass  # Fall back to ephemeral key if we can't write.

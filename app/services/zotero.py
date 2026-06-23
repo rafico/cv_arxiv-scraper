@@ -171,6 +171,24 @@ class ZoteroClient:
 
         return item
 
+    @staticmethod
+    def _failed_items(resp: requests.Response) -> dict:
+        """Extract Zotero's per-item ``failed`` map from a 200 response.
+
+        The Zotero Web API returns HTTP 200 even when individual items are
+        rejected (validation, quota, …), reporting the outcome in the body as
+        ``{"successful": …, "unchanged": …, "failed": {...}}``. Treating any 200
+        as full success silently loses those items, so callers must inspect this.
+        Defensive against non-JSON / non-dict bodies (older/mocked responses).
+        """
+        try:
+            body = resp.json()
+        except (ValueError, TypeError):
+            return {}
+        if isinstance(body, dict) and isinstance(body.get("failed"), dict):
+            return body["failed"]
+        return {}
+
     def add_item(self, paper: Paper, collection_key: str | None = None) -> dict:
         """Add a paper to the user's Zotero library.
 
@@ -186,9 +204,15 @@ class ZoteroClient:
                 timeout=30,
             )
             resp.raise_for_status()
-            return {"success": True, "message": "Item added to Zotero."}
         except requests.RequestException as exc:
             return {"success": False, "message": f"Failed to add item: {exc}"}
+
+        failed = self._failed_items(resp)
+        if failed:
+            reason: object = next(iter(failed.values()), {})
+            message = reason.get("message") if isinstance(reason, dict) else None
+            return {"success": False, "message": f"Zotero rejected the item: {message or 'unknown error'}"}
+        return {"success": True, "message": "Item added to Zotero."}
 
     def sync_saved_papers(
         self,
@@ -201,6 +225,7 @@ class ZoteroClient:
         """
         items = [self._paper_to_zotero_item(p, collection_key) for p in papers]
         synced = 0
+        rejected = 0
 
         for i in range(0, len(items), ZOTERO_BATCH_LIMIT):
             batch = items[i : i + ZOTERO_BATCH_LIMIT]
@@ -212,14 +237,23 @@ class ZoteroClient:
                     timeout=60,
                 )
                 resp.raise_for_status()
-                synced += len(batch)
             except requests.RequestException as exc:
                 return {
                     "success": False,
                     "message": f"Sync failed after {synced} items: {exc}",
                     "synced_count": synced,
                 }
+            # A 200 can still reject individual items; only count the accepted ones.
+            failed = len(self._failed_items(resp))
+            synced += len(batch) - failed
+            rejected += failed
 
+        if rejected:
+            return {
+                "success": False,
+                "message": f"Synced {synced} of {len(items)} papers; Zotero rejected {rejected}.",
+                "synced_count": synced,
+            }
         return {
             "success": True,
             "message": f"Synced {synced} papers to Zotero.",

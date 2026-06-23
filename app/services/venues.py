@@ -83,6 +83,23 @@ def _find_year(comment: str, *, search_from: int) -> int | None:
     return int(match.group()) if match else None
 
 
+def _nearest_distance(pattern: re.Pattern[str], comment: str, venue: re.Match[str]) -> int | None:
+    """Distance from the venue mention to the closest occurrence of ``pattern``."""
+    best: int | None = None
+    for m in pattern.finditer(comment):
+        distance = abs(m.start() - venue.start())
+        if best is None or distance < best:
+            best = distance
+    return best
+
+
+def _signal_near_venue(pattern: re.Pattern[str], comment: str, venue: re.Match[str], *, window: int = 30) -> bool:
+    """Whether ``pattern`` occurs within ``window`` characters of the venue mention."""
+    lo = max(0, venue.start() - window)
+    hi = min(len(comment), venue.end() + window)
+    return bool(pattern.search(comment, lo, hi))
+
+
 def parse_venue(comment: str | None) -> VenueMatch | None:
     """Detect a known venue and acceptance status in an arXiv comment string."""
     if not comment or not comment.strip():
@@ -103,19 +120,29 @@ def parse_venue(comment: str | None) -> VenueMatch | None:
     canonical, match = found
     year = _find_year(comment, search_from=match.end())
 
-    accepted = bool(_ACCEPT_RE.search(comment))
-    if _SUBMIT_RE.search(comment) and not accepted:
+    # Weigh acceptance signals by how close they sit to the venue mention rather
+    # than first-match-wins, so unrelated words elsewhere in the comment don't
+    # flip the status. "Submitted to CVPR; we hope it is accepted" is a
+    # submission (the stray "accepted" is farther away), and "Accepted to CVPR
+    # (Oral). Extended version of our ICCV workshop paper" is an oral (the
+    # "workshop" token belongs to the other venue, not CVPR).
+    submit_dist = _nearest_distance(_SUBMIT_RE, comment, match)
+    accept_dist = _nearest_distance(_ACCEPT_RE, comment, match)
+    qualifier = _QUALIFIER_RE.search(comment)
+
+    if submit_dist is not None and (accept_dist is None or submit_dist <= accept_dist):
+        # A submission cue at least as close as any acceptance cue → not confirmed.
         status = "mentioned"
-    elif _WORKSHOP_RE.search(comment):
+    elif _signal_near_venue(_WORKSHOP_RE, comment, match):
+        # "workshop" adjacent to the venue → a workshop acceptance.
         status = "workshop"
+    elif qualifier is not None:
+        # An oral/spotlight/highlight qualifier outranks a bare acceptance.
+        status = qualifier.group(1).lower()
+    elif accept_dist is not None:
+        status = "accepted"
     else:
-        qualifier = _QUALIFIER_RE.search(comment)
-        if qualifier:
-            status = qualifier.group(1).lower()
-        elif accepted:
-            status = "accepted"
-        else:
-            status = "mentioned"
+        status = "mentioned"
 
     return VenueMatch(venue=canonical, year=year, status=status)
 

@@ -135,8 +135,23 @@ class ArxivApiBackend:
             if not entries:
                 break
 
-            for batch_index, entry in enumerate(entries):
-                candidate = _parse_atom_candidate(entry)
+            candidates = [_parse_atom_candidate(entry) for entry in entries]
+
+            # If the saved cursor is no longer present on the page we resumed
+            # from, it was pushed off by submissions/withdrawals that landed
+            # between runs. Skipping the page (waiting to re-find the cursor)
+            # would silently drop every paper on it, so treat a missing cursor as
+            # "already past" and resume consuming from the page's first entry.
+            # Re-processing a few already-seen papers is harmless — _save_results
+            # de-dupes on the unique arxiv_id.
+            if (
+                not resume_consumed
+                and resume_page is not None
+                and resume_after_arxiv_id not in {c.arxiv_id for c in candidates}
+            ):
+                resume_consumed = True
+
+            for batch_index, candidate in enumerate(candidates):
                 current_page = ((start + batch_index) // self.page_size) + 1
 
                 if not resume_consumed and resume_page is not None:

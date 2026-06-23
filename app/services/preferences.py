@@ -40,6 +40,21 @@ def _dedupe_str_list(items: list[str]) -> list[str]:
     return list(dict.fromkeys(cleaned))
 
 
+def _as_str_list(value: object) -> list[str]:
+    """Coerce a config value into a list of strings.
+
+    A hand-edited ``config.yaml`` can store a whitelist as a bare YAML scalar
+    (``authors: Jane Doe``) instead of a list. ``list("Jane Doe")`` would explode
+    that into single characters, so treat a scalar string as a one-element list
+    and anything that isn't a list as empty.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return value
+    return []
+
+
 def get_preferences(config: dict | None) -> dict:
     merged = deepcopy(DEFAULT_PREFERENCES)
     if not isinstance(config, dict):
@@ -137,9 +152,13 @@ def save_config(config_path: Path, full_config: dict) -> dict:
 
 def append_whitelist_term(config: dict, key: str, term: str) -> tuple[dict, bool]:
     updated = deepcopy(config)
-    whitelists = updated.setdefault("whitelists", {})
-    items = _dedupe_str_list(list(whitelists.get(key, [])) + [term])
-    added = term.strip() in items and term.strip() not in config.get("whitelists", {}).get(key, [])
+    whitelists = updated.get("whitelists")
+    if not isinstance(whitelists, dict):
+        whitelists = {}
+        updated["whitelists"] = whitelists
+    existing = _dedupe_str_list(_as_str_list(whitelists.get(key)))
+    items = _dedupe_str_list(existing + [term])
+    added = term.strip() in items and term.strip() not in existing
     whitelists[key] = items
     return updated, added
 

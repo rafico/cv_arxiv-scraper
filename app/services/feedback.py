@@ -17,6 +17,11 @@ _POSITIVE_ACTIONS = {FeedbackAction.SAVE.value, FeedbackAction.PRIORITY.value}
 # Additive actions (don't conflict with others)
 _ADDITIVE_ACTIONS = {FeedbackAction.SHARED.value, FeedbackAction.SKIMMED.value}
 
+# Marker stored on a SAVE row that was auto-added because the user prioritized a
+# paper. Lets un-prioritizing remove that implied save while leaving a save the
+# user added explicitly (which carries no such marker).
+_IMPLIED_BY_PRIORITY = "implied_by_priority"
+
 
 def _load_feedback_rows(paper_id: int) -> list[PaperFeedback]:
     return PaperFeedback.query.filter_by(paper_id=paper_id).all()
@@ -45,6 +50,13 @@ def apply_feedback_action(
     if existing:
         db.session.delete(existing)
         delta -= compute_feedback_delta(action)
+        # Un-prioritizing removes the save that priority implied, but never a save
+        # the user made explicitly (only the implied one carries the marker).
+        if action == FeedbackAction.PRIORITY.value:
+            implied_save = rows_by_action.get(FeedbackAction.SAVE.value)
+            if implied_save is not None and implied_save.reason == _IMPLIED_BY_PRIORITY:
+                db.session.delete(implied_save)
+                delta -= compute_feedback_delta(FeedbackAction.SAVE.value)
     else:
         fb = PaperFeedback(paper_id=paper_id, action=action)
         if reason:
@@ -73,7 +85,13 @@ def apply_feedback_action(
             # Priority implies save
             if action == FeedbackAction.PRIORITY.value:
                 if FeedbackAction.SAVE.value not in rows_by_action:
-                    db.session.add(PaperFeedback(paper_id=paper_id, action=FeedbackAction.SAVE.value))
+                    db.session.add(
+                        PaperFeedback(
+                            paper_id=paper_id,
+                            action=FeedbackAction.SAVE.value,
+                            reason=_IMPLIED_BY_PRIORITY,
+                        )
+                    )
                     delta += compute_feedback_delta(FeedbackAction.SAVE.value)
         # Additive actions (shared, skimmed) don't conflict with anything
 

@@ -53,7 +53,13 @@ def _load_full_config() -> dict:
     config_path = Path(current_app.config["CONFIG_PATH"])
     if config_path.is_file():
         with config_path.open("r", encoding="utf-8") as handle:
-            return yaml.safe_load(handle)
+            loaded = yaml.safe_load(handle)
+        # An empty or whitespace-only file yields None, and a malformed scalar
+        # yields a non-dict; either would make the callers' `config[key] = ...`
+        # raise a TypeError and 500 every settings POST. Fall back to the live
+        # in-memory config so the route can still write a sane document.
+        if isinstance(loaded, dict):
+            return loaded
     return deepcopy(current_app.config["SCRAPER_CONFIG"])
 
 

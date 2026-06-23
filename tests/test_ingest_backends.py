@@ -239,6 +239,31 @@ class ArxivApiBackendTests(TestCase):
         self.assertEqual(mock_request.call_args_list[0].kwargs["params"]["start"], 2)
         self.assertEqual(mock_request.call_args_list[1].kwargs["params"]["start"], 4)
 
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_fetch_does_not_drop_page_when_cursor_absent(self, mock_request):
+        # The saved cursor was pushed off its page between runs (new submissions /
+        # withdrawals). The resumed page must still be returned, not silently
+        # skipped while waiting to re-find a cursor that is no longer there.
+        mock_request.side_effect = [
+            Mock(text=ARXIV_API_XML_RESUME_FIRST_PAGE),
+            Mock(text=ARXIV_API_XML_RESUME_SECOND_PAGE),
+        ]
+
+        backend = ArxivApiBackend(page_size=2)
+        candidates = backend.fetch(
+            categories=["cs.CV"],
+            start_dt=date(2026, 4, 1),
+            end_dt=date(2026, 4, 2),
+            max_results=25,
+            offset=2,
+            resume_after_arxiv_id="2604.09999",  # not present on the resumed page
+        )
+
+        self.assertEqual(
+            [candidate.arxiv_id for candidate in candidates],
+            ["2604.00003", "2604.00004", "2604.00005"],
+        )
+
 
 class ArxivAdapterTests(TestCase):
     def test_result_to_entry_uses_candidate_shape(self):

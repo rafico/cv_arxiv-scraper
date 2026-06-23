@@ -68,5 +68,40 @@ class SchedulerLockTests(unittest.TestCase):
             scheduler.stop()
 
 
+class SchedulerDailyAtParsingTests(unittest.TestCase):
+    def test_parse_daily_at_falls_back_on_invalid_values(self):
+        # Out-of-range-but-parseable, malformed, and good inputs.
+        self.assertEqual(ScrapeScheduler._parse_daily_at("25:00"), (8, 0))
+        self.assertEqual(ScrapeScheduler._parse_daily_at("08:60"), (8, 0))
+        self.assertEqual(ScrapeScheduler._parse_daily_at("-1:30"), (8, 0))
+        self.assertEqual(ScrapeScheduler._parse_daily_at("notatime"), (8, 0))
+        self.assertEqual(ScrapeScheduler._parse_daily_at("23:59"), (23, 59))
+
+    def test_out_of_range_daily_at_does_not_crash_startup(self):
+        # "25:00" parses to ints but is not a valid wall-clock time; before the
+        # fix, _seconds_until's datetime.replace raised straight out of start().
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = SimpleNamespace(instance_path=tmpdir)
+            scheduler = ScrapeScheduler()
+            try:
+                with patch("app.services.scheduler.threading.Timer") as timer:
+                    scheduler.start(app, daily_at="25:00")
+                self.assertTrue(scheduler.is_enabled)
+                timer.assert_called_once()
+            finally:
+                scheduler.stop()
+
+    def test_next_run_at_does_not_crash_on_invalid_daily_at(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = SimpleNamespace(instance_path=tmpdir)
+            scheduler = ScrapeScheduler()
+            try:
+                with patch.object(scheduler, "_schedule_next"):
+                    scheduler.start(app, daily_at="25:00")
+                self.assertIn("08:00", scheduler.next_run_at)
+            finally:
+                scheduler.stop()
+
+
 if __name__ == "__main__":
     unittest.main()
