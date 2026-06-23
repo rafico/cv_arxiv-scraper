@@ -12,7 +12,17 @@ from flask_sqlalchemy.query import Query
 from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
 from app.csrf import get_or_create_csrf_token
 from app.enums import FeedbackAction, SortOption
-from app.models import Collection, DigestRun, Paper, PaperCollection, PaperFeedback, SavedSearch, ScrapeRun, db
+from app.models import (
+    Collection,
+    DigestRun,
+    Paper,
+    PaperCollection,
+    PaperFeedback,
+    SavedSearch,
+    ScrapeRun,
+    db,
+    inbox_freshness_clause,
+)
 from app.services.feedback import get_feedback_snapshot
 from app.services.preferences import first_author_name, get_preferences
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score, generate_ranking_explanation
@@ -108,13 +118,7 @@ def _apply_timeframe(query: Query, timeframe: str) -> Query:
         return query
 
     cutoff_dt = now_utc() - timedelta(days=days)
-    cutoff_date = cutoff_dt.date()
-    return query.filter(
-        db.or_(
-            Paper.publication_dt >= cutoff_date,
-            db.and_(Paper.publication_dt.is_(None), Paper.scraped_at >= cutoff_dt),
-        )
-    )
+    return query.filter(inbox_freshness_clause(cutoff_dt))
 
 
 def _interest_counts(config: dict) -> dict[str, int]:

@@ -14,6 +14,28 @@ from app.services.rate_limiter import get_shared_rate_limiter, resolve_rate_limi
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = "cv-arxiv-scraper/1.0"
+
+# 4xx statuses that are still worth retrying: rate-limit (429), request timeout
+# (408), too-early (425). Every other 4xx is a permanent client error — retrying
+# a 404/403/400 just wastes a request and a backoff sleep, and (for arXiv PDFs of
+# freshly announced papers) spams the log with pointless retries.
+_RETRYABLE_4XX = frozenset({408, 425, 429})
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Whether ``exc`` from an HTTP attempt is worth retrying.
+
+    Network-level failures (timeouts, connection resets) carry no response and
+    are transient, so retry them. HTTP errors are retried only for 5xx and the
+    select 4xx in :data:`_RETRYABLE_4XX`; all other 4xx fail fast.
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status is None:
+        return True
+    return status >= 500 or status in _RETRYABLE_4XX
+
+
 _SESSION_LIMITER_ATTR = "_cv_arxiv_rate_limiter"
 _SESSION_RATE_LIMIT_ATTR = "_cv_arxiv_rate_limit_settings"
 _SESSION_USER_AGENT_ATTR = "_cv_arxiv_user_agent"
@@ -104,7 +126,7 @@ def request_with_backoff(
             return response
         except Exception as exc:  # pragma: no cover - exercised by integration paths
             last_exc = exc
-            if attempt == attempts:
+            if attempt == attempts or not _is_retryable(exc):
                 break
 
             delay = base_delay * (2 ** (attempt - 1))

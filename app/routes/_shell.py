@@ -15,24 +15,20 @@ from flask import Flask
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.enums import FeedbackAction
-from app.models import Collection, Paper, PaperFeedback, SavedSearch, db
+from app.models import Collection, Paper, PaperFeedback, SavedSearch, db, inbox_freshness_clause
 from app.services.text import now_utc
 
 
 def _inbox_count() -> int:
-    """Papers visible in the default inbox view (last day, not hidden)."""
+    """Papers visible in the default inbox view (last day, not hidden).
+
+    Mirrors the dashboard's daily timeframe (see ``_apply_timeframe``): a paper
+    counts if it was published in the last day, or scraped in the last day with
+    a recent-enough publication date — so freshly scraped, announcement-lagged
+    arXiv papers are counted the same way they're displayed.
+    """
     cutoff_dt = now_utc() - timedelta(days=1)
-    cutoff_date = cutoff_dt.date()
-    return (
-        Paper.query.filter(Paper.is_hidden.is_(False))
-        .filter(
-            db.or_(
-                Paper.publication_dt >= cutoff_date,
-                db.and_(Paper.publication_dt.is_(None), Paper.scraped_at >= cutoff_dt),
-            )
-        )
-        .count()
-    )
+    return Paper.query.filter(Paper.is_hidden.is_(False)).filter(inbox_freshness_clause(cutoff_dt)).count()
 
 
 def _build_shell() -> dict:

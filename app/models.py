@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text as sql_text
 from sqlalchemy.types import TEXT, TypeDecorator
+
+from app.constants import INBOX_ANNOUNCEMENT_LAG_DAYS
 
 db = SQLAlchemy()
 
@@ -168,6 +171,34 @@ class Paper(db.Model):
         from app.services.ranking import combined_rank_score
 
         return combined_rank_score(float(self.paper_score or 0.0), int(self.feedback_score or 0))
+
+
+def inbox_freshness_clause(cutoff_dt: datetime):
+    """SQLAlchemy filter for papers that are "fresh" relative to ``cutoff_dt``.
+
+    A paper qualifies if it was *published* on/after the cut-off date, OR it
+    *arrived* (was scraped) on/after the cut-off and is not a stale backfill.
+
+    arXiv announces papers up to several days after their listed publication
+    date, so a paper scraped today routinely carries a publication date a few
+    days in the past. Anchoring purely on ``publication_dt`` therefore hides
+    every just-scraped paper from short windows — which is why the daily inbox
+    can read empty right after a successful scrape. We anchor the arrival branch
+    on ``scraped_at`` instead, bounding publication age by
+    ``INBOX_ANNOUNCEMENT_LAG_DAYS`` so genuine old imports don't resurface.
+    """
+    cutoff_date = cutoff_dt.date()
+    publication_floor = cutoff_date - timedelta(days=INBOX_ANNOUNCEMENT_LAG_DAYS)
+    return db.or_(
+        Paper.publication_dt >= cutoff_date,
+        db.and_(
+            Paper.scraped_at >= cutoff_dt,
+            db.or_(
+                Paper.publication_dt.is_(None),
+                Paper.publication_dt >= publication_floor,
+            ),
+        ),
+    )
 
 
 class Collection(db.Model):
