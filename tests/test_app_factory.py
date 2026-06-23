@@ -70,6 +70,10 @@ class CreateAppInitializationTests(unittest.TestCase):
                         "uq_papers_arxiv_id",
                     }.issubset(paper_indexes)
                 )
+                # The named idx_papers_* indexes are the only copies — the old
+                # column-level index=True duplicates (ix_papers_*) must not exist.
+                self.assertNotIn("ix_papers_scraped_at", paper_indexes)
+                self.assertNotIn("ix_papers_publication_dt", paper_indexes)
 
                 feedback_indexes = {
                     row["name"] for row in db.session.execute(text("PRAGMA index_list('paper_feedback')")).mappings()

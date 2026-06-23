@@ -141,8 +141,11 @@ class Paper(db.Model):
     publication_date = db.Column(db.Text)
     scraped_date = db.Column(db.Text, nullable=False)
 
-    publication_dt = db.Column(db.Date, index=True)
-    scraped_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False, index=True)
+    # No column-level index=True here: __table_args__ already declares
+    # idx_papers_publication_dt / idx_papers_scraped_at. Declaring both makes
+    # create_all() emit redundant ix_papers_* duplicates with identical coverage.
+    publication_dt = db.Column(db.Date)
+    scraped_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     feedback = db.relationship("PaperFeedback", back_populates="paper", cascade="all, delete-orphan")
 

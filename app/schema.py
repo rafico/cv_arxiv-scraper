@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone
 
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from app.models import db
 
@@ -121,6 +122,12 @@ INDEX_STATEMENTS = [
 UNIQUE_ARXIV_INDEX_STATEMENT = (
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_arxiv_id ON papers (arxiv_id) WHERE arxiv_id IS NOT NULL"
 )
+# Older DBs were provisioned with column-level index=True, which emitted ix_papers_*
+# duplicates of the named idx_papers_* indexes. Drop the redundant copies.
+REDUNDANT_INDEX_DROPS = [
+    "DROP INDEX IF EXISTS ix_papers_scraped_at",
+    "DROP INDEX IF EXISTS ix_papers_publication_dt",
+]
 
 
 def _try_parse_date(value: str | None):
@@ -249,6 +256,8 @@ def ensure_schema() -> None:
 
     for statement in INDEX_STATEMENTS:
         db.session.execute(text(statement))
+    for statement in REDUNDANT_INDEX_DROPS:
+        db.session.execute(text(statement))
     db.session.commit()
     try:
         db.session.execute(text(UNIQUE_ARXIV_INDEX_STATEMENT))
@@ -274,9 +283,10 @@ def ensure_schema() -> None:
         if scraped_at is None:
             scraped_at = _try_parse_datetime(row["scraped_date"])
         if scraped_at is None:
-            created_at = row["created_at"]
-            if isinstance(created_at, datetime):
-                scraped_at = created_at
+            # A raw text() SELECT of a SQLite DATETIME yields a str, so the old
+            # isinstance(created_at, datetime) guard was always False and silently
+            # discarded a real created_at. Parse it like the other date fields.
+            scraped_at = _try_parse_datetime(row["created_at"])
         if scraped_at is None:
             scraped_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -332,24 +342,57 @@ _ARXIV_ID_RE = re.compile(r"arxiv\.org/abs/(.+?)(?:v\d+)?$")
 
 
 def _backfill_arxiv_ids() -> None:
-    """Fill in NULL arxiv_id values by extracting from the paper link."""
+    """Fill in NULL arxiv_id values by extracting from the paper link.
+
+    The version-stripping regex maps every version of a paper (…v1, …v2) to the
+    same id, and the partial unique index uq_papers_arxiv_id already exists, so a
+    legacy DB holding two versions of one paper would raise IntegrityError on the
+    bulk UPDATE and abort create_app. Dedupe against ids already present and within
+    this batch, then fall back to per-row updates that skip any residual collision.
+    """
     rows = db.session.execute(text("SELECT id, link FROM papers WHERE arxiv_id IS NULL AND link IS NOT NULL")).all()
     if not rows:
         return
 
+    assigned = {
+        row[0]
+        for row in db.session.execute(text("SELECT arxiv_id FROM papers WHERE arxiv_id IS NOT NULL")).all()
+    }
     updates = []
     for paper_id, link in rows:
         match = _ARXIV_ID_RE.search(link or "")
-        if match:
-            updates.append({"id": paper_id, "arxiv_id": match.group(1)})
+        if not match:
+            continue
+        arxiv_id = match.group(1)
+        if arxiv_id in assigned:
+            # Another row already owns this id (the unique index would reject it);
+            # leave this row NULL rather than crashing the migration.
+            continue
+        assigned.add(arxiv_id)
+        updates.append({"id": paper_id, "arxiv_id": arxiv_id})
 
-    if updates:
-        LOGGER.info("Backfilling arxiv_id for %d papers...", len(updates))
-        db.session.execute(
-            text("UPDATE papers SET arxiv_id = :arxiv_id WHERE id = :id"),
-            updates,
-        )
+    if not updates:
+        return
+
+    LOGGER.info("Backfilling arxiv_id for %d papers...", len(updates))
+    stmt = text("UPDATE papers SET arxiv_id = :arxiv_id WHERE id = :id")
+    try:
+        db.session.execute(stmt, updates)
         db.session.commit()
+    except IntegrityError as exc:
+        # Defensive: a residual collision shouldn't abort startup. Roll back and
+        # apply row-by-row, skipping any id that still collides.
+        LOGGER.warning("Bulk arxiv_id backfill hit a collision (%s); retrying per-row", exc)
+        db.session.rollback()
+        applied = 0
+        for update in updates:
+            try:
+                db.session.execute(stmt, update)
+                db.session.commit()
+                applied += 1
+            except IntegrityError:
+                db.session.rollback()
+        LOGGER.info("Backfilled arxiv_id for %d/%d papers after collisions", applied, len(updates))
 
 
 def _fix_pdf_links() -> None:

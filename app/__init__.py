@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -205,6 +206,10 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
         raise ValueError("'preferences' must be a dict")
     normalized_preferences = get_preferences(config)
     for key, value in normalized_preferences["ranking"].items():
+        # NaN slips past both bounds below (every comparison with NaN is False),
+        # persists to config.yaml, and corrupts every paper_score. Reject it first.
+        if not math.isfinite(value):
+            raise ValueError(f"'preferences.ranking.{key}' must be a finite number")
         if value <= 0:
             raise ValueError(f"'preferences.ranking.{key}' must be positive")
         if value > 1000:
