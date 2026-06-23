@@ -49,7 +49,7 @@
     <option value="citations" {{ 'selected' if current_filters.sort == 'citations' }}>Most Cited</option>
     {% endif %}
 </select>
-<a href="{{ url_for('dashboard.index', **dict(request.args.to_dict(), density='list' if visual_mode else 'visual')) }}"
+<a href="{{ url_for('dashboard.index', **(dict(request.args.to_dict(), density='list' if visual_mode else 'visual') | safe_url_args)) }}"
    class="btn-ghost hidden lg:inline-flex py-1.5 text-xs">{{ 'List view' if visual_mode else 'Visual grid' }}</a>
 <button type="button" onclick="toggleBulkMode()" id="bulk-mode-toggle"
         class="btn-ghost hidden lg:inline-flex py-1.5 text-xs">Select</button>

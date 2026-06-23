@@ -396,6 +396,20 @@ def create_app(config_overrides: dict | None = None) -> Flask:
 
     app.jinja_env.globals["ARXIV_CATEGORY_NAMES"] = ARXIV_CATEGORY_NAMES
 
+    def _safe_url_args(mapping: object) -> dict:
+        """Drop werkzeug-reserved (``_``-prefixed) keys before splatting into ``url_for``.
+
+        A saved-search row or a crafted query string can carry a key like ``_method``
+        or ``_external``; passing it to ``url_for(**...)`` raises ``BuildError`` and 500s
+        the page. The dashboard only consumes named query params, so ``_``-prefixed keys
+        are never legitimate here.
+        """
+        if not isinstance(mapping, dict):
+            return {}
+        return {k: v for k, v in mapping.items() if not (isinstance(k, str) and k.startswith("_"))}
+
+    app.jinja_env.filters["safe_url_args"] = _safe_url_args
+
     # Start built-in scheduler if configured.
     scheduler_config = app.config["SCRAPER_CONFIG"].get("scheduler", {})
     if scheduler_config.get("enabled"):

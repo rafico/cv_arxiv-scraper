@@ -56,6 +56,15 @@ def validate_saved_search(data: dict) -> list[str]:
             elif not all(isinstance(item, str) for item in data[field]):
                 errors.append(f"{field} must contain only strings")
 
+    # The free-form ``filters`` dict is splatted into ``url_for`` in the sidebar.
+    # A werkzeug-reserved key (``_method``/``_external``/…) raises BuildError and
+    # would brick every page, so reject ``_``-prefixed keys at the boundary.
+    filters = data.get("filters")
+    if isinstance(filters, dict):
+        reserved = sorted(k for k in filters if isinstance(k, str) and k.startswith("_"))
+        if reserved:
+            errors.append(f"filters may not contain reserved keys: {', '.join(reserved)}")
+
     return errors
 
 

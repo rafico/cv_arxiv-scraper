@@ -79,7 +79,7 @@
         {% if saved_searches %}
         <span class="text-gray-300 mx-1">|</span>
         {% for ss in saved_searches %}
-        {% set ss_filters = ss.filters if ss.filters is mapping else {} %}
+        {% set ss_filters = (ss.filters if ss.filters is mapping else {}) | safe_url_args %}
         <a href="{{ url_for('dashboard.index', **ss_filters) }}"
            class="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors">
             {{ ss.name }}
@@ -251,7 +251,7 @@
                class="text-gray-500 hover:text-gray-700">Reset filters</a>
             {% endif %}
             {% set visual_mode = current_filters.density == 'visual' %}
-            <a href="{{ url_for('dashboard.index', **dict(request.args.to_dict(), density='comfortable' if visual_mode else 'visual')) }}"
+            <a href="{{ url_for('dashboard.index', **(dict(request.args.to_dict(), density='comfortable' if visual_mode else 'visual') | safe_url_args)) }}"
                class="text-gray-400 hover:text-gray-600 text-xs">{{ 'Comfortable view' if visual_mode else 'Visual grid' }}</a>
             <button type="button" onclick="toggleBulkMode()"
                     id="bulk-mode-toggle"
