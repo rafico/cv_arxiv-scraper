@@ -1,10 +1,12 @@
 """Feed source management endpoints."""
 
 from flask import abort, jsonify, request
+from sqlalchemy.exc import IntegrityError
 
 from app.csrf import validate_csrf_token
 from app.models import db
 from app.routes.api import api_bp
+from app.routes.api._validation import optional_str, require_str
 
 
 @api_bp.route("/feed-sources", methods=["GET"])
@@ -33,14 +35,19 @@ def create_feed_source():
 
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "").strip()
-    url = (payload.get("url") or "").strip()
-    if not name or not url:
-        return jsonify({"error": "Missing 'name' or 'url'"}), 400
-    feed_type = payload.get("feed_type", "arxiv_rss")
+    name = require_str(payload, "name")
+    url = require_str(payload, "url")
+    if FeedSource.query.filter_by(url=url).first():
+        return jsonify({"error": "Feed source with this URL already exists"}), 409
+    feed_type = optional_str(payload, "feed_type") or "arxiv_rss"
     s = FeedSource(name=name, url=url, feed_type=feed_type)
     db.session.add(s)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Closes the (single-worker, narrow) race between the pre-check and commit.
+        db.session.rollback()
+        return jsonify({"error": "Feed source with this URL already exists"}), 409
     return jsonify({"id": s.id, "name": s.name}), 201
 
 

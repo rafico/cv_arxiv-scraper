@@ -7,6 +7,7 @@ from app.enums import ReadingStatus
 from app.models import Paper, db
 from app.routes._config import persist_config
 from app.routes.api import api_bp
+from app.routes.api._validation import require_str
 from app.services import apply_feedback_action
 from app.services.preferences import (
     append_muted_term,
@@ -54,6 +55,9 @@ def paper_reading_status(paper_id: int):
     paper = db.session.get(Paper, paper_id) or abort(404)
     payload = request.get_json(silent=True) or {}
     status = payload.get("status")
+    if status is not None and not isinstance(status, str):
+        # A non-hashable (dict/list) would raise TypeError on the set lookup below.
+        return jsonify({"error": "'status' must be a string"}), 400
     if status is not None and status not in VALID_READING_STATUSES:
         return jsonify({"error": f"Invalid status. Must be one of: {', '.join(sorted(VALID_READING_STATUSES))}"}), 400
     paper.reading_status = status
@@ -79,9 +83,7 @@ def paper_add_tag(paper_id: int):
     validate_csrf_token()
     paper = db.session.get(Paper, paper_id) or abort(404)
     payload = request.get_json(silent=True) or {}
-    tag = payload.get("tag", "").strip()
-    if not tag:
-        return jsonify({"error": "Missing 'tag'"}), 400
+    tag = require_str(payload, "tag")
     current = list(paper.user_tags or [])
     if tag not in current:
         current.append(tag)
@@ -95,9 +97,7 @@ def paper_remove_tag(paper_id: int):
     validate_csrf_token()
     paper = db.session.get(Paper, paper_id) or abort(404)
     payload = request.get_json(silent=True) or {}
-    tag = payload.get("tag", "").strip()
-    if not tag:
-        return jsonify({"error": "Missing 'tag'"}), 400
+    tag = require_str(payload, "tag")
     current = list(paper.user_tags or [])
     if tag in current:
         current.remove(tag)
