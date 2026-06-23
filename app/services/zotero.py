@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import requests
+
+from app.services.secret_files import write_secret_file
 
 if TYPE_CHECKING:
     from app.models import Paper
@@ -48,8 +49,7 @@ class ZoteroClient:
     def _save_credentials(self, api_key: str, user_id: str) -> None:
         """Save credentials to disk with restricted permissions."""
         data = {"api_key": api_key, "user_id": user_id}
-        self.credentials_path.write_text(json.dumps(data), encoding="utf-8")
-        os.chmod(self.credentials_path, 0o600)
+        write_secret_file(self.credentials_path, json.dumps(data))
         self._creds = data
 
     def _get_headers(self) -> dict:

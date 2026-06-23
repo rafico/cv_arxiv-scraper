@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 from datetime import date, timedelta
 from html import escape
 from pathlib import Path
@@ -31,6 +30,7 @@ if TYPE_CHECKING:
 
 from app.models import DigestRun, Paper, db
 from app.services.ranking import FEEDBACK_BOOST, combined_rank_score
+from app.services.secret_files import write_secret_file
 from app.services.text import now_utc, utc_today
 
 LOGGER = logging.getLogger(__name__)
@@ -211,8 +211,7 @@ def finish_oauth_flow(
         )
         flow.fetch_token(authorization_response=authorization_response_url)
         creds = flow.credentials
-        token_path.write_text(creds.to_json())
-        os.chmod(token_path, 0o600)
+        write_secret_file(token_path, creds.to_json())
         return {"success": True, "message": "Gmail authorized successfully."}
     except Exception as exc:
         msg = str(exc)
@@ -374,8 +373,7 @@ def _load_gmail_credentials(
                 f"Details: {exc}"
             ) from exc
         # Persist the refreshed token.
-        token_path.write_text(creds.to_json())
-        os.chmod(token_path, 0o600)
+        write_secret_file(token_path, creds.to_json())
 
     if not creds.valid:
         raise RuntimeError("Gmail credentials are invalid. Re-run 'python gmail_auth_setup.py'.")

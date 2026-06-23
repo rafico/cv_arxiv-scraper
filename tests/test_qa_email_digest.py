@@ -80,7 +80,7 @@ class GmailOAuthQaTests(unittest.TestCase):
 
             with (
                 patch("google_auth_oauthlib.flow.Flow.from_client_secrets_file", return_value=fake_flow),
-                patch("app.services.email_digest.os.chmod") as mock_chmod,
+                patch("app.services.secret_files.os.chmod") as mock_chmod,
             ):
                 result = finish_oauth_flow(
                     authorization_response_url="https://example.com/callback?code=abc&state=xyz",
@@ -111,7 +111,7 @@ class GmailOAuthQaTests(unittest.TestCase):
             with (
                 patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=fake_creds),
                 patch("google.auth.transport.requests.Request", return_value=object()) as mock_request,
-                patch("app.services.email_digest.os.chmod") as mock_chmod,
+                patch("app.services.secret_files.os.chmod") as mock_chmod,
             ):
                 loaded = _load_gmail_credentials(token_path=token_path)
                 written_token = token_path.read_text(encoding="utf-8")

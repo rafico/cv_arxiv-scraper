@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import requests
+
+from app.services.secret_files import write_secret_file
 
 if TYPE_CHECKING:
     from app.models import Paper
@@ -55,8 +56,7 @@ class MendeleyClient:
             "client_id": client_id,
             "client_secret": client_secret,
         }
-        self.credentials_path.write_text(json.dumps(data), encoding="utf-8")
-        os.chmod(self.credentials_path, 0o600)
+        write_secret_file(self.credentials_path, json.dumps(data))
 
     def _load_token(self) -> dict:
         """Load the stored OAuth token."""
@@ -68,8 +68,7 @@ class MendeleyClient:
 
     def _save_token(self, token_data: dict) -> None:
         """Save OAuth token to disk with restricted permissions."""
-        self.token_path.write_text(json.dumps(token_data), encoding="utf-8")
-        os.chmod(self.token_path, 0o600)
+        write_secret_file(self.token_path, json.dumps(token_data))
         self._token_data = token_data
 
     def _headers_for_access_token(self, access_token: str) -> dict:

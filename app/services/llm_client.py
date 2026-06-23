@@ -48,15 +48,12 @@ def has_api_key(key_path: Path | None = None) -> bool:
 
 
 def write_api_key(api_key: str, key_path: Path | None = None) -> Path:
-    path = key_path or _DEFAULT_KEY_PATH
     # Create with 0600 from the start so the key is never briefly world-readable
-    # (avoids a write-then-chmod TOCTOU window); the trailing chmod also tightens
-    # an already-existing file whose mode may be looser.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(api_key.strip())
-    os.chmod(path, 0o600)
-    return path
+    # (avoids a write-then-chmod TOCTOU window). Shared with the OAuth/reference-
+    # manager secret writers so the safe pattern can't drift.
+    from app.services.secret_files import write_secret_file
+
+    return write_secret_file(key_path or _DEFAULT_KEY_PATH, api_key.strip())
 
 
 class LLMClient:
