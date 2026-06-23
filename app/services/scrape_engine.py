@@ -756,7 +756,15 @@ def _entry_has_match_signal(entry: dict, whitelists: dict, affiliation_text: str
     )
 
 
-def _prefetch_affiliation_text(entries: list[dict], whitelists: dict, scraper_config: dict, session) -> None:
+def _prefetch_affiliation_text(
+    entries: list[dict],
+    whitelists: dict,
+    scraper_config: dict,
+    session,
+    *,
+    config: dict | None = None,
+    rate_limit_profile: str = "interactive",
+) -> None:
     """Download PDFs and extract affiliation-header text for entries whose API
     affiliations didn't already match — once per scrape, isolated.
 
@@ -786,8 +794,18 @@ def _prefetch_affiliation_text(entries: list[dict], whitelists: dict, scraper_co
     def _download(entry: dict) -> bytes | None:
         pdf_url = entry["link"].replace("/abs/", "/pdf/")
         try:
+            # Pass the same config + profile the session was configured with, so
+            # request_with_backoff doesn't clobber its custom User-Agent / rate
+            # limit back to defaults (and re-setattr the shared session per thread).
             response = request_with_backoff(
-                "GET", pdf_url, timeout=30, attempts=attempts, base_delay=1.0, session=session
+                "GET",
+                pdf_url,
+                timeout=30,
+                attempts=attempts,
+                base_delay=1.0,
+                session=session,
+                scraper_config=config,
+                rate_limit_profile=rate_limit_profile,
             )
             return response.content
         except Exception as exc:
@@ -967,7 +985,9 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             {"phase": "affiliations", "message": "Fetching metadata from arXiv API..."},
         )
         enrich_entries_with_api_metadata(entries, session=session)
-        _prefetch_affiliation_text(entries, whitelists, scraper_config, session)
+        _prefetch_affiliation_text(
+            entries, whitelists, scraper_config, session, config=config, rate_limit_profile="interactive"
+        )
 
         _emit(
             event_callback,
@@ -1064,7 +1084,9 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
         llm_client, interests_text = _create_llm_client(app)
         interest_profile = build_interest_profile(app)
         enrich_entries_with_api_metadata(entries, session=session)
-        _prefetch_affiliation_text(entries, whitelists, scraper_config, session)
+        _prefetch_affiliation_text(
+            entries, whitelists, scraper_config, session, config=config, rate_limit_profile="bulk"
+        )
 
         results = _collect_matched_results(
             entries,

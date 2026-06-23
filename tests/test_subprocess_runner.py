@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import signal
+import time
 
 import pytest
 
@@ -25,6 +26,15 @@ def _self_terminate_with_signal() -> None:
     os.kill(os.getpid(), signal.SIGKILL)
 
 
+def _large_payload(size: int) -> bytes:
+    return b"x" * size
+
+
+def _sleep(seconds: float) -> int:
+    time.sleep(seconds)
+    return 1
+
+
 @pytest.fixture
 def _isolated(monkeypatch):
     monkeypatch.setenv("CV_ARXIV_NATIVE_ISOLATION", "1")
@@ -43,6 +53,20 @@ def test_signal_death_becomes_native_crash_error(_isolated):
     # A child killed by a signal must surface as a catchable error, not crash the parent.
     with pytest.raises(NativeCrashError):
         run_isolated(_self_terminate_with_signal)
+
+
+def test_large_payload_returned_intact(_isolated):
+    # A result larger than the OS pipe buffer (~64KB) used to deadlock: the child
+    # blocked on queue.put() while the parent blocked on join(). Draining before
+    # joining must return the full payload (here 1 MiB) without a TimeoutError.
+    size = 1024 * 1024
+    result = run_isolated(_large_payload, size, timeout=30)
+    assert result == b"x" * size
+
+
+def test_timeout_raises_and_kills_child(_isolated):
+    with pytest.raises(TimeoutError):
+        run_isolated(_sleep, 30, timeout=0.5)
 
 
 def test_runs_inline_when_isolation_disabled(monkeypatch):
