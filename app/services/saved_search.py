@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from app.models import Paper, SavedSearch, db
+from app.models import Paper, SavedSearch, db, inbox_freshness_clause
 from app.services.text import now_utc
 
 LOGGER = logging.getLogger(__name__)
@@ -95,16 +95,12 @@ def execute_saved_search(
             author_filters.append(Paper.authors.ilike(f"%{_escape_like(author)}%", escape="\\"))
         query = query.filter(db.or_(*author_filters))
 
-    # Date window filter.
+    # Date window filter. Anchored on arrival (scraped_at) with a bounded
+    # publication floor, consistent with the inbox/export timeframe windows, so a
+    # saved search doesn't silently drop freshly scraped, announcement-lagged papers.
     if search.date_window_days is not None:
         cutoff = now_utc() - timedelta(days=search.date_window_days)
-        cutoff_date = cutoff.date()
-        query = query.filter(
-            db.or_(
-                Paper.publication_dt >= cutoff_date,
-                db.and_(Paper.publication_dt.is_(None), Paper.scraped_at >= cutoff),
-            )
-        )
+        query = query.filter(inbox_freshness_clause(cutoff))
 
     # Minimum citations filter.
     if search.min_citations is not None:

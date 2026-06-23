@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import render_template
 
-from app.models import Paper, db
+from app.models import Paper, db, inbox_freshness_clause
 from app.routes.dashboard import TIMEFRAME_DAYS
 from app.services.ranking import FEEDBACK_BOOST
 from app.services.text import now_utc
@@ -24,13 +24,7 @@ def generate_html_report(app, timeframe: str = "daily", output_path: str | Path 
         query = Paper.query.filter(Paper.is_hidden.is_(False))
         if days is not None:
             cutoff_dt = generated_at - timedelta(days=days)
-            cutoff_date = cutoff_dt.date()
-            query = query.filter(
-                db.or_(
-                    Paper.publication_dt >= cutoff_date,
-                    db.and_(Paper.publication_dt.is_(None), Paper.scraped_at >= cutoff_dt),
-                )
-            )
+            query = query.filter(inbox_freshness_clause(cutoff_dt))
 
         papers = query.order_by(
             (

@@ -132,6 +132,22 @@ class TestExecuteSavedSearch(FlaskDBTestCase):
         assert recent.id in result_ids
         assert old.id not in result_ids
 
+    def test_date_window_includes_announcement_lagged_paper(self):
+        # arXiv announces papers a few days after their publication date. A paper
+        # scraped just now but published 3 days ago must not be silently dropped
+        # by a tight date window — consistent with the inbox/export behaviour.
+        lagged = self._add_paper(
+            title="Lagged",
+            arxiv_id="d3",
+            link="https://arxiv.org/abs/d3",
+            publication_dt=date.today() - timedelta(days=3),
+        )
+        search = SavedSearch(name="test", date_window_days=1)
+        db.session.add(search)
+        db.session.commit()
+        results = execute_saved_search(search)
+        assert lagged.id in [p.id for p in results]
+
     def test_combined_filters(self):
         p1 = self._add_paper(
             title="Transformer for Remote Sensing",
