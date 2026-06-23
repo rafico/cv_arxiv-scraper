@@ -127,7 +127,9 @@ def run_saved_search(search_id: int):
     s = db.session.get(SavedSearch, search_id) or abort(404)
     payload = request.get_json(silent=True) or {}
     try:
-        limit = min(int(payload.get("limit", 100)), 500)
+        # Clamp the lower bound too: SQLite treats a negative LIMIT as "unlimited",
+        # so a negative value would defeat the cap and return the whole corpus.
+        limit = max(1, min(int(payload.get("limit", 100)), 500))
     except (ValueError, TypeError):
         limit = 100
 

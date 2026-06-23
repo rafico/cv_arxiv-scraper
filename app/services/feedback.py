@@ -47,7 +47,14 @@ def apply_feedback_action(
     delta = 0
     active = False
 
-    if existing:
+    if existing and action == FeedbackAction.SAVE.value and existing.reason == _IMPLIED_BY_PRIORITY:
+        # Clicking "save" on a paper whose save was auto-added by prioritizing it
+        # promotes the implied save to an explicit one (clears the marker) instead
+        # of toggling it off — otherwise a still-prioritized paper would be left
+        # with no save row, breaking the "priority implies save" invariant.
+        existing.reason = None
+        active = True
+    elif existing:
         db.session.delete(existing)
         delta -= compute_feedback_delta(action)
         # Un-prioritizing removes the save that priority implied, but never a save
@@ -59,7 +66,10 @@ def apply_feedback_action(
                 delta -= compute_feedback_delta(FeedbackAction.SAVE.value)
     else:
         fb = PaperFeedback(paper_id=paper_id, action=action)
-        if reason:
+        # Never let a client-supplied reason masquerade as the internal
+        # priority-implied marker — it drives cascade-deletes on un-prioritize, so
+        # an explicit save carrying that string would be silently removed later.
+        if reason and reason != _IMPLIED_BY_PRIORITY:
             fb.reason = reason
         if note:
             fb.note = note

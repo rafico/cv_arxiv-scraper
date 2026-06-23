@@ -80,10 +80,15 @@ def top_related_papers(
     top_k: int = 3,
     min_similarity: float = 0.18,
 ) -> list[int]:
-    # Try embedding-based similarity first (higher quality)
+    # Try embedding-based similarity first (higher quality). FAISS neighbours are
+    # global paper ids, but the caller can only render papers in the current
+    # candidate pool (``vectors_by_id``) — out-of-pool ids get silently dropped.
+    # Keep only renderable neighbours and fall back to TF-IDF when none remain,
+    # so a populated index never leaves a card with zero related papers.
     embedding_results = top_related_papers_embedding(paper_id, top_k=top_k)
-    if embedding_results:
-        return embedding_results
+    in_pool = [pid for pid in embedding_results if pid in vectors_by_id]
+    if in_pool:
+        return in_pool
 
     # Fall back to TF-IDF
     target = vectors_by_id.get(paper_id)

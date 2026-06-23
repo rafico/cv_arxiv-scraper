@@ -36,6 +36,17 @@ _SECURITY_HEADERS: dict[str, str] = {
     "Referrer-Policy": "same-origin",
 }
 
+# Scalars a user might hand-write in config.yaml to mean "off". A bare string is
+# otherwise truthy, so ``enabled: "false"`` would silently enable a feature.
+_FALSY_FLAG_STRINGS = {"", "false", "no", "off", "0", "none", "null"}
+
+
+def _is_truthy_flag(value: object) -> bool:
+    """Interpret a config flag that may be a real bool or a hand-edited scalar."""
+    if isinstance(value, str):
+        return value.strip().lower() not in _FALSY_FLAG_STRINGS
+    return bool(value)
+
 
 def _load_config(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as config_file:
@@ -415,9 +426,13 @@ def create_app(config_overrides: dict | None = None) -> Flask:
 
     app.jinja_env.filters["safe_url_args"] = _safe_url_args
 
-    # Start built-in scheduler if configured.
-    scheduler_config = app.config["SCRAPER_CONFIG"].get("scheduler", {})
-    if scheduler_config.get("enabled"):
+    # Start built-in scheduler if configured. A hand-edited ``scheduler:`` that is
+    # null or a non-mapping must not crash startup (it parses to None/scalar, not the
+    # ``{}`` default), and a string ``"false"`` must disable rather than read truthy.
+    scheduler_config = app.config["SCRAPER_CONFIG"].get("scheduler")
+    if not isinstance(scheduler_config, dict):
+        scheduler_config = {}
+    if _is_truthy_flag(scheduler_config.get("enabled")):
         from app.web.scheduler import SCRAPE_SCHEDULER
 
         daily_at = str(scheduler_config.get("daily_at", "08:00"))

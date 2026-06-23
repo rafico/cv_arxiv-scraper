@@ -128,5 +128,7 @@ def search_hybrid(
             }
         )
 
-    scored.sort(key=lambda x: x["rrf_score"], reverse=True)
+    # Tie-break on paper_id so the top_k cut is reproducible: all_pids is a set, so
+    # equal-rrf_score papers would otherwise order non-deterministically across runs.
+    scored.sort(key=lambda x: (-x["rrf_score"], x["paper_id"]))
     return scored[:top_k]

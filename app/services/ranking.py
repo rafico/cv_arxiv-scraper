@@ -52,7 +52,10 @@ def _normalize_ranking_weights(raw_weights: dict | None) -> dict[str, float]:
             value = float(raw_value)
         except (TypeError, ValueError):
             continue
-        if 0 < value <= 1000:
+        # Allow 0 so a DB RankingConfig can disable a signal (e.g. ai_weight: 0),
+        # matching the preferences path; the >1000 / NaN / inf cases stay rejected
+        # (NaN/inf fail the comparison) and recency clamps half-life to >= 0.5.
+        if 0 <= value <= 1000:
             normalized[canonical_key] = value
     return normalized
 

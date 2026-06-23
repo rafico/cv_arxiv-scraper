@@ -57,7 +57,9 @@ def search_papers():
     q = request.args.get("q", "").strip()
     mode = request.args.get("mode", "hybrid")
     try:
-        top_k = min(int(request.args.get("limit", 30)), 100)
+        # Lower-bound the cap: a negative LIMIT is "unlimited" in SQLite, which would
+        # bypass the 100-result ceiling on the FTS/hybrid query.
+        top_k = max(1, min(int(request.args.get("limit", 30)), 100))
     except (ValueError, TypeError):
         top_k = 30
 

@@ -89,6 +89,10 @@ def request_with_backoff(
     **kwargs: Any,
 ) -> requests.Response:
     """Run an HTTP request with bounded retries and exponential backoff."""
+    # Always make at least one attempt. A misconfigured ``attempts <= 0`` (e.g.
+    # ``pdf_attempts: 0``) would otherwise skip the loop entirely and ``raise
+    # last_exc`` with last_exc still None → confusing ``TypeError``, no request made.
+    attempts = max(1, attempts)
     last_exc: Exception | None = None
     requested_settings = resolve_rate_limit_settings(scraper_config, profile=rate_limit_profile)
     requested_user_agent = user_agent or resolve_user_agent(scraper_config)

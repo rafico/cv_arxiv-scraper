@@ -100,6 +100,19 @@ def _signal_near_venue(pattern: re.Pattern[str], comment: str, venue: re.Match[s
     return bool(pattern.search(comment, lo, hi))
 
 
+def _qualifier_near_venue(comment: str, venue: re.Match[str], *, window: int = 30) -> str | None:
+    """The oral/spotlight/highlight qualifier within ``window`` chars of the venue, if any.
+
+    Mirrors :func:`_signal_near_venue` so a qualifier that belongs to a *different*
+    venue elsewhere in the comment (e.g. "Accepted to CVPR 2024. Extended version of
+    our ICCV oral paper.") does not flip the matched venue's status to oral.
+    """
+    lo = max(0, venue.start() - window)
+    hi = min(len(comment), venue.end() + window)
+    match = _QUALIFIER_RE.search(comment, lo, hi)
+    return match.group(1).lower() if match else None
+
+
 def parse_venue(comment: str | None) -> VenueMatch | None:
     """Detect a known venue and acceptance status in an arXiv comment string."""
     if not comment or not comment.strip():
@@ -128,7 +141,7 @@ def parse_venue(comment: str | None) -> VenueMatch | None:
     # "workshop" token belongs to the other venue, not CVPR).
     submit_dist = _nearest_distance(_SUBMIT_RE, comment, match)
     accept_dist = _nearest_distance(_ACCEPT_RE, comment, match)
-    qualifier = _QUALIFIER_RE.search(comment)
+    qualifier = _qualifier_near_venue(comment, match)
 
     if submit_dist is not None and (accept_dist is None or submit_dist <= accept_dist):
         # A submission cue at least as close as any acceptance cue → not confirmed.
@@ -137,8 +150,9 @@ def parse_venue(comment: str | None) -> VenueMatch | None:
         # "workshop" adjacent to the venue → a workshop acceptance.
         status = "workshop"
     elif qualifier is not None:
-        # An oral/spotlight/highlight qualifier outranks a bare acceptance.
-        status = qualifier.group(1).lower()
+        # An oral/spotlight/highlight qualifier *near the venue* outranks a bare
+        # acceptance; a stray qualifier about another venue does not (see above).
+        status = qualifier
     elif accept_dist is not None:
         status = "accepted"
     else:

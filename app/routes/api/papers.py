@@ -5,7 +5,7 @@ from flask import abort, current_app, jsonify, request
 from app.csrf import validate_csrf_token
 from app.enums import ReadingStatus
 from app.models import Paper, db
-from app.routes._config import persist_config
+from app.routes._config import config_write_lock, persist_config
 from app.routes.api import api_bp
 from app.routes.api._validation import require_str
 from app.services import apply_feedback_action
@@ -116,6 +116,10 @@ def paper_feedback(paper_id: int):
 
     reason = payload.get("reason")
     note = payload.get("note")
+    if reason is not None and not isinstance(reason, str):
+        return jsonify({"error": "'reason' must be a string"}), 400
+    if note is not None and not isinstance(note, str):
+        return jsonify({"error": "'note' must be a string"}), 400
 
     try:
         result = apply_feedback_action(paper_id, action, reason=reason, note=note)
@@ -140,6 +144,10 @@ def bulk_feedback():
 
     results = []
     for pid in paper_ids:
+        # Only integer primary keys are valid; a dict/list id reaches SQLAlchemy as a
+        # malformed PK and raises InvalidRequestError (not caught below) → 500.
+        if not isinstance(pid, int) or isinstance(pid, bool):
+            continue
         try:
             result = apply_feedback_action(pid, action)
             results.append(result)
@@ -181,8 +189,9 @@ def follow_recommendation(paper_id: int):
     if not term:
         return jsonify({"error": "No author available to follow"}), 400
 
-    full_config, added = append_whitelist_term(current_app.config["SCRAPER_CONFIG"], "authors", term)
-    persist_config(full_config)
+    with config_write_lock():
+        full_config, added = append_whitelist_term(current_app.config["SCRAPER_CONFIG"], "authors", term)
+        persist_config(full_config)
     return jsonify({"term": term, "added": added, "message": f"Following {term}."})
 
 
@@ -195,6 +204,7 @@ def mute_recommendation(paper_id: int):
     if not term:
         return jsonify({"error": "No topic available to mute"}), 400
 
-    full_config, added = append_muted_term(current_app.config["SCRAPER_CONFIG"], "topics", term)
-    persist_config(full_config)
+    with config_write_lock():
+        full_config, added = append_muted_term(current_app.config["SCRAPER_CONFIG"], "topics", term)
+        persist_config(full_config)
     return jsonify({"term": term, "added": added, "message": f"Muted topic {term}."})

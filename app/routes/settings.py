@@ -22,7 +22,7 @@ from flask import (
 from app.constants import DEFAULT_LLM_MODEL, GEMMA_MODELS
 from app.csrf import get_or_create_csrf_token, validate_csrf_token
 from app.models import Paper, db
-from app.routes._config import activate_saved_config, persist_config
+from app.routes._config import activate_saved_config, config_write_lock, persist_config
 from app.services.llm_client import has_api_key, write_api_key
 from app.services.preferences import get_preferences, save_config, update_preferences_from_form
 from app.services.ranking import recompute_all_paper_scores
@@ -42,11 +42,12 @@ def _normalize_multiline(value: str) -> list[str]:
 def _save_config_key(key: str, value) -> None:
     """Update a top-level key in config.yaml and in-memory config."""
     config_path = Path(current_app.config["CONFIG_PATH"])
-    full_config = _load_full_config()
-    full_config[key] = value
+    with config_write_lock():
+        full_config = _load_full_config()
+        full_config[key] = value
 
-    save_config(config_path, full_config)
-    activate_saved_config(full_config)
+        save_config(config_path, full_config)
+        activate_saved_config(full_config)
 
 
 def _load_full_config() -> dict:
@@ -175,14 +176,15 @@ def save_settings():
         "affiliations": _normalize_multiline(request.form.get("affiliations", "")),
         "authors": _normalize_multiline(request.form.get("authors", "")),
     }
-    full_config = _load_full_config()
-    full_config["whitelists"] = new_whitelists
+    with config_write_lock():
+        full_config = _load_full_config()
+        full_config["whitelists"] = new_whitelists
 
-    try:
-        persist_config(full_config)
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("settings.view_settings", section="interests"))
+        try:
+            persist_config(full_config)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("settings.view_settings", section="interests"))
 
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("Settings saved successfully.", "success")
@@ -194,8 +196,9 @@ def save_preferences():
     validate_csrf_token()
 
     try:
-        full_config = update_preferences_from_form(_load_full_config(), request.form)
-        persist_config(full_config)
+        with config_write_lock():
+            full_config = update_preferences_from_form(_load_full_config(), request.form)
+            persist_config(full_config)
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("settings.view_settings", section="controls"))
@@ -315,24 +318,25 @@ def save_llm_settings():
         flash("LLM max concurrent requests must be a positive integer.", "error")
         return redirect(url_for("settings.view_settings", section="ai"))
 
-    full_config = _load_full_config()
-    full_config["llm"] = {
-        "enabled": enabled,
-        "structured_insights": structured_insights,
-        "provider": provider,
-        "model": model,
-        "base_url": base_url,
-        "max_concurrent": max_concurrent,
-    }
+    with config_write_lock():
+        full_config = _load_full_config()
+        full_config["llm"] = {
+            "enabled": enabled,
+            "structured_insights": structured_insights,
+            "provider": provider,
+            "model": model,
+            "base_url": base_url,
+            "max_concurrent": max_concurrent,
+        }
 
-    if provider != "ollama" and api_key and api_key != _LLM_MASK_VALUE:
-        write_api_key(api_key, key_path)
+        if provider != "ollama" and api_key and api_key != _LLM_MASK_VALUE:
+            write_api_key(api_key, key_path)
 
-    try:
-        persist_config(full_config)
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("settings.view_settings", section="ai"))
+        try:
+            persist_config(full_config)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("settings.view_settings", section="ai"))
 
     session["settings_csrf_token"] = token_urlsafe(32)
     flash("LLM settings saved.", "success")

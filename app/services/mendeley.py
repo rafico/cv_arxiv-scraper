@@ -304,5 +304,10 @@ class MendeleyClient:
                 "message": "Document added to Mendeley.",
                 "document_id": result.get("id"),
             }
-        except requests.RequestException as exc:
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, OSError) as exc:
+            # A mid-batch 401 triggers _refresh_access_token, which raises RuntimeError
+            # when the stored token has no refresh_token (and KeyError/ValueError/OSError
+            # on malformed creds). Those aren't RequestExceptions, so without this the
+            # error escaped → caller 500s and an in-progress sync aborted before commit,
+            # losing the mendeley_doc_id of already-synced papers (duplicate re-uploads).
             return {"success": False, "message": f"Failed to add document: {exc}"}

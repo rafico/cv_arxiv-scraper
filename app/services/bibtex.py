@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models import Paper
 
-_LATEX_SPECIAL = re.compile(r"([&%#_{}~^\\])")
+_LATEX_SPECIAL = re.compile(r"([&%#$_{}~^\\])")
 
 _LATEX_REPLACEMENTS = {
     "&": r"\&",
     "%": r"\%",
     "#": r"\#",
+    "$": r"\$",
     "_": r"\_",
     "{": r"\{",
     "}": r"\}",

@@ -92,9 +92,14 @@ class ScrapeScheduler:
             return
         LOGGER.info("Scheduled scrape starting")
         try:
-            from app.services.scrape_engine import execute_scrape
+            # Route through the shared job manager's single-flight gate instead of
+            # calling execute_scrape directly, so a scheduled scrape and a
+            # user-triggered scrape never run concurrently. Two overlapping scrapes
+            # each rewrite the FAISS index on completion via atomic rename, so the
+            # later writer silently drops the earlier run's vectors/sections.
+            from app.services.jobs import SCRAPE_JOB_MANAGER
 
-            execute_scrape(self._app)
+            SCRAPE_JOB_MANAGER.start_or_get_active(self._app)
         except Exception:
             LOGGER.exception("Scheduled scrape failed")
         finally:

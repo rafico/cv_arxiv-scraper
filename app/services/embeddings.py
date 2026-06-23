@@ -255,8 +255,17 @@ class EmbeddingService:
 
         self._ensure_section_index()
 
-        texts = [text for _, _, text in entries]
-        meta = [{"paper_id": pid, "section_type": stype} for pid, stype, _ in entries]
+        # Skip papers already represented in the section index. Unlike add_papers,
+        # this index has no removal path, so re-embedding an already-indexed paper
+        # (e.g. it is re-scraped) would append duplicate section vectors — bloating
+        # the index and returning the same paper multiple times from search_sections.
+        indexed_paper_ids = {m["paper_id"] for m in self._section_id_map}
+        fresh = [(pid, stype, text) for pid, stype, text in entries if pid not in indexed_paper_ids]
+        if not fresh:
+            return 0
+
+        texts = [text for _, _, text in fresh]
+        meta = [{"paper_id": pid, "section_type": stype} for pid, stype, _ in fresh]
 
         embeddings = self.encode(texts)
 
@@ -264,7 +273,7 @@ class EmbeddingService:
             self._section_index.add(embeddings)
             self._section_id_map.extend(meta)
 
-        return len(entries)
+        return len(fresh)
 
     def search_sections(
         self,
