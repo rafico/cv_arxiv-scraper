@@ -3,7 +3,7 @@
 from flask import Response, abort, current_app, jsonify, request
 
 from app.enums import FeedbackAction
-from app.models import Paper, db
+from app.models import Paper, db, inbox_freshness_clause
 from app.routes.api import api_bp
 from app.services.bibtex import paper_to_bibtex, papers_to_bibtex
 from app.services.export import generate_html_report
@@ -47,13 +47,7 @@ def export_bibtex():
     days = TIMEFRAME_DAYS.get(timeframe)
     if days is not None:
         cutoff = now_utc() - timedelta(days=days)
-        cutoff_date = cutoff.date()
-        query = query.filter(
-            db.or_(
-                Paper.publication_dt >= cutoff_date,
-                db.and_(Paper.publication_dt.is_(None), Paper.scraped_at >= cutoff),
-            )
-        )
+        query = query.filter(inbox_freshness_clause(cutoff))
 
     papers = query.order_by(
         (db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST).desc(),
