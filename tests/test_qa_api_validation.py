@@ -55,18 +55,14 @@ class ApiInputValidationTests(FlaskDBTestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_create_collection_non_string_description(self):
-        r = self.client.post(
-            "/api/collections", json={"name": "ok", "description": {"x": 1}}, headers=self._hdr()
-        )
+        r = self.client.post("/api/collections", json={"name": "ok", "description": {"x": 1}}, headers=self._hdr())
         self.assertEqual(r.status_code, 400)
 
     def test_add_papers_non_list_paper_ids(self):
         c = Collection(name="C1")
         db.session.add(c)
         db.session.commit()
-        r = self.client.post(
-            f"/api/collections/{c.id}/papers", json={"paper_ids": "1,2,3"}, headers=self._hdr()
-        )
+        r = self.client.post(f"/api/collections/{c.id}/papers", json={"paper_ids": "1,2,3"}, headers=self._hdr())
         self.assertEqual(r.status_code, 400)
 
     def test_add_papers_skips_non_int_ids(self):
@@ -75,9 +71,7 @@ class ApiInputValidationTests(FlaskDBTestCase):
         p = _make_paper(1)
         db.session.add_all([c, p])
         db.session.commit()
-        r = self.client.post(
-            f"/api/collections/{c.id}/papers", json={"paper_ids": [p.id, "x"]}, headers=self._hdr()
-        )
+        r = self.client.post(f"/api/collections/{c.id}/papers", json={"paper_ids": [p.id, "x"]}, headers=self._hdr())
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.get_json()["added"], 1)
 
@@ -86,9 +80,7 @@ class ApiInputValidationTests(FlaskDBTestCase):
         p = _make_paper(2)
         db.session.add(p)
         db.session.commit()
-        r = self.client.post(
-            f"/api/papers/{p.id}/reading-status", json={"status": {"bad": 1}}, headers=self._hdr()
-        )
+        r = self.client.post(f"/api/papers/{p.id}/reading-status", json={"status": {"bad": 1}}, headers=self._hdr())
         self.assertEqual(r.status_code, 400)
 
     def test_add_tag_non_string(self):
@@ -110,9 +102,7 @@ class ApiInputValidationTests(FlaskDBTestCase):
         self.assertEqual(r.status_code, 409)
 
     def test_feed_source_non_string_url(self):
-        r = self.client.post(
-            "/api/feed-sources", json={"name": "B", "url": 5}, headers=self._hdr()
-        )
+        r = self.client.post("/api/feed-sources", json={"name": "B", "url": 5}, headers=self._hdr())
         self.assertEqual(r.status_code, 400)
 
     # --- export -----------------------------------------------------------

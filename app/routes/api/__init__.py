@@ -34,6 +34,7 @@ def _handle_bad_input(exc: Exception):
     current_app.logger.exception("Unhandled %s in API route", type(exc).__name__)
     return jsonify({"error": "Invalid request"}), 400
 
+
 # Route modules attach their handlers to api_bp on import.
 from app.routes.api import (  # noqa: E402
     collections,

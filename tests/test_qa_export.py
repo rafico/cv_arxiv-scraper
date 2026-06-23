@@ -138,7 +138,7 @@ class BibtexEndpointTests(FlaskDBTestCase):
         # (mirroring the dashboard) rather than the daily window, which would drop
         # older saved papers.
         old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
-        old_date = (date.today() - timedelta(days=60))
+        old_date = date.today() - timedelta(days=60)
         p = _make_paper(
             0, title="Old Saved Paper", publication_dt=old_date, scraped_at=old, scraped_date=old_date.isoformat()
         )

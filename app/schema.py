@@ -355,8 +355,7 @@ def _backfill_arxiv_ids() -> None:
         return
 
     assigned = {
-        row[0]
-        for row in db.session.execute(text("SELECT arxiv_id FROM papers WHERE arxiv_id IS NOT NULL")).all()
+        row[0] for row in db.session.execute(text("SELECT arxiv_id FROM papers WHERE arxiv_id IS NOT NULL")).all()
     }
     updates = []
     for paper_id, link in rows:
