@@ -196,6 +196,25 @@ class DigestServiceQaTests(FlaskDBTestCase):
         self.assertEqual(run.status, "error")
         self.assertIn("gmail boom", run.error_message)
 
+    def test_send_digest_logs_error_when_credential_load_fails(self):
+        # A missing/expired token is the most common real-world failure and was
+        # the one path that left the DigestRun stuck in "running" forever, because
+        # the credential load sat outside the error-recording try block.
+        self.app.config["SCRAPER_CONFIG"]["email"] = {"recipient": "digest@example.com"}
+        db.session.add(_make_paper(title="No Token", link="https://arxiv.org/abs/2604.00009"))
+        db.session.commit()
+
+        with patch(
+            "app.services.email_digest._load_gmail_credentials",
+            side_effect=FileNotFoundError("token.json missing"),
+        ):
+            with self.assertRaises(FileNotFoundError):
+                send_digest(self.app)
+
+        run = DigestRun.query.one()
+        self.assertEqual(run.status, "error")
+        self.assertIn("token.json missing", run.error_message)
+
     def test_digest_preview_route_matches_service_preview(self):
         self.app.config["SCRAPER_CONFIG"]["email"] = {
             "recipient": "preview@example.com",

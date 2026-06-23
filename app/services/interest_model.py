@@ -25,7 +25,7 @@ MIN_NEGATIVE_FEEDBACK = 3
 
 _cache_lock = threading.Lock()
 _cached_profile: InterestProfile | None = None
-_cached_fingerprint: tuple[int, int] | None = None
+_cached_fingerprint: tuple[int, ...] | None = None
 
 
 @dataclass(slots=True)
@@ -34,7 +34,7 @@ class InterestProfile:
 
     pos_centroid: np.ndarray
     neg_centroid: np.ndarray | None
-    fingerprint: tuple[int, int]
+    fingerprint: tuple[int, ...]
 
 
 def _feedback_fingerprint() -> tuple[int, int]:
@@ -78,14 +78,18 @@ def build_interest_profile(app) -> InterestProfile | None:
 
     try:
         with app.app_context():
-            fingerprint = _feedback_fingerprint()
-            with _cache_lock:
-                if _cached_fingerprint == fingerprint:
-                    return _cached_profile
-
             from app.services.embeddings import get_embedding_service
 
             service = get_embedding_service(app)
+            # Fold the index size into the cache key: a paper saved before it was
+            # embedded yields no vector, so a profile can read as "disabled"
+            # (None) at 5 saves. Once the backlog embeds (index grows) with no new
+            # feedback, the feedback-only key wouldn't change and the stale None
+            # would stick. Keying on index size too forces the recompute.
+            fingerprint = (*_feedback_fingerprint(), service.index_size())
+            with _cache_lock:
+                if _cached_fingerprint == fingerprint:
+                    return _cached_profile
 
             pos_ids = _paper_ids_for_actions(POSITIVE_ACTIONS)
             _, pos_vectors = service.get_paper_vectors(pos_ids)

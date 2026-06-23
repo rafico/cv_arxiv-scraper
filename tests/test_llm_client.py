@@ -93,6 +93,24 @@ class WriteApiKeyTests(unittest.TestCase):
             write_api_key("  spaced-key  \n", key_path)
             self.assertEqual(key_path.read_text(encoding="utf-8"), "spaced-key")
 
+    def test_write_api_key_creates_0600_without_relying_on_chmod(self):
+        # Neutralize the trailing chmod so the assertion proves the *creation*
+        # mode — i.e. the key is never briefly world-readable (no TOCTOU window),
+        # even under a permissive umask.
+        import os
+        import stat
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key_path = Path(tmpdir) / ".llm_api_key"
+            old_umask = os.umask(0)
+            try:
+                with patch("app.services.llm_client.os.chmod"):
+                    write_api_key("my-key", key_path)
+                mode = stat.S_IMODE(key_path.stat().st_mode)
+                self.assertEqual(mode, 0o600)
+            finally:
+                os.umask(old_umask)
+
 
 class LLMClientInitTests(unittest.TestCase):
     @patch("app.services.llm_client.OpenAI")

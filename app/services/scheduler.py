@@ -52,13 +52,27 @@ class ScrapeScheduler:
                 self._timer = None
             self._release_leader_lock()
 
-    def _seconds_until(self, time_str: str) -> float:
-        now = datetime.now(timezone.utc)
+    @staticmethod
+    def _parse_daily_at(time_str: str) -> tuple[int, int]:
+        """Parse ``"HH:MM"`` into a valid (hour, minute), defaulting to 08:00.
+
+        Guards the *range* as well as the parse: a value like ``"25:00"`` or
+        ``"08:60"`` parses to ints but is not a valid wall-clock time, and
+        feeding it to ``datetime.replace`` would raise. Anything invalid falls
+        back to 08:00 so a bad config value can never crash app startup.
+        """
         try:
             hour, minute = (int(x) for x in time_str.split(":"))
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError(f"out-of-range time {time_str!r}")
         except (ValueError, TypeError):
             LOGGER.warning("Invalid daily_at value %r, defaulting to 08:00", time_str)
-            hour, minute = 8, 0
+            return 8, 0
+        return hour, minute
+
+    def _seconds_until(self, time_str: str) -> float:
+        now = datetime.now(timezone.utc)
+        hour, minute = self._parse_daily_at(time_str)
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)
@@ -92,10 +106,7 @@ class ScrapeScheduler:
         if not self._enabled:
             return None
         now = datetime.now(timezone.utc)
-        try:
-            hour, minute = (int(x) for x in self._daily_at.split(":"))
-        except (ValueError, TypeError):
-            hour, minute = 8, 0
+        hour, minute = self._parse_daily_at(self._daily_at)
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)

@@ -69,6 +69,51 @@ class TestFetchOpenalexBatch:
         assert result["2301.00001"]["openalex_cited_by_count"] == 10
 
     @patch("app.services.openalex.request_with_backoff")
+    def test_prefix_ids_are_not_misattributed(self, mock_request):
+        # The batch holds a short id that is a string-prefix of a longer one. The
+        # only returned work belongs to the longer id and must NOT be attributed
+        # to the shorter id via a substring match.
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [
+                {
+                    "id": "https://openalex.org/W999",
+                    "doi": "https://doi.org/10.48550/arxiv.2301.00012",
+                    "open_access": {"oa_status": "green"},
+                    "cited_by_count": 99,
+                    "referenced_works": [],
+                    "topics": [],
+                }
+            ]
+        }
+        mock_request.return_value = mock_response
+
+        result = fetch_openalex_batch(["2301.0001", "2301.00012"])
+        assert "2301.0001" not in result
+        assert result["2301.00012"]["openalex_cited_by_count"] == 99
+
+    @patch("app.services.openalex.request_with_backoff")
+    def test_versioned_doi_still_matches(self, mock_request):
+        # A DOI carrying a trailing version (v2) must still map to the bare id.
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [
+                {
+                    "id": "https://openalex.org/W1",
+                    "doi": "https://doi.org/10.48550/arxiv.2301.00001v2",
+                    "open_access": {"oa_status": "green"},
+                    "cited_by_count": 7,
+                    "referenced_works": [],
+                    "topics": [],
+                }
+            ]
+        }
+        mock_request.return_value = mock_response
+
+        result = fetch_openalex_batch(["2301.00001"])
+        assert result["2301.00001"]["openalex_cited_by_count"] == 7
+
+    @patch("app.services.openalex.request_with_backoff")
     def test_failed_request(self, mock_request):
         mock_request.return_value = None
         result = fetch_openalex_batch(["2301.00001"])

@@ -12,6 +12,14 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 100
 
+# Upper bounds on the numeric filters. Without these, a huge ``date_window_days``
+# overflows ``timedelta`` (OverflowError) when ``/run`` builds the cutoff, and a
+# huge ``min_citations`` overflows the SQLite INTEGER column on commit — both
+# surfacing as a 500. 100 years of window and ~2^31 citations are far beyond any
+# real value while staying inside both ranges.
+MAX_DATE_WINDOW_DAYS = 36_500
+MAX_MIN_CITATIONS = 2_147_483_647
+
 
 def _escape_like(value: str) -> str:
     """Escape SQL LIKE wildcard characters."""
@@ -26,6 +34,8 @@ def validate_saved_search(data: dict) -> list[str]:
             val = int(data["date_window_days"])
             if val < 0:
                 errors.append("date_window_days must be non-negative")
+            elif val > MAX_DATE_WINDOW_DAYS:
+                errors.append(f"date_window_days must be at most {MAX_DATE_WINDOW_DAYS}")
         except (ValueError, TypeError):
             errors.append("date_window_days must be an integer")
 
@@ -34,6 +44,8 @@ def validate_saved_search(data: dict) -> list[str]:
             val = int(data["min_citations"])
             if val < 0:
                 errors.append("min_citations must be non-negative")
+            elif val > MAX_MIN_CITATIONS:
+                errors.append(f"min_citations must be at most {MAX_MIN_CITATIONS}")
         except (ValueError, TypeError):
             errors.append("min_citations must be an integer")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from app.services.enrichment_providers.base import (
@@ -88,12 +89,18 @@ class OpenAlexProvider(EnrichmentProvider):
                     continue
 
                 data = response.json()
+                batch_by_id = {aid.lower(): aid for aid in batch}
                 for work in data.get("results", []):
                     doi = (work.get("doi") or "").lower()
-                    for aid in batch:
-                        if aid.lower() in doi:
-                            fetched[aid] = parse_openalex_work(work)
-                            break
+                    if "arxiv." not in doi:
+                        continue
+                    # Map the work back by its *exact* arXiv id, not a substring:
+                    # `aid in doi` wrongly attributes ".../arxiv.2301.00012" to the
+                    # shorter id "2301.0001". Strip any trailing version (vN).
+                    work_id = re.sub(r"v\d+$", "", doi.rsplit("arxiv.", 1)[-1])
+                    aid = batch_by_id.get(work_id)
+                    if aid is not None:
+                        fetched[aid] = parse_openalex_work(work)
             except Exception as exc:
                 LOGGER.warning("Failed to fetch OpenAlex data for batch: %s", exc)
 

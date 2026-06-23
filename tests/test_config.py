@@ -167,5 +167,31 @@ class ConfigValidationTests(unittest.TestCase):
             _validate_config(cfg)
 
 
+class AppendWhitelistTermTests(unittest.TestCase):
+    def test_appends_to_existing_list(self):
+        from app.services.preferences import append_whitelist_term
+
+        updated, added = append_whitelist_term({"whitelists": {"authors": ["Jane Doe"]}}, "authors", "John Smith")
+        self.assertTrue(added)
+        self.assertEqual(updated["whitelists"]["authors"], ["Jane Doe", "John Smith"])
+
+    def test_scalar_string_value_is_not_exploded_into_characters(self):
+        # A hand-edited config can store `authors: Jane Doe` as a bare scalar.
+        # list("Jane Doe") would explode it into single characters; the term must
+        # instead be appended to a one-element list.
+        from app.services.preferences import append_whitelist_term
+
+        updated, added = append_whitelist_term({"whitelists": {"authors": "Jane Doe"}}, "authors", "John Smith")
+        self.assertTrue(added)
+        self.assertEqual(updated["whitelists"]["authors"], ["Jane Doe", "John Smith"])
+
+    def test_missing_whitelists_section_is_created(self):
+        from app.services.preferences import append_whitelist_term
+
+        updated, added = append_whitelist_term({}, "titles", "Vision")
+        self.assertTrue(added)
+        self.assertEqual(updated["whitelists"]["titles"], ["Vision"])
+
+
 if __name__ == "__main__":
     unittest.main()

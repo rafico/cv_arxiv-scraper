@@ -58,6 +58,34 @@ class ZoteroClientTests(unittest.TestCase):
         self.assertIn("/users/12345/items", call_url)
 
     @patch("app.services.zotero.requests.post")
+    def test_add_item_reports_failure_when_zotero_rejects(self, mock_post):
+        # Zotero returns HTTP 200 even when it rejects the item; the outcome is in
+        # the body's `failed` map. Treating any 200 as success was silent data loss.
+        self._write_creds()
+        resp = Mock(status_code=200)
+        resp.raise_for_status = Mock()
+        resp.json.return_value = {"successful": {}, "failed": {"0": {"code": 400, "message": "bad item"}}}
+        mock_post.return_value = resp
+
+        result = self._client().add_item(_make_paper())
+
+        self.assertFalse(result["success"])
+        self.assertIn("bad item", result["message"])
+
+    @patch("app.services.zotero.requests.post")
+    def test_sync_counts_only_accepted_items(self, mock_post):
+        self._write_creds()
+        resp = Mock(status_code=200)
+        resp.raise_for_status = Mock()
+        resp.json.return_value = {"successful": {}, "failed": {"0": {"code": 400, "message": "bad"}}}
+        mock_post.return_value = resp
+
+        result = self._client().sync_saved_papers([_make_paper()])
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["synced_count"], 0)
+
+    @patch("app.services.zotero.requests.post")
     def test_add_item_maps_paper_fields_to_zotero_schema(self, mock_post):
         self._write_creds()
         mock_post.return_value = Mock(status_code=200)

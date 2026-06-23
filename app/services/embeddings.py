@@ -148,6 +148,10 @@ class EmbeddingService:
 
         return len(new_ids)
 
+    def index_size(self) -> int:
+        """Number of vectors in the FAISS index. Cheap — does not load the model."""
+        return int(self._index.ntotal)
+
     def search(self, query_text: str, top_k: int = 20) -> list[tuple[int, float]]:
         """Search by text query. Returns [(paper_id, score)]."""
         if self._index.ntotal == 0:

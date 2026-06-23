@@ -133,6 +133,26 @@ class MendeleyClientTests(unittest.TestCase):
         self.assertEqual(doc["identifiers"]["arxiv"], "2603.12345")
         self.assertEqual(doc["year"], 2026)
 
+    @patch("app.services.mendeley.requests.post")
+    def test_add_document_handles_single_token_author_name(self, mock_post):
+        # A mononym / collaboration name has no first name; it must not be sent
+        # with first_name == last_name (the token duplicated into both fields).
+        self._write_creds()
+        self._write_token()
+        mock_post.return_value = Mock(status_code=201)
+        mock_post.return_value.raise_for_status = Mock()
+        mock_post.return_value.json.return_value = {"id": "doc-789"}
+
+        paper = _make_paper()
+        paper.authors = "Madonna, Alice Smith"
+        self._client().add_document(paper)
+
+        doc = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
+        mononym = doc["authors"][0]
+        self.assertEqual(mononym["last_name"], "Madonna")
+        self.assertEqual(mononym["first_name"], "")
+        self.assertEqual(doc["authors"][1], {"first_name": "Alice", "last_name": "Smith"})
+
     @patch("app.services.mendeley.requests.get")
     def test_check_connection_returns_error_on_expired_token(self, mock_get):
         self._write_creds()

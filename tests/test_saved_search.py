@@ -27,6 +27,18 @@ class TestValidateSavedSearch:
         errors = validate_saved_search({"date_window_days": -1})
         assert any("non-negative" in e for e in errors)
 
+    def test_date_window_rejected_above_upper_bound(self):
+        # A huge window would overflow timedelta() when /run builds the cutoff
+        # (→ 500). It must be rejected at validation instead.
+        errors = validate_saved_search({"date_window_days": 10**9})
+        assert any("at most" in e for e in errors)
+
+    def test_min_citations_rejected_above_upper_bound(self):
+        # A huge min_citations would overflow the SQLite INTEGER column on commit
+        # (→ 500). It must be rejected at validation instead.
+        errors = validate_saved_search({"min_citations": 10**30})
+        assert any("at most" in e for e in errors)
+
     def test_invalid_keywords_type(self):
         errors = validate_saved_search({"include_keywords": "not a list"})
         assert any("list" in e for e in errors)

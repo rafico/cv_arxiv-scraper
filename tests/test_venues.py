@@ -47,6 +47,19 @@ class ParseVenueTests(unittest.TestCase):
         self.assertEqual(match.venue, "CVPR")
         self.assertEqual(match.status, "workshop")
 
+    def test_main_conference_oral_not_demoted_by_distant_workshop_mention(self):
+        # The "workshop" token belongs to a different venue mentioned later; it
+        # must not demote a genuine CVPR oral acceptance to "workshop".
+        match = parse_venue("Accepted to CVPR 2024 (Oral). Extended version of our ICCV workshop paper.")
+        self.assertEqual(match.venue, "CVPR")
+        self.assertEqual(match.status, "oral")
+
+    def test_submitted_with_distant_accepted_word_is_only_mentioned(self):
+        # A stray, far-away "accepted" must not promote a submission to accepted.
+        match = parse_venue("Submitted to CVPR; we hope it gets accepted.")
+        self.assertEqual(match.venue, "CVPR")
+        self.assertEqual(match.status, "mentioned")
+
     def test_nips_alias_maps_to_neurips(self):
         self.assertEqual(parse_venue("Published at NIPS 2017").venue, "NeurIPS")
 

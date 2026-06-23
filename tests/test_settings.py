@@ -50,6 +50,16 @@ class SettingsRouteTests(FlaskDBTestCase):
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         self.assertEqual(saved["whitelists"], expected)
 
+    def test_settings_post_survives_empty_config_file(self):
+        # An externally-truncated config.yaml makes yaml.safe_load() return None;
+        # before the fix every mutating settings POST 500'd on `config[key] = ...`.
+        token = self._csrf_token()
+        config_path = Path(self.app.config["CONFIG_PATH"])
+        config_path.write_text("", encoding="utf-8")
+
+        response = self.client.post("/settings", data=self._payload(token))
+        self.assertEqual(response.status_code, 302)
+
     def test_settings_page_shows_callback_uri(self):
         """The no_credentials state shows the callback URI for setup."""
         with patch("app.services.email_digest.DEFAULT_CREDENTIALS_PATH") as mock_creds:

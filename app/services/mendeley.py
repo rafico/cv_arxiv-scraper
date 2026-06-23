@@ -262,7 +262,10 @@ class MendeleyClient:
             "type": "journal",
             "title": paper.title,
             "authors": [
-                {"first_name": parts[0], "last_name": parts[-1]}
+                # Single-token names (mononyms, collaborations like "ATLAS") have no
+                # first name; emit an empty one rather than duplicating the token into
+                # both fields.
+                {"first_name": parts[0] if len(parts) > 1 else "", "last_name": parts[-1]}
                 for name in paper.authors.split(",")
                 if (parts := name.strip().rsplit(None, 1)) and len(parts) >= 1
             ],
