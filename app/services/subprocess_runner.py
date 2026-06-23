@@ -15,7 +15,9 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import os
+import time
 from collections.abc import Callable
+from queue import Empty
 from typing import Any
 
 LOGGER = logging.getLogger(__name__)
@@ -57,21 +59,39 @@ def run_isolated(target: Callable[..., Any], *args: Any, timeout: float | None =
     queue = _CTX.Queue()
     proc = _CTX.Process(target=_child, args=(target, args, kwargs, queue))
     proc.start()
-    proc.join(timeout)
 
-    if proc.is_alive():
-        proc.terminate()
-        proc.join()
-        raise TimeoutError(f"isolated call to {name} timed out after {timeout}s")
+    # Drain the queue BEFORE joining. A result larger than the OS pipe buffer
+    # (~64KB) blocks the child on queue.put() until the parent reads it; joining
+    # first would deadlock until the timeout and lose the output. Poll the queue
+    # while the child is alive so a native crash (no result) is still detected
+    # promptly instead of waiting the full timeout.
+    result = None
+    got_result = False
+    start = time.monotonic()
+    while True:
+        try:
+            remaining = None if timeout is None else max(0.0, timeout - (time.monotonic() - start))
+            result = queue.get(timeout=0.5 if remaining is None else min(0.5, remaining))
+            got_result = True
+            break
+        except Empty:
+            if not proc.is_alive():
+                break  # child exited without producing a result (likely a crash)
+            if timeout is not None and time.monotonic() - start >= timeout:
+                proc.terminate()
+                proc.join()
+                raise TimeoutError(f"isolated call to {name} timed out after {timeout}s") from None
 
-    if proc.exitcode is not None and proc.exitcode < 0:
-        raise NativeCrashError(f"{name} crashed in an isolated process (signal {-proc.exitcode})")
+    # The child has put its result (or died); joining now is safe and lets its
+    # feeder thread flush the pipe.
+    proc.join()
 
-    try:
-        status, payload = queue.get_nowait()
-    except Exception as exc:  # queue empty => child exited without producing a result
-        raise NativeCrashError(f"{name} produced no result (exit code {proc.exitcode})") from exc
+    if not got_result:
+        if proc.exitcode is not None and proc.exitcode < 0:
+            raise NativeCrashError(f"{name} crashed in an isolated process (signal {-proc.exitcode})")
+        raise NativeCrashError(f"{name} produced no result (exit code {proc.exitcode})")
 
+    status, payload = result
     if status == "err":
         raise payload
     return payload

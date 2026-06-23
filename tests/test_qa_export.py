@@ -133,6 +133,31 @@ class BibtexEndpointTests(FlaskDBTestCase):
         self.assertIn("Saved Export", text)
         self.assertNotIn("Not Saved Export", text)
 
+    def test_bibtex_export_saved_defaults_to_all_window(self):
+        # With no timeframe, a "saved" export must default to the full archive
+        # (mirroring the dashboard) rather than the daily window, which would drop
+        # older saved papers.
+        old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
+        old_date = date.today() - timedelta(days=60)
+        p = _make_paper(
+            0, title="Old Saved Paper", publication_dt=old_date, scraped_at=old, scraped_date=old_date.isoformat()
+        )
+        db.session.add(p)
+        db.session.commit()
+        db.session.add(PaperFeedback(paper_id=p.id, action="save"))
+        db.session.commit()
+
+        response = self.client.get("/api/export/bibtex?view=saved")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Old Saved Paper", response.get_data(as_text=True))
+
+    def test_export_html_crlf_timeframe_does_not_500(self):
+        # An unvalidated timeframe used to flow into the Content-Disposition header;
+        # a CRLF payload would 500. It must be normalized to a safe value instead.
+        response = self.client.get("/api/export?download=1&timeframe=x%0d%0aSet-Cookie:+a=b")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("arxiv_report_daily.html", response.headers.get("Content-Disposition", ""))
+
 
 class HtmlReportTests(FlaskDBTestCase):
     """Test HTML report generation."""

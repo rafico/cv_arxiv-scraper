@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -205,6 +206,10 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
         raise ValueError("'preferences' must be a dict")
     normalized_preferences = get_preferences(config)
     for key, value in normalized_preferences["ranking"].items():
+        # NaN slips past both bounds below (every comparison with NaN is False),
+        # persists to config.yaml, and corrupts every paper_score. Reject it first.
+        if not math.isfinite(value):
+            raise ValueError(f"'preferences.ranking.{key}' must be a finite number")
         if value <= 0:
             raise ValueError(f"'preferences.ranking.{key}' must be positive")
         if value > 1000:
@@ -395,6 +400,20 @@ def create_app(config_overrides: dict | None = None) -> Flask:
     from app.constants import ARXIV_CATEGORY_NAMES
 
     app.jinja_env.globals["ARXIV_CATEGORY_NAMES"] = ARXIV_CATEGORY_NAMES
+
+    def _safe_url_args(mapping: object) -> dict:
+        """Drop werkzeug-reserved (``_``-prefixed) keys before splatting into ``url_for``.
+
+        A saved-search row or a crafted query string can carry a key like ``_method``
+        or ``_external``; passing it to ``url_for(**...)`` raises ``BuildError`` and 500s
+        the page. The dashboard only consumes named query params, so ``_``-prefixed keys
+        are never legitimate here.
+        """
+        if not isinstance(mapping, dict):
+            return {}
+        return {k: v for k, v in mapping.items() if not (isinstance(k, str) and k.startswith("_"))}
+
+    app.jinja_env.filters["safe_url_args"] = _safe_url_args
 
     # Start built-in scheduler if configured.
     scheduler_config = app.config["SCRAPER_CONFIG"].get("scheduler", {})

@@ -47,6 +47,16 @@ class TestValidateSavedSearch:
         errors = validate_saved_search({"include_keywords": [1, 2]})
         assert any("strings" in e for e in errors)
 
+    def test_reserved_filter_key_rejected(self):
+        # A filters dict carrying a werkzeug-reserved key (_method/_external/...) is
+        # splatted into url_for in the sidebar and would raise BuildError -> 500 on
+        # every page. Reject it at the boundary so it never persists.
+        errors = validate_saved_search({"filters": {"_method": "POST", "q": "ok"}})
+        assert any("reserved" in e for e in errors)
+
+    def test_ordinary_filter_keys_allowed(self):
+        assert validate_saved_search({"filters": {"q": "vision", "view": "saved"}}) == []
+
 
 class TestExecuteSavedSearch(FlaskDBTestCase):
     def _add_paper(self, **kwargs):
@@ -282,3 +292,26 @@ class TestSavedSearchApi(FlaskDBTestCase):
             headers={"X-CSRF-Token": self.csrf_token},
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_create_rejects_reserved_filter_key(self):
+        response = self.client.post(
+            "/api/saved-searches",
+            json={"name": "Sneaky", "filters": {"_method": "POST"}},
+            headers={"X-CSRF-Token": self.csrf_token},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_page_renders_with_legacy_reserved_filter_key(self):
+        # A legacy/hand-edited row may already carry a reserved key. The sidebar
+        # link must not 500 the whole page — the safe_url_args filter strips it.
+        s = SavedSearch(name="Legacy", filters={"_method": "POST", "view": "saved"})
+        db.session.add(s)
+        db.session.commit()
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+
+    def test_density_toggle_with_reserved_query_arg(self):
+        # The density-toggle link splats request.args into url_for; a crafted
+        # ?_method=POST must not 500 the page.
+        response = self.client.get("/?_method=POST&density=visual")
+        self.assertEqual(response.status_code, 200)

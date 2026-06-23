@@ -676,6 +676,29 @@ class PrefetchAffiliationTextTests(unittest.TestCase):
         self.assertEqual(candidate["pdf_affiliation_text"], "")
         self.assertEqual(candidate["pdf_content"], b"%PDF")
 
+    def test_download_forwards_config_and_profile_to_avoid_session_clobber(self):
+        from app.services import scrape_engine
+
+        candidate = self._entry("9", title="A Vision Paper", api_affiliations="")
+        full_config = {"ingest": {"user_agent": "custom-UA"}, "scraper": {"max_workers": 1}}
+        with (
+            patch.object(scrape_engine, "request_with_backoff", return_value=Mock(content=b"%PDF")) as mock_req,
+            patch.object(scrape_engine, "extract_affiliation_text_batch", return_value=[""]),
+        ):
+            scrape_engine._prefetch_affiliation_text(
+                [candidate],
+                self.WHITELISTS,
+                {"max_workers": 1},
+                session=object(),
+                config=full_config,
+                rate_limit_profile="bulk",
+            )
+
+        # Without the config/profile, request_with_backoff would reconfigure the
+        # shared session back to default UA + interactive rate limit.
+        self.assertIs(mock_req.call_args.kwargs["scraper_config"], full_config)
+        self.assertEqual(mock_req.call_args.kwargs["rate_limit_profile"], "bulk")
+
 
 class OrphanedScrapeRunReclaimTests(FlaskDBTestCase):
     def test_stale_running_runs_are_marked_error_on_startup(self):

@@ -353,7 +353,6 @@ def backfill_github(
                 if not papers:
                     break
 
-                last_seen_id = papers[-1].id
                 repos_by_arxiv_id: dict[str, str] = {}
                 for paper in papers:
                     repo = extract_github_repo(paper.resource_links_list)
@@ -378,6 +377,15 @@ def backfill_github(
 
                 db.session.commit()
                 total_updated += updated_now
+
+                if provider.rate_limited:
+                    # Stop before advancing the cursor past papers this batch couldn't
+                    # fetch — they still have github_repo IS NULL, so re-running after
+                    # the rate-limit window resets resumes exactly where we left off.
+                    emit("GitHub API rate limited; stopping. Re-run after the limit resets to continue.")
+                    break
+
+                last_seen_id = papers[-1].id
                 emit(
                     f"GitHub batch through paper {last_seen_id}: "
                     f"updated {updated_now}/{len(papers)} papers (total {total_updated})"

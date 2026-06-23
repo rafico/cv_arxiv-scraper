@@ -11,8 +11,15 @@ from app.services.export import generate_html_report
 
 @api_bp.route("/export", methods=["GET"])
 def export_html():
+    from app.routes.dashboard import TIMEFRAME_DAYS
+
     app = current_app._get_current_object()
+    # Normalize before use: an unvalidated timeframe flows into the
+    # Content-Disposition header below, where a CRLF 500s the response and a quote
+    # breaks out of the filename parameter.
     timeframe = request.args.get("timeframe", "daily")
+    if timeframe not in TIMEFRAME_DAYS:
+        timeframe = "daily"
     html = generate_html_report(app, timeframe=timeframe)
     response = current_app.response_class(html, mimetype="text/html")
     if request.args.get("download") == "1":
@@ -28,11 +35,14 @@ def export_bibtex():
     from app.services.ranking import FEEDBACK_BOOST
     from app.services.text import now_utc
 
-    timeframe = request.args.get("timeframe", "daily")
     view = request.args.get("view", "inbox")
 
+    # Saved exports default to the full archive, mirroring the dashboard — otherwise
+    # an unparametrized "saved" bibtex export silently drops older saved papers.
+    default_timeframe = "all" if view == "saved" else "daily"
+    timeframe = request.args.get("timeframe", default_timeframe)
     if timeframe not in TIMEFRAME_DAYS:
-        timeframe = "daily"
+        timeframe = default_timeframe
 
     query = Paper.query.filter(Paper.is_hidden.is_(False))
 
@@ -66,6 +76,9 @@ def single_paper_bibtex(paper_id: int):
     return Response(bib, mimetype="application/x-bibtex")
 
 
+MAX_BULK_IDS = 1000
+
+
 @api_bp.route("/papers/bulk-bibtex", methods=["GET"])
 def bulk_bibtex():
     ids_param = request.args.get("ids", "")
@@ -73,6 +86,11 @@ def bulk_bibtex():
         paper_ids = [int(x.strip()) for x in ids_param.split(",") if x.strip()]
     except ValueError:
         return jsonify({"error": "Invalid paper IDs"}), 400
+    # De-dup and cap before the IN query: an unbounded list overflows SQLite's
+    # SQLITE_MAX_VARIABLE_NUMBER and surfaces as an OperationalError 500.
+    paper_ids = list(dict.fromkeys(paper_ids))
+    if len(paper_ids) > MAX_BULK_IDS:
+        return jsonify({"error": f"Too many paper IDs (max {MAX_BULK_IDS})"}), 400
     if not paper_ids:
         return Response("", mimetype="application/x-bibtex")
     papers = Paper.query.filter(Paper.id.in_(paper_ids)).all()

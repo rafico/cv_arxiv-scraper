@@ -149,22 +149,24 @@ class IngestOrchestrator:
         session: requests.Session | None = None,
         strict: bool = False,
     ) -> list[PaperCandidate]:
-        try:
-            candidates: list[PaperCandidate] = []
-            for feed_url in feed_urls:
-                candidates.extend(
-                    self._rolling_window_fetcher(
-                        days,
-                        feed_url,
-                        session=session,
-                    )
-                )
-            return candidates
-        except Exception as exc:
-            LOGGER.warning("Rolling-window fetch failed: %s", exc)
-            if strict:
-                raise
-            return []
+        # Per-feed isolation (mirrors _fetch_rss_candidates): one feed's transient
+        # failure (arXiv 5xx, truncated XML) must not discard candidates already
+        # collected from the other feeds. Only re-raise in strict mode when every
+        # feed failed and nothing was collected.
+        candidates: list[PaperCandidate] = []
+        feed_errors: list[Exception] = []
+
+        for feed_url in feed_urls:
+            try:
+                candidates.extend(self._rolling_window_fetcher(days, feed_url, session=session))
+            except Exception as exc:
+                LOGGER.warning("Rolling-window fetch failed for %s: %s", feed_url, exc)
+                feed_errors.append(exc)
+
+        if strict and feed_errors and not candidates and len(feed_errors) == len(feed_urls):
+            raise feed_errors[0]
+
+        return candidates
 
     def _fetch_rss_candidates(
         self,

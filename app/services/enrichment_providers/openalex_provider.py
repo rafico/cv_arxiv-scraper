@@ -19,22 +19,27 @@ OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 
 
 def parse_openalex_work(work: dict) -> dict[str, Any]:
-    """Extract relevant fields from an OpenAlex work object."""
+    """Extract relevant fields from an OpenAlex work object.
+
+    Null-safe: OpenAlex returns explicit ``null`` for absent fields, so ``work.get``
+    with a default still yields None. Coerce with ``or`` so a single sparse work
+    can't crash (and abandon) the rest of the batch.
+    """
     topics = []
-    for topic in work.get("topics", []):
+    for topic in work.get("topics") or []:
         name = topic.get("display_name")
         score = topic.get("score")
         if name:
             topics.append({"name": name, "score": score})
 
-    oa_info = work.get("open_access", {}) or {}
+    oa_info = work.get("open_access") or {}
 
     return {
-        "openalex_id": work.get("id", "").replace("https://openalex.org/", ""),
+        "openalex_id": (work.get("id") or "").replace("https://openalex.org/", ""),
         "openalex_topics": topics,
         "oa_status": oa_info.get("oa_status"),
         "openalex_cited_by_count": work.get("cited_by_count"),
-        "referenced_works_count": len(work.get("referenced_works", [])),
+        "referenced_works_count": len(work.get("referenced_works") or []),
     }
 
 
@@ -91,16 +96,20 @@ class OpenAlexProvider(EnrichmentProvider):
                 data = response.json()
                 batch_by_id = {aid.lower(): aid for aid in batch}
                 for work in data.get("results", []):
-                    doi = (work.get("doi") or "").lower()
-                    if "arxiv." not in doi:
-                        continue
-                    # Map the work back by its *exact* arXiv id, not a substring:
-                    # `aid in doi` wrongly attributes ".../arxiv.2301.00012" to the
-                    # shorter id "2301.0001". Strip any trailing version (vN).
-                    work_id = re.sub(r"v\d+$", "", doi.rsplit("arxiv.", 1)[-1])
-                    aid = batch_by_id.get(work_id)
-                    if aid is not None:
-                        fetched[aid] = parse_openalex_work(work)
+                    try:
+                        doi = (work.get("doi") or "").lower()
+                        if "arxiv." not in doi:
+                            continue
+                        # Map the work back by its *exact* arXiv id, not a substring:
+                        # `aid in doi` wrongly attributes ".../arxiv.2301.00012" to the
+                        # shorter id "2301.0001". Strip any trailing version (vN).
+                        work_id = re.sub(r"v\d+$", "", doi.rsplit("arxiv.", 1)[-1])
+                        aid = batch_by_id.get(work_id)
+                        if aid is not None:
+                            fetched[aid] = parse_openalex_work(work)
+                    except Exception as exc:
+                        # One malformed work must not abandon the rest of the batch.
+                        LOGGER.warning("Skipping malformed OpenAlex work: %s", exc)
             except Exception as exc:
                 LOGGER.warning("Failed to fetch OpenAlex data for batch: %s", exc)
 

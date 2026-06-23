@@ -55,6 +55,9 @@ class EmbeddingService:
         # Reverse: paper PK -> FAISS row position
         self._pk_to_row: dict[int, int] = {}
         self._lock = threading.Lock()
+        # Separate from _lock so a (slow, one-time) model load doesn't serialize
+        # with FAISS index search/add.
+        self._model_lock = threading.Lock()
 
         self._load_index()
 
@@ -79,29 +82,34 @@ class EmbeddingService:
             self._pk_to_row = {}
 
     def _load_model(self):
+        # Double-checked locking: without the lock, two concurrent cold-start
+        # search requests would each load the ~400MB SPECTER2 model.
         if self._model is not None:
             return
-        try:
-            import torch
-
-            # Match torch' OpenMP pool to faiss' so the two libgomp copies don't race.
-            torch.set_num_threads(_OMP_THREADS)
-        except Exception:  # pragma: no cover - torch optional/absent
-            pass
-        from sentence_transformers import SentenceTransformer
-
-        last_exc: Exception | None = None
-        for model_name in EMBEDDING_MODEL_CANDIDATES:
-            try:
-                LOGGER.info("Loading embedding model %s (first call may download model weights)...", model_name)
-                self._model = SentenceTransformer(model_name)
-                LOGGER.info("Embedding model loaded: %s", model_name)
+        with self._model_lock:
+            if self._model is not None:
                 return
-            except Exception as exc:
-                last_exc = exc
-                LOGGER.warning("Failed to load embedding model %s: %s", model_name, exc)
+            try:
+                import torch
 
-        raise RuntimeError("Unable to load any embedding model") from last_exc
+                # Match torch' OpenMP pool to faiss' so the two libgomp copies don't race.
+                torch.set_num_threads(_OMP_THREADS)
+            except Exception:  # pragma: no cover - torch optional/absent
+                pass
+            from sentence_transformers import SentenceTransformer
+
+            last_exc: Exception | None = None
+            for model_name in EMBEDDING_MODEL_CANDIDATES:
+                try:
+                    LOGGER.info("Loading embedding model %s (first call may download model weights)...", model_name)
+                    self._model = SentenceTransformer(model_name)
+                    LOGGER.info("Embedding model loaded: %s", model_name)
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    LOGGER.warning("Failed to load embedding model %s: %s", model_name, exc)
+
+            raise RuntimeError("Unable to load any embedding model") from last_exc
 
     def encode(self, texts: list[str]) -> np.ndarray:
         """Encode texts into L2-normalized embeddings."""

@@ -56,6 +56,18 @@ def validate_saved_search(data: dict) -> list[str]:
             elif not all(isinstance(item, str) for item in data[field]):
                 errors.append(f"{field} must contain only strings")
 
+    # The free-form ``filters`` dict is splatted into ``url_for`` in the sidebar.
+    # A werkzeug-reserved key (``_method``/``_external``/…) raises BuildError and
+    # would brick every page, so reject ``_``-prefixed keys at the boundary.
+    filters = data.get("filters")
+    if isinstance(filters, dict):
+        reserved = sorted(k for k in filters if isinstance(k, str) and k.startswith("_"))
+        if reserved:
+            errors.append(f"filters may not contain reserved keys: {', '.join(reserved)}")
+        if "q" in filters and filters["q"] is not None and not isinstance(filters["q"], str):
+            # A non-string q would crash _escape_like at /run time.
+            errors.append("filters.q must be a string")
+
     return errors
 
 
@@ -136,8 +148,8 @@ def execute_saved_search(
 
     # Also apply legacy free-form filters dict for backward compatibility.
     filters = search.filters or {}
-    if filters.get("q"):
-        q = filters["q"]
+    q = filters.get("q")
+    if isinstance(q, str) and q:
         escaped_q = _escape_like(q)
         query = query.filter(
             db.or_(

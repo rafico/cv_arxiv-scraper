@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -184,4 +186,29 @@ class TestEmbeddingService:
             service._load_model()
 
         assert loaded_models == ["broken-model", "working-model"]
+        assert service._model is not None
+
+    def test_load_model_is_thread_safe_and_constructs_once(self, index_dir, monkeypatch):
+        # Concurrent cold-start search requests must not each load the ~400MB model.
+        service = EmbeddingService(index_dir)
+        monkeypatch.setattr("app.services.embeddings.EMBEDDING_MODEL_CANDIDATES", ("the-model",))
+
+        construct_count = 0
+        count_lock = threading.Lock()
+
+        def slow_loader(model_name):
+            nonlocal construct_count
+            with count_lock:
+                construct_count += 1
+            time.sleep(0.1)  # widen the race window
+            return MagicMock()
+
+        with patch("sentence_transformers.SentenceTransformer", side_effect=slow_loader):
+            threads = [threading.Thread(target=service._load_model) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        assert construct_count == 1
         assert service._model is not None

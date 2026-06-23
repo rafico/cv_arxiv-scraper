@@ -5,6 +5,7 @@ from flask import abort, jsonify, request
 from app.csrf import validate_csrf_token
 from app.models import Collection, Paper, PaperCollection, db
 from app.routes.api import api_bp
+from app.routes.api._validation import optional_str, require_list, require_str
 
 
 @api_bp.route("/collections", methods=["GET"])
@@ -41,15 +42,13 @@ def list_collections():
 def create_collection():
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "").strip()
-    if not name:
-        return jsonify({"error": "Missing 'name'"}), 400
+    name = require_str(payload, "name")
     if Collection.query.filter_by(name=name).first():
         return jsonify({"error": "Collection already exists"}), 409
     c = Collection(
         name=name,
-        description=(payload.get("description") or "").strip(),
-        color=(payload.get("color") or "").strip() or None,
+        description=optional_str(payload, "description"),
+        color=optional_str(payload, "color") or None,
     )
     db.session.add(c)
     db.session.commit()
@@ -61,13 +60,13 @@ def update_collection(collection_id: int):
     validate_csrf_token()
     c = db.session.get(Collection, collection_id) or abort(404)
     payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "").strip()
+    name = optional_str(payload, "name")
     if name:
         c.name = name
     if "description" in payload:
-        c.description = (payload["description"] or "").strip()
+        c.description = optional_str(payload, "description")
     if "color" in payload:
-        c.color = (payload["color"] or "").strip() or None
+        c.color = optional_str(payload, "color") or None
     db.session.commit()
     return jsonify({"id": c.id, "name": c.name})
 
@@ -86,12 +85,13 @@ def add_paper_to_collection(collection_id: int):
     validate_csrf_token()
     c = db.session.get(Collection, collection_id) or abort(404)
     payload = request.get_json(silent=True) or {}
-    paper_ids = payload.get("paper_ids", [])
     if isinstance(payload.get("paper_id"), int):
         paper_ids = [payload["paper_id"]]
+    else:
+        paper_ids = require_list(payload, "paper_ids")
     added = 0
     for pid in paper_ids:
-        if not db.session.get(Paper, pid):
+        if not isinstance(pid, int) or not db.session.get(Paper, pid):
             continue
         if PaperCollection.query.filter_by(paper_id=pid, collection_id=c.id).first():
             continue
