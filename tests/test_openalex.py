@@ -41,6 +41,23 @@ class TestParseOpenalexWork:
         result = _parse_openalex_work(work)
         assert result["oa_status"] is None
 
+    def test_explicit_null_fields_do_not_raise(self):
+        # OpenAlex returns explicit null for absent fields, so .get(key, default)
+        # still yields None. The parser must coerce instead of crashing.
+        work = {
+            "id": None,
+            "doi": None,
+            "topics": None,
+            "open_access": None,
+            "referenced_works": None,
+            "cited_by_count": None,
+        }
+        result = _parse_openalex_work(work)
+        assert result["openalex_id"] == ""
+        assert result["openalex_topics"] == []
+        assert result["oa_status"] is None
+        assert result["referenced_works_count"] == 0
+
 
 class TestFetchOpenalexBatch:
     def test_empty_ids(self):
@@ -124,6 +141,30 @@ class TestFetchOpenalexBatch:
         mock_request.side_effect = Exception("Network error")
         result = fetch_openalex_batch(["2301.00001"])
         assert result == {}
+
+    @patch("app.services.openalex.request_with_backoff")
+    def test_one_malformed_work_does_not_abort_batch(self, mock_request):
+        # A non-dict (or otherwise broken) work in results must be skipped, not
+        # abandon the rest of the 50-paper batch.
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [
+                "not-a-dict",  # raises AttributeError on work.get(...)
+                {
+                    "id": "https://openalex.org/W999",
+                    "doi": "https://doi.org/10.48550/arxiv.2301.00002",
+                    "open_access": {"oa_status": "gold"},
+                    "cited_by_count": 3,
+                    "referenced_works": [],
+                    "topics": [],
+                },
+            ]
+        }
+        mock_request.return_value = mock_response
+
+        result = fetch_openalex_batch(["2301.00001", "2301.00002"])
+        assert "2301.00002" in result
+        assert result["2301.00002"]["oa_status"] == "gold"
 
     @patch("app.services.openalex.request_with_backoff")
     def test_email_parameter(self, mock_request):

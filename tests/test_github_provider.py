@@ -103,6 +103,26 @@ class GitHubProviderTests(FlaskDBTestCase):
 
         self.assertEqual(request_fn.call_count, 1)
         self.assertEqual(payloads, {})
+        # The flag lets the CLI backfill stop advancing its cursor past unfetched papers.
+        self.assertTrue(provider.rate_limited)
+
+    def test_non_json_response_skips_repo_without_aborting(self):
+        db.session.add_all([_paper("2606.00040"), _paper("2606.00041")])
+        db.session.commit()
+
+        bad = MagicMock()
+        bad.json.side_effect = ValueError("not json")
+        good = _repo_response("lab/good", stars=12)
+        request_fn = MagicMock(side_effect=[bad, good])
+        provider = GitHubProvider(request_fn=request_fn)
+        repos = {"2606.00040": "lab/bad", "2606.00041": "lab/good"}
+
+        payloads = provider.fetch_batch(["2606.00040", "2606.00041"], repos_by_arxiv_id=repos)
+
+        # The non-JSON 200 skips its repo; the next repo is still processed.
+        self.assertNotIn("2606.00040", payloads)
+        self.assertEqual(payloads["2606.00041"]["github_stars"], 12)
+        self.assertFalse(provider.rate_limited)
 
     def test_not_found_is_cached_as_miss(self):
         paper = _paper("2606.00006")

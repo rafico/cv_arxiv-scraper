@@ -112,6 +112,29 @@ class IngestOrchestratorTests(TestCase):
 
         self.assertEqual([candidate.title for candidate in candidates], ["rss"])
 
+    def test_daily_watch_partial_rolling_failure_keeps_surviving_feed_candidates(self):
+        # One feed's rolling-window failure (arXiv 5xx / truncated XML) must not
+        # discard the recent candidates already collected from the other feeds.
+        def rolling_fetcher(days, feed_url, *, session=None):
+            if feed_url.endswith("cs.RO"):
+                raise RuntimeError("boom")
+            return [_candidate("R1", f"recent:{feed_url}")]
+
+        orchestrator = IngestOrchestrator(
+            rss_candidate_fetcher=lambda feed_url, *, session=None: [_candidate("0001", f"rss:{feed_url}")],
+            rolling_window_fetcher=rolling_fetcher,
+        )
+
+        candidates = orchestrator.fetch(
+            mode=IngestMode.DAILY_WATCH,
+            feed_urls=["https://rss.arxiv.org/rss/cs.CV", "https://rss.arxiv.org/rss/cs.RO"],
+            rolling_window_days=2,
+            backend_names=["rss", "arxiv_api"],
+        )
+
+        titles = {c.title for c in candidates}
+        self.assertIn("recent:https://rss.arxiv.org/rss/cs.CV", titles)
+
     def test_backfill_uses_arxiv_backend(self):
         class FakeArxivBackend:
             def fetch(self, **kwargs):

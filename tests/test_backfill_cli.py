@@ -250,6 +250,7 @@ class BackfillCliTests(FlaskDBTestCase):
         mock_provider_cls.return_value.fetch_batch.return_value = {
             "2601.00009": {"github_repo": "lab/model", "github_stars": 250, "github_license": "MIT"}
         }
+        mock_provider_cls.return_value.rate_limited = False
 
         updated = backfill_github(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
 
@@ -260,6 +261,25 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertEqual(stored.github_license, "MIT")
         repos = mock_provider_cls.return_value.fetch_batch.call_args.kwargs["repos_by_arxiv_id"]
         self.assertEqual(repos, {"2601.00009": "lab/model"})
+
+    @patch("app.enrich.GitHubProvider")
+    def test_backfill_github_stops_on_rate_limit_without_advancing(self, mock_provider_cls):
+        # With batch_size=1 and two papers, a rate-limited first batch must stop the
+        # run (one fetch_batch call) rather than advancing the cursor through the
+        # second paper, which would skip it for the rest of the run.
+        for idx in (10, 11):
+            paper = _paper(f"2601.000{idx}")
+            paper.resource_links = [{"type": "code", "label": "Code", "url": f"https://github.com/lab/m{idx}"}]
+            db.session.add(paper)
+        db.session.commit()
+
+        mock_provider_cls.return_value.fetch_batch.return_value = {}
+        mock_provider_cls.return_value.rate_limited = True
+
+        updated = backfill_github(self.app, batch_size=1, delay_seconds=0, emit=lambda _: None)
+
+        self.assertEqual(updated, 0)
+        self.assertEqual(mock_provider_cls.return_value.fetch_batch.call_count, 1)
 
     @patch("backfill_cli.backfill_abstracts", return_value=7)
     @patch("backfill_cli.backfill_thumbnails", return_value=4)

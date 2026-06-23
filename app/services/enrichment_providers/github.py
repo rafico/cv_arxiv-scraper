@@ -66,6 +66,9 @@ class GitHubProvider(EnrichmentProvider):
         self._request_fn = request_fn
         self.max_fetches = max_fetches
         self.token = token
+        # Set when a batch stops early due to GitHub rate limiting, so a caller
+        # (e.g. the CLI backfill) can stop advancing its cursor past unfetched papers.
+        self.rate_limited = False
 
     def fetch_batch(  # type: ignore[override]  # provider-specific kwargs; base Protocol uses **kwargs
         self,
@@ -110,6 +113,7 @@ class GitHubProvider(EnrichmentProvider):
             except Exception as exc:
                 if _is_rate_limited(exc):
                     LOGGER.warning("GitHub API rate limited; skipping remaining repos: %s", exc)
+                    self.rate_limited = True
                     break
                 if _is_not_found(exc):
                     # Cache the miss so a deleted repo is not re-queried every run.
@@ -118,15 +122,20 @@ class GitHubProvider(EnrichmentProvider):
                 LOGGER.warning("GitHub metadata fetch failed for %s: %s", repo, exc)
                 continue
 
-            data = response.json()
-            license_info = data.get("license") or {}
-            fetched[arxiv_id] = {
-                "github_repo": data.get("full_name") or repo,
-                "github_stars": data.get("stargazers_count"),
-                "github_license": license_info.get("spdx_id") or license_info.get("name"),
-                "archived": data.get("archived"),
-                "pushed_at": data.get("pushed_at"),
-            }
+            try:
+                data = response.json()
+                license_info = data.get("license") or {}
+                fetched[arxiv_id] = {
+                    "github_repo": data.get("full_name") or repo,
+                    "github_stars": data.get("stargazers_count"),
+                    "github_license": license_info.get("spdx_id") or license_info.get("name"),
+                    "archived": data.get("archived"),
+                    "pushed_at": data.get("pushed_at"),
+                }
+            except Exception as exc:
+                # A non-JSON 200 must skip this one repo, not abort the whole run.
+                LOGGER.warning("GitHub metadata parse failed for %s: %s", repo, exc)
+                continue
 
         if fetched:
             store_cached_payloads(
