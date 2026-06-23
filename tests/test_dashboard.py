@@ -58,6 +58,53 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertIn("Inbox", text)
         self.assertNotIn("Paper 29", text)
 
+    def _add_paper(self, *, title: str, arxiv_id: str, published_days_ago: int) -> None:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        publication_dt = date.today() - timedelta(days=published_days_ago)
+        db.session.add(
+            Paper(
+                arxiv_id=arxiv_id,
+                title=title,
+                authors="Author B",
+                link=f"https://arxiv.org/abs/{arxiv_id}",
+                pdf_link=f"https://arxiv.org/pdf/{arxiv_id}",
+                abstract_text="vision transformer segmentation",
+                match_type="Title",
+                matched_terms=["vision"],
+                paper_score=999.0,  # sort onto page 1 regardless of the seeded papers
+                feedback_score=0,
+                is_hidden=False,
+                publication_date=publication_dt.isoformat(),
+                publication_dt=publication_dt,
+                scraped_date=date.today().isoformat(),
+                scraped_at=now,  # scraped just now
+            )
+        )
+        db.session.commit()
+
+    def test_daily_inbox_shows_announcement_lagged_paper(self):
+        # arXiv announces papers a few days after their publication date, so a
+        # just-scraped paper routinely carries a recent-past publication_dt. It
+        # must still appear in the default daily inbox (regression: it didn't).
+        self._add_paper(title="Announcement Lagged Paper", arxiv_id="2602.9001", published_days_ago=3)
+
+        response = self.client.get("/")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Announcement Lagged Paper", text)
+
+    def test_daily_inbox_excludes_recently_scraped_stale_paper(self):
+        # A genuinely old paper (well beyond the announcement-lag window) that is
+        # scraped today must not flood the daily inbox.
+        self._add_paper(title="Stale Backfilled Paper", arxiv_id="2602.9002", published_days_ago=30)
+
+        response = self.client.get("/")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Stale Backfilled Paper", text)
+
     def test_all_time_second_page_available(self):
         response = self.client.get("/?timeframe=all&page=2")
         text = response.get_data(as_text=True)

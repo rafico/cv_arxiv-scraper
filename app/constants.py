@@ -2,6 +2,14 @@
 
 DASHBOARD_PER_PAGE = 24
 
+# arXiv announces papers up to several days after their listed publication date
+# (submission cut-offs + weekends/holidays), so a paper scraped today routinely
+# carries a publication date a few days in the past. The inbox treats a freshly
+# scraped paper as "in window" if its publication date is no older than this many
+# days before the window cut-off — wide enough to cover the announcement lag, far
+# short of genuine backfills/old imports that should not resurface in the inbox.
+INBOX_ANNOUNCEMENT_LAG_DAYS = 7
+
 ARXIV_API_DELAY = 3
 ARXIV_API_BATCH_SIZE = 50
 

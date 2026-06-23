@@ -123,5 +123,65 @@ class HttpClientTests(unittest.TestCase):
         self.assertEqual(session._cv_arxiv_rate_limit_settings.profile, "bulk")
 
 
+class RetryPolicyTests(unittest.TestCase):
+    # A generous rate limit so the token bucket never sleeps and the tests stay fast;
+    # only the retry/backoff behaviour is under test here.
+    _FAST_CONFIG = {"ingest": {"rate_limit": {"requests_per_second": 1000.0, "burst": 1000}}}
+
+    @staticmethod
+    def _http_error(status: int) -> requests.HTTPError:
+        response = Mock(spec=requests.Response)
+        response.status_code = status
+        error = requests.HTTPError(f"{status} error", response=response)
+        response.raise_for_status.side_effect = error
+        return response, error
+
+    @patch("app.services.http_client.time.sleep")
+    @patch("app.services.http_client.requests.request")
+    def test_does_not_retry_non_retryable_client_error(self, mock_request, mock_sleep):
+        response, _ = self._http_error(404)
+        mock_request.return_value = response
+
+        with self.assertRaises(requests.HTTPError):
+            request_with_backoff("GET", "https://example.invalid/pdf", attempts=3, scraper_config=self._FAST_CONFIG)
+
+        # 404 is permanent: one attempt, no retry, no backoff sleep.
+        self.assertEqual(mock_request.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    @patch("app.services.http_client.time.sleep")
+    @patch("app.services.http_client.requests.request")
+    def test_retries_on_server_error(self, mock_request, mock_sleep):
+        response, _ = self._http_error(503)
+        mock_request.return_value = response
+
+        with self.assertRaises(requests.HTTPError):
+            request_with_backoff("GET", "https://example.invalid/data", attempts=3, scraper_config=self._FAST_CONFIG)
+
+        self.assertEqual(mock_request.call_count, 3)
+
+    @patch("app.services.http_client.time.sleep")
+    @patch("app.services.http_client.requests.request")
+    def test_retries_on_rate_limit(self, mock_request, mock_sleep):
+        response, _ = self._http_error(429)
+        mock_request.return_value = response
+
+        with self.assertRaises(requests.HTTPError):
+            request_with_backoff("GET", "https://example.invalid/data", attempts=2, scraper_config=self._FAST_CONFIG)
+
+        self.assertEqual(mock_request.call_count, 2)
+
+    @patch("app.services.http_client.time.sleep")
+    @patch("app.services.http_client.requests.request")
+    def test_retries_on_network_timeout(self, mock_request, mock_sleep):
+        # Network-level errors carry no response and are transient → retried.
+        mock_request.side_effect = requests.Timeout("read timed out")
+
+        with self.assertRaises(requests.Timeout):
+            request_with_backoff("GET", "https://example.invalid/data", attempts=2, scraper_config=self._FAST_CONFIG)
+
+        self.assertEqual(mock_request.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
