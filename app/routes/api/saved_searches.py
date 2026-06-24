@@ -5,6 +5,7 @@ from flask import abort, jsonify, request
 from app.csrf import validate_csrf_token
 from app.models import SavedSearch, db
 from app.routes.api import api_bp
+from app.routes.api._validation import optional_str, require_str
 
 
 def _serialize_saved_search(s: SavedSearch) -> dict:
@@ -38,9 +39,10 @@ def create_saved_search():
 
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "").strip()
-    if not name:
-        return jsonify({"error": "Missing 'name'"}), 400
+    # require_str yields a clean 400 ("Missing 'name'" / "'name' must be a string")
+    # via the api_bp HTTPException handler instead of an AttributeError on a
+    # non-string name falling through to the generic safety-net 400 + log noise.
+    name = require_str(payload, "name")
 
     errors = validate_saved_search(payload)
     if errors:
@@ -87,7 +89,9 @@ def update_saved_search(search_id: int):
         return jsonify({"errors": errors}), 400
 
     if "name" in payload:
-        name = (payload["name"] or "").strip()
+        # optional_str tolerates an absent/empty name (left unchanged) but rejects a
+        # non-string with a clean 400 instead of an AttributeError.
+        name = optional_str(payload, "name")
         if name:
             s.name = name
     if "filters" in payload:

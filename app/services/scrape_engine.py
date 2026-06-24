@@ -420,6 +420,18 @@ def _extract_sections(app, results: list[dict]) -> None:
     if not targets:
         return
 
+    # Dedup by link: a cross-listed paper can appear twice in `results` (same link,
+    # not deduped across feeds). Both resolve to one Paper row, so without this the
+    # second iteration's bulk delete (autoflush) wipes the PaperSection rows the
+    # first just added, and total_sections double-counts. Keep the first per link.
+    seen_links: set[str] = set()
+    deduped: list[tuple[str, bytes]] = []
+    for link, pdf in targets:
+        if link not in seen_links:
+            seen_links.add(link)
+            deduped.append((link, pdf))
+    targets = deduped
+
     # Parse all PDFs in one isolated child, then write rows in the parent (child is DB-free).
     try:
         sections_per_target = run_isolated(
@@ -556,8 +568,13 @@ def _finish_scrape_run(app, scrape_run_id: int | None, *, status: str) -> None:
 
 
 def _create_llm_client(app) -> tuple[LLMClient | None, str]:
+    from app import _is_truthy_flag
+
     llm_config = app.config["SCRAPER_CONFIG"].get("llm", {})
-    if not llm_config.get("enabled"):
+    if not _is_truthy_flag(llm_config.get("enabled")):
+        # A hand-edited ``enabled: "false"`` scalar is truthy as a raw string; route
+        # it through the same helper the config validator / scheduler use so a
+        # disabled LLM stays disabled (and doesn't silently run + cost tokens).
         return None, ""
 
     provider = llm_config.get("provider", "openrouter")

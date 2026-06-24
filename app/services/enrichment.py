@@ -147,8 +147,17 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
             "start": start,
             "max_results": batch_size,
         }
-        response = _request_arxiv_api(params, session=session)
-        root = ET.fromstring(response.text)
+        try:
+            response = _request_arxiv_api(params, session=session)
+            root = ET.fromstring(response.text)
+        except Exception as exc:
+            # A mid-pagination arXiv failure (exhausted retries) or a malformed page
+            # must not discard the entries already paginated this run — keep what we
+            # have and stop, like the per-feed isolation in the ingest orchestrator.
+            LOGGER.warning(
+                "Rolling-window pagination stopped early for %s after %d page(s): %s", category, pages_fetched, exc
+            )
+            break
         batch_entries = [_parse_atom_entry(entry) for entry in root.findall("atom:entry", _ATOM_NS)]
         if not batch_entries:
             break

@@ -206,3 +206,73 @@ feature** authored outside this QA session: `app/templates/partials/_shell_scrip
 in `scrape_engine.py`, and added cases in `tests/test_scrape_engine.py`. No QA agent touched
 those and they are left intact. Of the `scrape_engine.py` changes, only `_INDEX_WRITE_LOCK`
 (G9) belongs to this round.
+
+---
+
+# Pre-Release QA Findings — Round 5
+
+Round: `qa/pre-release-sweep-5`. Baseline before this round: **905 passed**, 8 e2e
+deselected; `ruff`/`ruff format`/`mypy` all clean. After this round: **943 passed**
+(38 regression tests across 13 new `test_qa_round5_*.py` modules). 16 defects fixed;
+every fix has a regression test verified to fail on the pre-fix code and pass on the
+fix. Distinct from the 72 fixed in rounds 1–4.
+
+Method: a plan-mode Explore pre-sweep seeded 3 input-validation defects; then a
+multi-agent finder sweep over disjoint subsystems fed every candidate through two
+independent adversarial verifiers (correctness/reachability + duplicate/already-
+handled). The first finder run was throttled by an API burst rate-limit (only the
+ingest lane completed — surfacing H1/H11, verified by hand); a second **waved** run
+covered the remaining 12 lanes and returned 12 confirmed + 1 contested. One contested
+item and one false positive were investigated and not fixed (see below).
+
+## High-impact (S1 / S2)
+
+| # | Sev | Area | Defect | File |
+|---|-----|------|--------|------|
+| H1 | S2 | ingest/http | A configured `ingest.user_agent` was silently dropped on the default daily/scheduled scrape: the RSS backend's bare `request_with_backoff(session=session)` resolved the "requested" UA to the library default, mismatched the session's configured UA, and the reconfigure branch reset the live session's User-Agent **and** rate-limit settings to defaults for the rest of the scrape (arXiv UA-compliance lost; throttle profile dropped). Fix is dimension-aware: only (re)configure the dimension the caller specified, else inherit the session's. Also covers the `user_agent`-only facet (`arxiv_api_backend`) that reset the rate limit | app/services/http_client.py |
+| H2 | S2 | enrichment | `fetch_recent_papers` discarded **all** already-paginated entries when arXiv failed (exhausted retries) or returned malformed XML mid-pagination — the per-page fetch+parse had no isolation, so the exception unwound the whole call. Now keeps collected entries and stops, mirroring the orchestrator's per-feed isolation | app/services/enrichment.py |
+| H3 | S2 | venues | `parse_venue` attributed a submit/accept/qualifier/workshop cue to the (dict-order) first-matched venue whenever it sat within the proximity window — even when the cue was **nearer a co-mentioned venue** ("Accepted to CVPR 2024. Our ICCV oral paper…" → CVPR mis-tagged *oral*). Rounds 3/4 gated by window; this gates by nearest-venue ownership | app/services/venues.py |
+| H4 | S2 | config/llm | A hand-edited scalar `llm.enabled` ("false"/"no"/"off") read truthy: app startup crashed when no API key was configured, and the LLM **silently ran while "disabled"** (token cost). Routed `llm.enabled` through `_is_truthy_flag` at the validator and the client factory, mirroring the round-3 F19 `scheduler.enabled` fix | app/__init__.py, app/services/scrape_engine.py |
+| H5 | S2 | cli/embeddings | A non-positive `--batch-size` made the offset-paginated backfill loops spin forever (SQLite reads `LIMIT -1` as unlimited and the offset cursor never advances). Reject `<= 0` at the argparse `--batch-size` type, and clamp the `backfill_embeddings` library entry | app/cli/backfill.py, app/services/embed_backfill.py |
+| H6 | S2 | settings | Saving **Email** settings activated the loaded config without validation (the one mutating route that didn't go through `persist_config`), so an unrelated email save silently re-activated a `config.yaml` that had drifted to a dict-but-invalid state. Routed `_save_config_key` through `persist_config` (validate before activate); the email route now flashes the error like its siblings | app/routes/settings.py |
+| H7 | S2 | pdf/sections | The known-heading regex's trailing `\|\s+` branch matched any wrapped body line that merely *starts* with a section keyword ("Results show our approach…"), fabricating a section boundary and truncating the real section. Added the same short-line guard the all-caps heading branch already uses | app/services/pdf_extraction.py |
+
+## Lower / edge (S3)
+
+| # | Sev | Area | Defect | File |
+|---|-----|------|--------|------|
+| H8 | S3 | api/collections | `add_paper_to_collection` accepted a boolean `paper_id` (`bool` ⊂ `int`): `{"paper_id": true}` resolved to `db.session.get(Paper, True)` → silently added Paper **#1**. Excludes bool, mirroring the round-2 `bulk_feedback` guard | app/routes/api/collections.py |
+| H9 | S3 | api/saved-search | A non-string `name` in saved-search create/update raised `AttributeError` (`(123 or "").strip()`), caught by the safety net as a generic 400 + a logged traceback on every malformed request. Now `require_str`/`optional_str` → a specific 400, no log noise | app/routes/api/saved_searches.py |
+| H10 | S3 | api/scrape | A non-string `start_date`/`end_date` in historical scrape raised `TypeError` (`strptime`), not `ValueError`, so it missed the format-error branch and fell to the generic safety-net 400. Now catches both | app/routes/api/scrape.py |
+| H11 | S3 | ingest | `_merge_candidates` keyed dedup on `arxiv_id or link`; a non-arXiv feed item with neither (`arxiv_id=None`, `link=""`) hashed to `""`, so **all** link-less candidates collapsed to one and the rest were dropped before save (a NULL-`arxiv_id` paper is persistable — the unique index is partial). Falls back to a per-candidate key | app/services/ingest/orchestrator.py |
+| H12 | S3 | scrape/sections | `_extract_sections` didn't dedup result targets by link, so a cross-listed paper (same link twice in a batch) had the second copy's bulk `delete()` autoflush + wipe the `PaperSection` rows the first just added, and `total_sections` double-counted. Dedup targets by link | app/services/scrape_engine.py |
+| H13 | S3 | jobs | `get_status_snapshot` could momentarily report a finishing job as a spurious non-terminal `{"running": False}`: `_publish` cleared `_active_job_id` (under `_lock`) before setting `finished_at` (under `job.condition`). Now clears the active id only after the job is marked finished | app/services/jobs.py |
+| H14 | S3 | ranking/matching | An empty/whitespace whitelist term (hand-edited `config.yaml`) compiled to `r"\b\b"`, which matches at every word boundary → a false Author/Title match on **all** papers. Empty terms now compile to a never-matching pattern | app/services/matching.py |
+| H15 | S3 | cli/sync | An oversized `--chunk-days` overflowed date/`timedelta` arithmetic in `iter_date_chunks` (`OverflowError`, not `ValueError`), so the sync CLI's handler missed it → traceback. Now caught and reported cleanly | app/cli/sync.py |
+| H16 | S3 | bibtex/export | A BibTeX cite key derived from a non-arXiv link was unsanitized (spaces/`?`/`&` …) — or empty — emitting a malformed/un-citable `@article{…}`. Sanitizes to BibTeX-legal chars with a `paper_<id>` fallback | app/services/bibtex.py |
+
+## Fix notes (judgment-call items)
+
+- **H1** — the fix is at the root in `request_with_backoff` rather than threading
+  `user_agent`/`scraper_config` through six ingest signatures: each call now reconfigures
+  only the dimensions it actually specified (`scraper_config`/explicit `rate_limit_profile`
+  → settings; `user_agent`/`scraper_config` → UA) and inherits the rest from the session.
+  This preserves the **intended** bulk re-tune for the enrichment/arxiv backends (which
+  pass `rate_limit_profile="bulk"` with no config) while fixing the RSS backend's reset —
+  and subsumes the separately-found "user_agent-only call resets the rate limit" facet.
+- **H3** — added `_venue_owns_signal` (a cue belongs to the matched venue only if no other
+  co-mentioned venue is strictly nearer; ties go to the matched venue). With a single venue
+  in the comment this is a no-op, so all 12 pre-existing venue tests still pass.
+- **H4** — `_create_llm_client` imports `_is_truthy_flag` from `app` locally (the in-function
+  import pattern this repo already uses) to avoid an import cycle.
+
+## Investigated, not fixed (transparency)
+
+- **(contested) `subprocess_runner.run_isolated` unbounded post-timeout `join()`** — claim
+  was that a wedged native child ignores `SIGTERM` and hangs the worker forever (holding
+  `_INDEX_WRITE_LOCK`). The reachability verifier **refuted the premise**: `Process.terminate()`
+  sends a real `SIGTERM` via `os.kill` (not a Python-level handler that needs the interpreter
+  to regain control), so a normally-terminating child is reaped. A bounded join + `SIGKILL`
+  escalation is defensible hardening but the asserted hang is not reachable; deferred.
+- **(false positive) Mendeley "empty author names"** — `"".rsplit(None, 1)` returns `[]`, so
+  the existing walrus guard already drops empty author components. Discarded in verification.

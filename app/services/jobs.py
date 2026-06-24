@@ -63,10 +63,8 @@ class ScrapeJobManager:
         terminal_events = {"done", "scrape_error", "skipped"}
         with self._lock:
             job = self._jobs.get(job_id)
-            if not job:
-                return
-            if event in terminal_events and self._active_job_id == job_id:
-                self._active_job_id = None
+        if not job:
+            return
 
         with job.condition:
             job.events.append((event, data))
@@ -80,6 +78,18 @@ class ScrapeJobManager:
                 job.status = "skipped"
                 job.finished_at = now_utc()
             job.condition.notify_all()
+
+        # Clear the active id only AFTER the job is marked finished above. If it were
+        # cleared first (as before), a get_status_snapshot interleaving between the
+        # two would see "active id cleared but finished_at not yet set" and fall to the
+        # completed-jobs branch, which excludes the still-unfinished job → a spurious
+        # non-terminal {"running": False} for one poll cycle. The reverse window
+        # (finished but active not yet cleared) is handled by the snapshot's active
+        # branch, which already treats a finished active job as terminal.
+        if event in terminal_events:
+            with self._lock:
+                if self._active_job_id == job_id:
+                    self._active_job_id = None
 
     def _run_job(self, app, job_id: str, force: bool = False) -> None:
         try:

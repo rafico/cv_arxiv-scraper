@@ -30,6 +30,11 @@ def _build_pattern(term: str) -> tuple[str, int]:
     - Other terms are case-insensitive.
     """
     normalized = normalize(term)
+    if not normalized.strip():
+        # An empty/whitespace term would compile to r"\b\b", which matches at every
+        # word boundary — i.e. every paper. A garbage (hand-edited) whitelist entry
+        # must never match instead. ``(?!)`` is a never-matching pattern.
+        return r"(?!)", 0
     escaped = re.escape(normalized)
     is_short_acronym = len(term) <= 4 and term.isupper()
     flags = 0 if is_short_acronym else re.IGNORECASE
@@ -48,7 +53,11 @@ def _compile_patterns(terms: tuple[str, ...], mode: str) -> tuple[tuple[str, re.
     if mode == "author":
         for term in terms:
             normalized_term = normalize(term)
-            pattern = re.compile(rf"\b{re.escape(normalized_term)}\b", re.IGNORECASE)
+            if not normalized_term.strip():
+                # See _build_pattern: an empty term must never match, not match all.
+                pattern = re.compile(r"(?!)")
+            else:
+                pattern = re.compile(rf"\b{re.escape(normalized_term)}\b", re.IGNORECASE)
             compiled.append((term, pattern))
         return tuple(compiled)
 

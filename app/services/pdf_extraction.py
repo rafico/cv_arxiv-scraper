@@ -98,9 +98,13 @@ def extract_sections(pdf_content: bytes) -> list[ExtractedSection]:
         if not stripped:
             continue
 
-        # Try known section heading regex.
+        # Try known section heading regex (short lines only). The regex's trailing
+        # ``\s+`` branch also matches a wrapped body line that merely *starts* with a
+        # section word ("Results show our approach…"), which would fabricate a bogus
+        # boundary and truncate the real section. Gate on length like the all-caps
+        # branch below — a true heading line is short.
         match = _HEADING_RE.match(stripped)
-        if match:
+        if match and len(stripped) < 60:
             section_name = _normalize_section_type(match.group(1))
             boundaries.append((i, section_name))
             continue

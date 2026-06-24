@@ -142,7 +142,9 @@ def main(argv: list[str] | None = None) -> int:
             end_dt=args.end_dt,
             chunk_days=args.chunk_days,
         )
-    except (RuntimeError, ValueError) as exc:
+    except (RuntimeError, ValueError, OverflowError) as exc:
+        # OverflowError: an oversized --chunk-days overflows date/timedelta arithmetic
+        # in iter_date_chunks; report it cleanly instead of dumping a traceback.
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

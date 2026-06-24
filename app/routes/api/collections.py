@@ -93,13 +93,16 @@ def add_paper_to_collection(collection_id: int):
     validate_csrf_token()
     c = db.session.get(Collection, collection_id) or abort(404)
     payload = request.get_json(silent=True) or {}
-    if isinstance(payload.get("paper_id"), int):
+    # ``bool`` is a subclass of ``int``: a JSON ``true``/``false`` would otherwise
+    # resolve to ``Paper`` id 1/0 and silently add the wrong paper (mirrors the
+    # bulk_feedback guard).
+    if isinstance(payload.get("paper_id"), int) and not isinstance(payload.get("paper_id"), bool):
         paper_ids = [payload["paper_id"]]
     else:
         paper_ids = require_list(payload, "paper_ids")
     added = 0
     for pid in paper_ids:
-        if not isinstance(pid, int) or not db.session.get(Paper, pid):
+        if not isinstance(pid, int) or isinstance(pid, bool) or not db.session.get(Paper, pid):
             continue
         if PaperCollection.query.filter_by(paper_id=pid, collection_id=c.id).first():
             continue

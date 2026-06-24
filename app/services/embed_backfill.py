@@ -15,6 +15,10 @@ def backfill_embeddings(app, batch_size: int = 64) -> int:
     service = get_embedding_service(app)
     total_added = 0
 
+    # A non-positive batch_size makes SQLite treat LIMIT as unlimited (LIMIT -1) and
+    # OFFSET stays <= 0, so the cursor never advances and the loop spins forever.
+    batch_size = max(1, batch_size)
+
     with app.app_context():
         offset = 0
         while True:

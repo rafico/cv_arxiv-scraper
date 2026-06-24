@@ -83,47 +83,95 @@ def _find_year(comment: str, *, search_from: int) -> int | None:
     return int(match.group()) if match else None
 
 
-def _nearest_distance(pattern: re.Pattern[str], comment: str, venue: re.Match[str]) -> int | None:
-    """Edge-aware distance from the venue *span* to the closest match of ``pattern``.
+def _span_distance(a_start: int, a_end: int, b_start: int, b_end: int) -> int:
+    """Edge distance between two spans — 0 if they overlap.
 
-    Measuring against the venue's start only mis-ranks long-form aliases
+    Measuring against a venue's start only mis-ranks long-form aliases
     ("International Journal of Computer Vision"): a genuine acceptance phrase that
-    *follows* the venue sits far from ``venue.start()``, so a preceding submission
-    word looks closer. Compare against the nearest venue edge instead — 0 if the
-    spans overlap, the gap before ``venue.start()`` for a preceding match, or the
-    gap after ``venue.end()`` for a following match.
+    *follows* the venue sits far from its start, so a preceding submission word looks
+    closer. Compare against the nearest edge instead.
     """
+    if a_start >= b_end:
+        return a_start - b_end
+    if a_end <= b_start:
+        return b_start - a_end
+    return 0
+
+
+def _all_venue_spans(comment: str) -> list[tuple[str, int, int]]:
+    """Every ``(canonical, start, end)`` known-venue mention in the comment."""
+    spans: list[tuple[str, int, int]] = []
+    for canonical, aliases in KNOWN_VENUES.items():
+        for alias in aliases:
+            for m in _alias_pattern(alias).finditer(comment):
+                spans.append((canonical, m.start(), m.end()))
+    return spans
+
+
+def _venue_owns_signal(
+    s_start: int, s_end: int, venue: re.Match[str], canonical: str, venue_spans: list[tuple[str, int, int]]
+) -> bool:
+    """Whether the matched venue is the nearest venue mention to a signal occurrence.
+
+    A submit/accept/qualifier/workshop cue that sits closer to a *different*
+    co-mentioned venue belongs to that venue, not the matched one (e.g. "Submitted to
+    CVPR. Accepted to ICCV 2024 oral" — the "Accepted"/"oral" cues are ICCV's). Ties
+    go to the matched venue; with a single venue in the comment this is always True.
+    """
+    own = _span_distance(s_start, s_end, venue.start(), venue.end())
+    for other_canonical, vs, ve in venue_spans:
+        if other_canonical == canonical:
+            continue
+        if _span_distance(s_start, s_end, vs, ve) < own:
+            return False
+    return True
+
+
+def _nearest_distance(
+    pattern: re.Pattern[str],
+    comment: str,
+    venue: re.Match[str],
+    canonical: str,
+    venue_spans: list[tuple[str, int, int]],
+) -> int | None:
+    """Edge distance to the closest ``pattern`` match the matched venue *owns*."""
     best: int | None = None
     for m in pattern.finditer(comment):
-        if m.start() >= venue.end():
-            distance = m.start() - venue.end()
-        elif m.end() <= venue.start():
-            distance = venue.start() - m.end()
-        else:
-            distance = 0
+        if not _venue_owns_signal(m.start(), m.end(), venue, canonical, venue_spans):
+            continue
+        distance = _span_distance(m.start(), m.end(), venue.start(), venue.end())
         if best is None or distance < best:
             best = distance
     return best
 
 
-def _signal_near_venue(pattern: re.Pattern[str], comment: str, venue: re.Match[str], *, window: int = 30) -> bool:
-    """Whether ``pattern`` occurs within ``window`` characters of the venue mention."""
+def _signal_near_venue(
+    pattern: re.Pattern[str],
+    comment: str,
+    venue: re.Match[str],
+    canonical: str,
+    venue_spans: list[tuple[str, int, int]],
+    *,
+    window: int = 30,
+) -> bool:
+    """Whether ``pattern`` occurs within ``window`` chars of the venue *and* is owned by it."""
     lo = max(0, venue.start() - window)
     hi = min(len(comment), venue.end() + window)
-    return bool(pattern.search(comment, lo, hi))
+    return any(
+        _venue_owns_signal(m.start(), m.end(), venue, canonical, venue_spans) for m in pattern.finditer(comment, lo, hi)
+    )
 
 
-def _qualifier_near_venue(comment: str, venue: re.Match[str], *, window: int = 30) -> str | None:
-    """The oral/spotlight/highlight qualifier within ``window`` chars of the venue, if any.
-
-    Mirrors :func:`_signal_near_venue` so a qualifier that belongs to a *different*
-    venue elsewhere in the comment (e.g. "Accepted to CVPR 2024. Extended version of
-    our ICCV oral paper.") does not flip the matched venue's status to oral.
-    """
+def _qualifier_near_venue(
+    comment: str, venue: re.Match[str], canonical: str, venue_spans: list[tuple[str, int, int]], *, window: int = 30
+) -> str | None:
+    """The oral/spotlight/highlight qualifier within ``window`` chars of, and owned by, the venue."""
     lo = max(0, venue.start() - window)
     hi = min(len(comment), venue.end() + window)
-    match = _QUALIFIER_RE.search(comment, lo, hi)
-    return match.group(1).lower() if match else None
+    for m in _QUALIFIER_RE.finditer(comment, lo, hi):
+        if _venue_owns_signal(m.start(), m.end(), venue, canonical, venue_spans):
+            return m.group(1).lower()
+    return None
 
 
 def parse_venue(comment: str | None) -> VenueMatch | None:
@@ -152,14 +200,18 @@ def parse_venue(comment: str | None) -> VenueMatch | None:
     # submission (the stray "accepted" is farther away), and "Accepted to CVPR
     # (Oral). Extended version of our ICCV workshop paper" is an oral (the
     # "workshop" token belongs to the other venue, not CVPR).
-    submit_dist = _nearest_distance(_SUBMIT_RE, comment, match)
-    accept_dist = _nearest_distance(_ACCEPT_RE, comment, match)
-    qualifier = _qualifier_near_venue(comment, match)
+    # Attribute each acceptance/submission cue only when the matched venue is the
+    # nearest venue mention to it, so cues that belong to a co-mentioned venue are
+    # not stolen by the (dict-order) first-matched venue.
+    venue_spans = _all_venue_spans(comment)
+    submit_dist = _nearest_distance(_SUBMIT_RE, comment, match, canonical, venue_spans)
+    accept_dist = _nearest_distance(_ACCEPT_RE, comment, match, canonical, venue_spans)
+    qualifier = _qualifier_near_venue(comment, match, canonical, venue_spans)
 
     if submit_dist is not None and (accept_dist is None or submit_dist <= accept_dist):
         # A submission cue at least as close as any acceptance cue → not confirmed.
         status = "mentioned"
-    elif _signal_near_venue(_WORKSHOP_RE, comment, match):
+    elif _signal_near_venue(_WORKSHOP_RE, comment, match, canonical, venue_spans):
         # "workshop" adjacent to the venue → a workshop acceptance.
         status = "workshop"
     elif qualifier is not None:
