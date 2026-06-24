@@ -101,19 +101,75 @@
         overlay.classList.toggle("hidden", !visible);
     }
 
+    // Staged progress model. Each scrape phase owns a band of the bar; determinate
+    // stages (downloading, processing) interpolate within their band from per-item
+    // counts, while network-bound stages pulse at the band's start so the UI keeps
+    // telling the user what's happening instead of freezing at 0%.
+    const SCRAPE_STAGES = {
+        feed:           { title: "Reading feed",          subtitle: "Connecting to arXiv...",                   start: 3 },
+        rolling_window: { title: "Loading recent papers", subtitle: "Pulling the rolling window from arXiv...", start: 5 },
+        filtered:       { title: "Checking your library", subtitle: "",                                         start: 8 },
+        affiliations:   { title: "Fetching metadata",     subtitle: "Querying arXiv for authors and venues...", start: 12 },
+        downloading:    { title: "Downloading PDFs",      subtitle: "Checking affiliations on each paper...",   start: 15, end: 55 },
+        processing:     { title: "Ranking papers",        subtitle: "Scoring against your interests...",        start: 55, end: 90 },
+        saving:         { title: "Saving results",        subtitle: "Writing matches to your library...",       start: 90, solid: true },
+        thumbnails:     { title: "Rendering previews",    subtitle: "Generating PDF thumbnails...",             start: 93, solid: true },
+        embeddings:     { title: "Building search index", subtitle: "Computing semantic embeddings...",         start: 96, solid: true },
+        sections:       { title: "Extracting sections",   subtitle: "Parsing PDF structure...",                 start: 98, solid: true },
+    };
+
+    // Highest bar value applied so far this run. Events can legitimately arrive in an
+    // order that would otherwise nudge the bar backwards (e.g. the "feed" event lands
+    // after "rolling_window" already advanced it), so progress is clamped monotonic.
+    // Reset to 0 at the start of every scrape (see startScrape).
+    let lastBarPct = 0;
+
+    function setProgressBar(pct, { solid = false } = {}) {
+        const clamped = Math.max(0, Math.min(100, pct));
+        // Never move backwards mid-run; terminal states set width/aria directly.
+        const next = Math.max(clamped, lastBarPct);
+        lastBarPct = next;
+        const rounded = Math.round(next);
+        const bar = document.getElementById("progress-bar");
+        bar.style.width = `${next}%`;
+        bar.classList.toggle("bar-pulse", !solid);
+        bar.setAttribute("aria-valuenow", String(rounded));
+        document.getElementById("progress-pct").textContent = `${rounded}%`;
+    }
+
+    // Only writes when the text actually changes, so re-setting the same phase copy on
+    // every streamed item (one event per PDF / per ranked paper) doesn't churn the
+    // aria-live region and spam screen readers.
+    function setProgressText(title, subtitle) {
+        const titleEl = document.getElementById("progress-title");
+        const subtitleEl = document.getElementById("progress-subtitle");
+        if (title != null && titleEl.textContent !== title) titleEl.textContent = title;
+        if (subtitle != null && subtitleEl.textContent !== subtitle) subtitleEl.textContent = subtitle;
+    }
+
+    // Position within a stage's band from a done/total ratio (clamped 0..1).
+    function bandPct(stage, done, total) {
+        if (!total || total <= 0) return stage.start;
+        const span = (stage.end != null ? stage.end : stage.start) - stage.start;
+        return stage.start + Math.min(1, Math.max(0, done / total)) * span;
+    }
+
     async function startScrape(force = false) {
         const btn = document.getElementById("scrape-btn");
         btn.disabled = true;
         document.getElementById("scrape-icon").classList.add("animate-spin");
         document.getElementById("scrape-text").textContent = "Scraping...";
 
-        document.getElementById("progress-bar").style.width = "2%";
-        document.getElementById("progress-bar").className = "h-full bg-accent rounded-full transition-all duration-300 ease-out bar-pulse";
+        lastBarPct = 0;
+        const progressBar = document.getElementById("progress-bar");
+        progressBar.style.width = "2%";
+        progressBar.className = "h-full bg-accent rounded-full transition-all duration-300 ease-out bar-pulse";
+        progressBar.setAttribute("aria-valuenow", "0");
         document.getElementById("progress-pct").textContent = "0%";
         document.getElementById("progress-matches").textContent = "0 matches";
         document.getElementById("progress-counter").textContent = "";
-        document.getElementById("progress-title").textContent = "Fetching RSS feed...";
-        document.getElementById("progress-subtitle").textContent = "Connecting to arXiv";
+        document.getElementById("progress-title").textContent = SCRAPE_STAGES.feed.title;
+        document.getElementById("progress-subtitle").textContent = SCRAPE_STAGES.feed.subtitle;
         document.getElementById("progress-feed").innerHTML =
             '<p class="text-xs text-fg-subtle text-center py-4" id="feed-placeholder">Waiting for matches...</p>';
         document.getElementById("progress-stats").classList.add("hidden");
@@ -148,9 +204,10 @@
 
             source.addEventListener("feed", (event) => {
                 const data = JSON.parse(event.data);
-                document.getElementById("progress-title").textContent = "Processing papers";
-                document.getElementById("progress-subtitle").textContent = `Found ${data.total} papers in feed`;
-                document.getElementById("progress-counter").textContent = `0 / ${data.total}`;
+                // The bar is already at the feed band from the status{phase:"feed"} (or
+                // "rolling_window") event; this listener only refines the copy + counter.
+                setProgressText(SCRAPE_STAGES.feed.title, `Found ${data.total} paper${data.total === 1 ? "" : "s"} in feed`);
+                document.getElementById("progress-counter").textContent = `${data.total} in feed`;
             });
 
             source.addEventListener("progress", (event) => {
@@ -164,19 +221,17 @@
             });
 
             source.addEventListener("status", (event) => {
-                const data = JSON.parse(event.data);
-                if (data.phase === "saving") {
-                    document.getElementById("progress-title").textContent = "Saving results";
-                    document.getElementById("progress-subtitle").textContent = "Writing to database...";
-                    document.getElementById("progress-bar").style.width = "100%";
-                    document.getElementById("progress-bar").classList.remove("bar-pulse");
-                }
+                handleScrapeStatus(JSON.parse(event.data));
             });
 
             source.addEventListener("scrape_error", (event) => {
                 const data = JSON.parse(event.data);
                 document.getElementById("progress-title").textContent = "Scrape error";
                 document.getElementById("progress-subtitle").textContent = data.message || "Unexpected failure";
+                const bar = document.getElementById("progress-bar");
+                bar.style.width = "100%";
+                bar.className = "h-full bg-red-500 rounded-full transition-all duration-300 ease-out";
+                bar.setAttribute("aria-valuenow", "100");
                 document.getElementById("progress-footer").classList.remove("hidden");
                 source.close();
                 resetScrapeButton();
@@ -194,8 +249,10 @@
 
                 document.getElementById("progress-title").textContent = "Already scraped";
                 document.getElementById("progress-subtitle").textContent = data.reason || "Today's papers have already been fetched.";
-                document.getElementById("progress-bar").style.width = "100%";
-                document.getElementById("progress-bar").className = "h-full bg-amber-400 rounded-full transition-all duration-300 ease-out";
+                const skippedBar = document.getElementById("progress-bar");
+                skippedBar.style.width = "100%";
+                skippedBar.className = "h-full bg-amber-400 rounded-full transition-all duration-300 ease-out";
+                skippedBar.setAttribute("aria-valuenow", "100");
                 document.getElementById("progress-pct").textContent = "";
                 document.getElementById("progress-matches").textContent = "";
                 document.getElementById("progress-counter").textContent = "";
@@ -218,8 +275,10 @@
         } catch (error) {
             document.getElementById("progress-title").textContent = "Unable to start scrape";
             document.getElementById("progress-subtitle").textContent = error.message || "Unexpected failure";
-            document.getElementById("progress-bar").style.width = "100%";
-            document.getElementById("progress-bar").className = "h-full bg-red-500 rounded-full transition-all duration-300 ease-out";
+            const bar = document.getElementById("progress-bar");
+            bar.style.width = "100%";
+            bar.className = "h-full bg-red-500 rounded-full transition-all duration-300 ease-out";
+            bar.setAttribute("aria-valuenow", "100");
             document.getElementById("progress-footer").classList.remove("hidden");
             resetScrapeButton();
         }
@@ -231,15 +290,56 @@
         document.getElementById("scrape-btn").disabled = false;
     }
 
-    function updateProgress(data) {
-        if (!data.total || !data.processed) {
+    // Map every streamed scrape phase onto the staged progress bar + a human-readable
+    // line, so the long network stages (metadata, PDF downloads) and the post-match
+    // stages (thumbnails, embeddings, sections) all report progress instead of leaving
+    // the toast frozen on "Processing papers / 0%".
+    function handleScrapeStatus(data) {
+        const phase = data.phase;
+
+        if (phase === "heartbeat") {
+            // Keep the current stage text; just reassure that work is ongoing.
+            setProgressText(null, "Still working — a fresh run can take a few minutes.");
             return;
         }
-        const pct = Math.round((data.processed / data.total) * 100);
-        document.getElementById("progress-bar").style.width = `${pct}%`;
-        document.getElementById("progress-pct").textContent = `${pct}%`;
+
+        if (phase === "filtered") {
+            const fresh = data.new || 0;
+            const seen = data.already_seen || 0;
+            const subtitle = seen > 0
+                ? `${fresh} new · ${seen} already in your library`
+                : `${fresh} new paper${fresh === 1 ? "" : "s"} to process`;
+            setProgressText(SCRAPE_STAGES.filtered.title, subtitle);
+            document.getElementById("progress-counter").textContent = `${fresh} new`;
+            setProgressBar(SCRAPE_STAGES.filtered.start);
+            return;
+        }
+
+        if (phase === "downloading") {
+            const stage = SCRAPE_STAGES.downloading;
+            setProgressText(stage.title, stage.subtitle);
+            document.getElementById("progress-counter").textContent = `${data.done} / ${data.total} PDFs`;
+            setProgressBar(bandPct(stage, data.done, data.total));
+            return;
+        }
+
+        const stage = SCRAPE_STAGES[phase];
+        if (!stage) {
+            return;
+        }
+        setProgressText(stage.title, data.message || stage.subtitle);
+        setProgressBar(stage.start, { solid: !!stage.solid });
+    }
+
+    function updateProgress(data) {
+        if (!data.total) {
+            return;
+        }
+        const stage = SCRAPE_STAGES.processing;
+        const processed = data.processed || 0;
+        setProgressBar(bandPct(stage, processed, data.total));
+        document.getElementById("progress-counter").textContent = `${processed} / ${data.total}`;
         document.getElementById("progress-matches").textContent = `${data.matched} match${data.matched !== 1 ? "es" : ""}`;
-        document.getElementById("progress-counter").textContent = `${data.processed} / ${data.total}`;
     }
 
     function addMatchToFeed(paper) {
@@ -282,17 +382,22 @@
     }
 
     function showDone(data) {
+        const newPapers = data.new_papers || 0;
         document.getElementById("progress-title").textContent = "Scrape complete";
         document.getElementById("progress-subtitle").textContent =
-            data.duplicates_skipped > 0
-                ? `${data.duplicates_skipped} duplicate${data.duplicates_skipped !== 1 ? "s" : ""} skipped`
-                : "All papers are new";
-        document.getElementById("progress-bar").style.width = "100%";
-        document.getElementById("progress-bar").className = "h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out";
+            `${newPapers} new paper${newPapers === 1 ? "" : "s"} added` +
+            (data.duplicates_skipped > 0
+                ? ` · ${data.duplicates_skipped} duplicate${data.duplicates_skipped !== 1 ? "s" : ""} skipped`
+                : "");
+        const bar = document.getElementById("progress-bar");
+        bar.style.width = "100%";
+        bar.className = "h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out";
+        bar.setAttribute("aria-valuenow", "100");
+        document.getElementById("progress-pct").textContent = "100%";
 
-        document.getElementById("stat-new").textContent = data.new_papers;
-        document.getElementById("stat-matched").textContent = data.total_matched;
-        document.getElementById("stat-total").textContent = data.total_in_feed;
+        document.getElementById("stat-new").textContent = newPapers;
+        document.getElementById("stat-matched").textContent = data.total_matched || 0;
+        document.getElementById("stat-total").textContent = data.total_in_feed || 0;
         document.getElementById("progress-stats").classList.remove("hidden");
         document.getElementById("progress-footer").classList.remove("hidden");
         resetScrapeButton();

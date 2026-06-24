@@ -773,5 +773,117 @@ class HistoricalScrapeTests(FlaskDBTestCase):
         self.assertIn("new_papers", summary)
 
 
+class DownloadProgressEventTests(FlaskDBTestCase):
+    """The PDF-download pre-pass should stream per-paper progress events."""
+
+    def test_prefetch_affiliation_text_streams_download_progress(self):
+        from app.services import scrape_engine
+
+        entries = [_make_entry(f"https://arxiv.org/abs/{i:04d}") for i in range(3)]
+        whitelists = {"affiliations": [], "authors": [], "titles": []}
+        scraper_config = {"max_workers": 2}
+
+        events: list[tuple[str, dict]] = []
+        fake_response = Mock()
+        fake_response.content = b"%PDF-1.4 fake"
+
+        with (
+            patch.object(scrape_engine, "request_with_backoff", return_value=fake_response),
+            patch(
+                "app.services.subprocess_runner.run_isolated",
+                side_effect=lambda _func, pdf_contents, *a, **k: ["" for _ in pdf_contents],
+            ),
+        ):
+            scrape_engine._prefetch_affiliation_text(
+                entries,
+                whitelists,
+                scraper_config,
+                Mock(),
+                event_callback=lambda event, data: events.append((event, data)),
+            )
+
+        downloading = [data for event, data in events if event == "status" and data.get("phase") == "downloading"]
+        self.assertTrue(downloading, "expected at least one 'downloading' status event")
+        # First event is the 0/total kick-off; last reports every PDF done.
+        self.assertEqual(downloading[0]["done"], 0)
+        self.assertEqual(downloading[0]["total"], 3)
+        self.assertEqual(downloading[-1]["done"], 3)
+        self.assertEqual(downloading[-1]["total"], 3)
+        # 'done' never goes backwards.
+        dones = [data["done"] for data in downloading]
+        self.assertEqual(dones, sorted(dones))
+
+    def test_prefetch_affiliation_text_emits_nothing_without_targets(self):
+        from app.services import scrape_engine
+
+        events: list[tuple[str, dict]] = []
+        scrape_engine._prefetch_affiliation_text(
+            [],
+            {"affiliations": []},
+            {"max_workers": 1},
+            Mock(),
+            event_callback=lambda event, data: events.append((event, data)),
+        )
+        self.assertEqual(events, [])
+
+
+class FilteredAndProgressTotalTests(FlaskDBTestCase):
+    """execute_scrape should report new-vs-known counts and a new-count denominator."""
+
+    def test_filtered_status_and_progress_denominator(self):
+        from app.services import scrape_engine
+
+        db.session.add(
+            Paper(
+                title="Existing",
+                authors="A",
+                link="https://arxiv.org/abs/existing",
+                pdf_link="https://arxiv.org/pdf/existing.pdf",
+                match_type="title",
+                matched_terms=["Vision"],
+                paper_score=1.0,
+                publication_date="2026-01-01",
+                scraped_date="2026-01-01",
+                scraped_at=now_utc() - timedelta(days=2),
+            )
+        )
+        db.session.commit()
+
+        fake_entries = [
+            _make_entry("https://arxiv.org/abs/existing", "Existing"),
+            _make_entry("https://arxiv.org/abs/new1", "New One"),
+        ]
+
+        def fake_process(entries, *args, **kwargs):
+            for i, entry in enumerate(entries, 1):
+                yield i, 1, _make_result(entry["link"], entry["title"])
+
+        captured: list[tuple[str, dict]] = []
+        summary = {"new_papers": 1, "duplicates_skipped": 1, "total_matched": 1, "total_in_feed": 2}
+
+        with (
+            patch.object(scrape_engine, "parse_feed_entries", side_effect=lambda url, session=None: fake_entries),
+            patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
+            patch.object(scrape_engine, "_prefetch_affiliation_text"),
+            patch.object(scrape_engine, "_process_entries_with_pipeline", side_effect=fake_process),
+            patch.object(scrape_engine, "_finalize_results", return_value=summary),
+        ):
+            scrape_engine.execute_scrape(
+                self.app, event_callback=lambda event, data: captured.append((event, data))
+            )
+
+        filtered = [data for event, data in captured if event == "status" and data.get("phase") == "filtered"]
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["new"], 1)
+        self.assertEqual(filtered[0]["already_seen"], 1)
+        self.assertEqual(filtered[0]["total"], 2)
+
+        progress_events = [data for event, data in captured if event in {"progress", "match"}]
+        self.assertTrue(progress_events, "expected per-paper progress/match events")
+        # Denominator must be the NEW count (1), not the raw feed size (2), so the bar fills.
+        for data in progress_events:
+            self.assertEqual(data["total"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

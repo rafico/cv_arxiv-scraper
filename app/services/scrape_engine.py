@@ -764,6 +764,7 @@ def _prefetch_affiliation_text(
     *,
     config: dict | None = None,
     rate_limit_profile: str = "interactive",
+    event_callback: EventCallback = None,
 ) -> None:
     """Download PDFs and extract affiliation-header text for entries whose API
     affiliations didn't already match — once per scrape, isolated.
@@ -773,6 +774,10 @@ def _prefetch_affiliation_text(
     in the parent (threaded). Results are stashed on each entry as ``pdf_affiliation_text``
     and ``pdf_content``; PDF bytes are kept only for entries that can still match (see
     :func:`_entry_has_match_signal`), so peak memory ≈ candidate count.
+
+    This PDF-download pass is usually the longest stage of a fresh daily scrape, so it
+    streams a ``downloading`` status event per completed PDF (``done``/``total``) to keep
+    the progress UI moving instead of sitting frozen.
     """
     affiliations = whitelists.get("affiliations", [])
     targets = [
@@ -812,10 +817,34 @@ def _prefetch_affiliation_text(
             LOGGER.warning("Error fetching PDF for %s: %s", entry.get("link"), exc)
             return None
 
-    for start in range(0, len(targets), _AFFILIATION_PREFETCH_CHUNK):
+    total_targets = len(targets)
+
+    def _emit_download_progress(done: int) -> None:
+        _emit(
+            event_callback,
+            "status",
+            {
+                "phase": "downloading",
+                "done": done,
+                "total": total_targets,
+                "message": f"Downloading PDFs to check affiliations ({done}/{total_targets})...",
+            },
+        )
+
+    _emit_download_progress(0)
+    downloaded = 0
+    for start in range(0, total_targets, _AFFILIATION_PREFETCH_CHUNK):
         chunk = targets[start : start + _AFFILIATION_PREFETCH_CHUNK]
+        # Submit + as_completed (instead of executor.map) so each finished download can
+        # tick the progress counter; results are written back by index to preserve the
+        # chunk order the downstream zip() relies on.
+        pdf_contents: list[bytes | None] = [None] * len(chunk)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            pdf_contents = list(executor.map(_download, chunk))
+            future_to_index = {executor.submit(_download, entry): i for i, entry in enumerate(chunk)}
+            for future in as_completed(future_to_index):
+                pdf_contents[future_to_index[future]] = future.result()
+                downloaded += 1
+                _emit_download_progress(downloaded)
 
         if any(pdf_contents):
             try:
@@ -844,11 +873,16 @@ def _collect_matched_results(
     interests_text: str,
     config: dict,
     *,
-    total_entries: int,
+    progress_total: int,
     event_callback: EventCallback = None,
     interest_profile=None,
 ) -> list[dict]:
-    """Run entries through the ranking pipeline, emitting progress events."""
+    """Run entries through the ranking pipeline, emitting progress events.
+
+    ``progress_total`` is the number of *new* entries being processed (after the
+    already-in-DB pre-filter), so the streamed bar fills to 100% — not the raw
+    feed size, which would cap the bar far short whenever most papers are known.
+    """
     results: list[dict] = []
     for processed, matched, result in _process_entries_with_pipeline(
         entries,
@@ -860,7 +894,7 @@ def _collect_matched_results(
         product_config=config,
         interest_profile=interest_profile,
     ):
-        payload = {"processed": processed, "total": total_entries, "matched": matched}
+        payload = {"processed": processed, "total": progress_total, "matched": matched}
         if result:
             results.append(result)
             _emit(
@@ -975,6 +1009,18 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         _emit(event_callback, "feed", {"total": total_entries})
 
         entries, pre_filtered = _filter_existing_entries(app, entries)
+        new_entries = len(entries)
+        _emit(
+            event_callback,
+            "status",
+            {
+                "phase": "filtered",
+                "new": new_entries,
+                "already_seen": pre_filtered,
+                "total": total_entries,
+                "message": f"{new_entries} new, {pre_filtered} already in your library",
+            },
+        )
 
         llm_client, interests_text = _create_llm_client(app)
         interest_profile = build_interest_profile(app)
@@ -982,17 +1028,23 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
         _emit(
             event_callback,
             "status",
-            {"phase": "affiliations", "message": "Fetching metadata from arXiv API..."},
+            {"phase": "affiliations", "message": f"Fetching metadata for {new_entries} papers from arXiv..."},
         )
         enrich_entries_with_api_metadata(entries, session=session)
         _prefetch_affiliation_text(
-            entries, whitelists, scraper_config, session, config=config, rate_limit_profile="interactive"
+            entries,
+            whitelists,
+            scraper_config,
+            session,
+            config=config,
+            rate_limit_profile="interactive",
+            event_callback=event_callback,
         )
 
         _emit(
             event_callback,
             "status",
-            {"phase": "processing", "message": f"Processing {len(entries)} papers..."},
+            {"phase": "processing", "message": f"Ranking {new_entries} papers against your interests..."},
         )
 
         results = _collect_matched_results(
@@ -1003,7 +1055,7 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             llm_client,
             interests_text,
             config,
-            total_entries=total_entries,
+            progress_total=new_entries,
             event_callback=event_callback,
             interest_profile=interest_profile,
         )
@@ -1096,7 +1148,7 @@ def execute_historical_scrape(app, categories: list[str], start_dt: date, end_dt
             llm_client,
             interests_text,
             config,
-            total_entries=total_entries,
+            progress_total=len(entries),
             interest_profile=interest_profile,
         )
 
