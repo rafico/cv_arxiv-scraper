@@ -55,5 +55,4 @@ hook blocks them.
 - **Commits:** Conventional Commits — `feat(...)`, `fix(...)`, `docs(...)`,
   `refactor(...)`, `chore(...)`.
 - **UI changes:** styling is token-based; after editing template classes, rebuild
-  CSS with `make tailwind`. Keep new UI work in the modern templates, not the
-  frozen `app/templates/classic/` escape hatch.
+  CSS with `make tailwind`.

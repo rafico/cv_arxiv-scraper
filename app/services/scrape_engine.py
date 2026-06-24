@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
@@ -37,6 +38,16 @@ LOGGER = logging.getLogger(__name__)
 # Wall-clock budget for an isolated native stage (embeddings / PDF render) before the
 # child is terminated and the stage is skipped as non-fatal.
 _NATIVE_STAGE_TIMEOUT = float(os.environ.get("CV_ARXIV_NATIVE_STAGE_TIMEOUT", "900"))
+
+# Serializes the FAISS index read-append-rename performed by run_isolated inside
+# _generate_embeddings / _extract_sections. The historical search
+# (POST /api/search/historical) runs the pipeline synchronously in the request
+# thread, outside the job-manager single-flight gate, so a daily/scheduled scrape
+# and a concurrent historical run can both load the same index snapshot and the
+# later os.replace would silently drop the other run's vectors/sections. A single
+# non-reentrant lock acquired once per stage serializes every path that writes the
+# index (all paths funnel through these two functions) with no duplication.
+_INDEX_WRITE_LOCK = threading.Lock()
 
 
 EventCallback = Callable[[str, dict], None] | None
@@ -376,10 +387,15 @@ def _generate_embeddings(app, results: list[dict]) -> None:
             # The faiss + torch work is the confirmed native-crash site; run it in a
             # child process so a SIGSEGV/abort there can't take down the server, then
             # reload the singleton from the index the child persisted.
-            added = run_isolated(
-                add_papers_to_index, index_dir, paper_ids, texts, vectors, timeout=_NATIVE_STAGE_TIMEOUT
-            )
-            reset_embedding_service()
+            #
+            # The lock serializes the child's load-append-os.replace against any other
+            # scrape path (scheduled, historical) writing the same index, so a
+            # concurrent run's rename can't silently drop these vectors.
+            with _INDEX_WRITE_LOCK:
+                added = run_isolated(
+                    add_papers_to_index, index_dir, paper_ids, texts, vectors, timeout=_NATIVE_STAGE_TIMEOUT
+                )
+                reset_embedding_service()
             LOGGER.info("Generated embeddings for %d papers", added)
     except Exception:
         LOGGER.warning("Embedding generation failed (non-fatal)", exc_info=True)
@@ -442,8 +458,11 @@ def _extract_sections(app, results: list[dict]) -> None:
             sections = PaperSection.query.join(Paper).filter(Paper.link.in_([link for link, _ in targets])).all()
             entries = [(s.paper_id, s.section_type, s.text) for s in sections if s.text]
         if entries:
-            added = run_isolated(add_sections_to_index, index_dir, entries, timeout=_NATIVE_STAGE_TIMEOUT)
-            reset_embedding_service()
+            # Serialize the section index's load-append-os.replace against any other
+            # scrape path writing the same index (see _INDEX_WRITE_LOCK rationale).
+            with _INDEX_WRITE_LOCK:
+                added = run_isolated(add_sections_to_index, index_dir, entries, timeout=_NATIVE_STAGE_TIMEOUT)
+                reset_embedding_service()
             LOGGER.info("Generated section embeddings for %d sections", added)
     except Exception:
         LOGGER.warning("Section embedding generation failed (non-fatal)", exc_info=True)

@@ -350,6 +350,17 @@ def _fetch_api_metadata_batch(
     try:
         response = _request_arxiv_api(params, session=session)
     except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 429:
+            # Recursively halving on a rate-limit only multiplies the request
+            # count and makes the throttling worse. Metadata is best-effort, so
+            # skip this batch entirely.
+            LOGGER.warning(
+                "arXiv API metadata batch rate-limited (429) for %d papers; skipping enrichment for this batch",
+                len(arxiv_ids),
+            )
+            return
+
         if len(arxiv_ids) == 1:
             LOGGER.warning("arXiv API metadata request failed for %s: %s", arxiv_ids[0], exc)
             return

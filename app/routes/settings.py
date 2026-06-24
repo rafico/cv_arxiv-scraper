@@ -14,6 +14,7 @@ from flask import (
     flash,
     jsonify,
     redirect,
+    render_template,
     request,
     session,
     url_for,
@@ -26,7 +27,6 @@ from app.routes._config import activate_saved_config, config_write_lock, persist
 from app.services.llm_client import has_api_key, write_api_key
 from app.services.preferences import get_preferences, save_config, update_preferences_from_form
 from app.services.ranking import recompute_all_paper_scores
-from app.ui import render_ui
 
 LOGGER = logging.getLogger(__name__)
 
@@ -103,7 +103,9 @@ def view_settings():
     )
 
     config = current_app.config["SCRAPER_CONFIG"]
-    email_cfg = config.get("email", {})
+    email_cfg = config.get("email")
+    if not isinstance(email_cfg, dict):
+        email_cfg = {}
     gmail_status = check_gmail_auth_status()
     llm_key_path = Path(current_app.config["LLM_KEY_PATH"])
     section = request.args.get("section", "interests")
@@ -135,7 +137,7 @@ def view_settings():
     except ValueError:
         config_save_path_label = str(config_save_path)
 
-    return render_ui(
+    return render_template(
         "settings.html",
         section=section,
         whitelists=config["whitelists"],

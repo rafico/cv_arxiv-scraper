@@ -868,9 +868,7 @@ class FilteredAndProgressTotalTests(FlaskDBTestCase):
             patch.object(scrape_engine, "_process_entries_with_pipeline", side_effect=fake_process),
             patch.object(scrape_engine, "_finalize_results", return_value=summary),
         ):
-            scrape_engine.execute_scrape(
-                self.app, event_callback=lambda event, data: captured.append((event, data))
-            )
+            scrape_engine.execute_scrape(self.app, event_callback=lambda event, data: captured.append((event, data)))
 
         filtered = [data for event, data in captured if event == "status" and data.get("phase") == "filtered"]
         self.assertEqual(len(filtered), 1)

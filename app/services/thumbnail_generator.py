@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
+import uuid
 from pathlib import Path
 
 import pdfplumber
@@ -49,6 +51,25 @@ def _download_pdf(pdf_link: str, session: requests.Session | None = None) -> byt
     return content
 
 
+def _save_image_atomic(im, out_path: Path) -> None:
+    """Save a pdfplumber PageImage to ``out_path`` atomically.
+
+    Render to a unique temp file in the SAME directory (so ``os.replace`` stays
+    intra-filesystem and atomic on POSIX), then swap it onto the final path only
+    after a successful save. A timeout (``proc.terminate``) or native Pillow crash
+    mid-save then leaves the temp file (cleaned up here) rather than a truncated
+    PNG at the served cache path.
+    """
+    tmp_path = out_path.with_name(f"{out_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        im.save(str(tmp_path), format="PNG")
+        if hasattr(im.original, "close"):
+            im.original.close()
+        os.replace(tmp_path, out_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def _render_thumbnail(pdf_content: bytes, out_path: Path, resolution: int = DEFAULT_THUMBNAIL_DPI) -> None:
     with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
         tmp.write(pdf_content)
@@ -59,10 +80,7 @@ def _render_thumbnail(pdf_content: bytes, out_path: Path, resolution: int = DEFA
                 raise ValueError("PDF had no pages")
             first_page = pdf.pages[0]
             im = first_page.to_image(resolution=resolution)
-            im.save(str(out_path), format="PNG")
-
-            if hasattr(im.original, "close"):
-                im.original.close()
+            _save_image_atomic(im, out_path)
 
 
 def _best_teaser_bbox(page) -> tuple[float, float, float, float] | None:
@@ -114,9 +132,7 @@ def extract_teaser_image(pdf_content: bytes, out_path: Path, resolution: int = D
                     if bbox is None:
                         continue
                     im = page.crop(bbox).to_image(resolution=resolution)
-                    im.save(str(out_path), format="PNG")
-                    if hasattr(im.original, "close"):
-                        im.original.close()
+                    _save_image_atomic(im, out_path)
                     return True
     except Exception as exc:
         LOGGER.debug("Teaser extraction failed: %s", exc)
@@ -152,6 +168,11 @@ def generate_thumbnail(
 
     out_path = thumbnails_dir / f"{arxiv_id}.png"
     teaser_path = thumbnails_dir / f"{arxiv_id}_teaser.png"
+    # Legacy slash-form ids (e.g. 'cs/9901001') nest under a subdir that
+    # thumbnails_dir.mkdir() above never creates; ensure it before rendering so
+    # the isolated save can't fail with a swallowed FileNotFoundError. The teaser
+    # shares the same parent.
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     if out_path.exists() and teaser_path.exists():
         return True
 

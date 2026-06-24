@@ -87,7 +87,7 @@ def get_preferences(config: dict | None) -> dict:
     muted = raw.get("muted", {})
     if isinstance(muted, dict):
         for key in merged["muted"]:
-            merged["muted"][key] = _dedupe_str_list(list(muted.get(key, [])))
+            merged["muted"][key] = _dedupe_str_list(_as_str_list(muted.get(key)))
 
     return merged
 

@@ -18,6 +18,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 _OMP_THREADS = max(1, int(os.environ.get("OMP_NUM_THREADS", "1") or "1"))
 
 import numpy as np  # noqa: E402
+from flask import current_app, has_app_context  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -128,15 +129,21 @@ class EmbeddingService:
 
         aligned_vectors = list(vectors) if vectors is not None else [None] * len(paper_ids)
 
-        # Filter out papers already indexed
+        # Filter out papers already indexed. Track ids accepted in THIS call too:
+        # _pk_to_row is only updated after the add loop below, so a paper_ids list
+        # containing the same id twice (e.g. a paper cross-listed across two RSS
+        # feeds, not deduped between feeds) would otherwise add the vector twice —
+        # orphaning a FAISS row and inflating the count.
         new_ids = []
         new_texts = []
         new_vectors = []
+        seen: set[int] = set()
         for pid, text, vec in zip(paper_ids, texts, aligned_vectors):
-            if pid not in self._pk_to_row:
+            if pid not in self._pk_to_row and pid not in seen:
                 new_ids.append(pid)
                 new_texts.append(text)
                 new_vectors.append(vec)
+                seen.add(pid)
 
         if not new_ids:
             return 0
@@ -259,6 +266,9 @@ class EmbeddingService:
         # this index has no removal path, so re-embedding an already-indexed paper
         # (e.g. it is re-scraped) would append duplicate section vectors — bloating
         # the index and returning the same paper multiple times from search_sections.
+        # Dedup is per *paper*, not per row: one paper legitimately contributes many
+        # section rows (intro/method/…) in a single call, so we must NOT drop a
+        # paper's later sections here (that is the add_papers one-vector-per-id case).
         indexed_paper_ids = {m["paper_id"] for m in self._section_id_map}
         fresh = [(pid, stype, text) for pid, stype, text in entries if pid not in indexed_paper_ids]
         if not fresh:
@@ -400,6 +410,14 @@ def get_embedding_service(app=None) -> EmbeddingService:
             index_dir = app.config.get(
                 "FAISS_INDEX_DIR",
                 str(Path(app.instance_path) / "faiss_index"),
+            )
+        elif has_app_context():
+            # Several request/scrape-context callers pass no app. Prefer the active
+            # app's configured index dir over the env/CWD fallback, which can diverge
+            # under a non-default CWD or instance path.
+            index_dir = current_app.config.get(
+                "FAISS_INDEX_DIR",
+                str(Path(current_app.instance_path) / "faiss_index"),
             )
         else:
             index_dir = os.environ.get(

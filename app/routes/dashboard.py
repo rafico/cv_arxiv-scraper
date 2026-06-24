@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Blueprint, current_app, request, send_file
+from flask import Blueprint, current_app, render_template, request, send_file
 from flask_sqlalchemy.query import Query
 
 from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
@@ -29,7 +29,6 @@ from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_sc
 from app.services.related import build_vector, top_related_papers
 from app.services.text import now_utc
 from app.services.thumbnail_warmer import THUMBNAIL_WARMER
-from app.ui import render_ui
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -332,6 +331,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             publication_dt=paper.publication_dt,
             resource_count=len(paper.resource_links_list),
             llm_relevance_score=paper.llm_relevance_score,
+            citation_count=paper.citation_count,
             acceptance_status=paper.acceptance_status,
             interest_similarity=paper.interest_similarity,
             feedback_score=int(paper.feedback_score or 0),
@@ -468,7 +468,7 @@ def index():
     if sort not in valid_sorts or sort not in SORT_OPTIONS:
         sort = default_sort
 
-    if sort == "saved" and view == "saved":
+    if sort == "saved" and view == "saved" and not collection_id:
         query = query.order_by(
             PaperFeedback.created_at.desc(),
             Paper.publication_dt.desc(),
@@ -525,7 +525,7 @@ def index():
     _enrich_cards_with_feedback_and_related(papers, candidate_pool, config)
     mendeley_connected = _mendeley_connected()
 
-    return render_ui(
+    return render_template(
         "dashboard.html",
         papers=papers,
         pagination=pagination,

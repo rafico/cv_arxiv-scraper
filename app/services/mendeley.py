@@ -63,6 +63,11 @@ class MendeleyClient:
         if self._token_data:
             return self._token_data
         data = json.loads(self.token_path.read_text(encoding="utf-8"))
+        if not data.get("access_token"):
+            # A valid-JSON token file lacking access_token is unusable. Raise here
+            # so check_connection()'s broad except converts it to a graceful
+            # "invalid" status instead of a later KeyError → HTTP 500.
+            raise ValueError("Stored Mendeley token has no access_token.")
         self._token_data = data
         return data
 
@@ -102,6 +107,11 @@ class MendeleyClient:
         )
         resp.raise_for_status()
         refreshed = resp.json()
+        if not refreshed.get("access_token"):
+            # A 2xx body without access_token is unusable; reject it so callers
+            # (check_connection, add_document) surface a graceful status instead
+            # of a KeyError when dereferencing refreshed['access_token'].
+            raise ValueError("Mendeley token refresh response has no access_token.")
         if not refreshed.get("refresh_token"):
             refreshed["refresh_token"] = refresh_token
         self._save_token(refreshed)
@@ -247,6 +257,8 @@ class MendeleyClient:
             )
             resp.raise_for_status()
             token_data = resp.json()
+            if not token_data.get("access_token"):
+                raise ValueError("Mendeley token response has no access_token.")
             self._save_token(token_data)
             return {"success": True, "message": "Mendeley authorized successfully."}
         except Exception as exc:

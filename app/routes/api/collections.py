@@ -1,6 +1,7 @@
 """Collections CRUD and membership endpoints."""
 
 from flask import abort, jsonify, request
+from sqlalchemy.exc import IntegrityError
 
 from app.csrf import validate_csrf_token
 from app.models import Collection, Paper, PaperCollection, db
@@ -62,12 +63,19 @@ def update_collection(collection_id: int):
     payload = request.get_json(silent=True) or {}
     name = optional_str(payload, "name")
     if name:
+        if Collection.query.filter(Collection.name == name, Collection.id != c.id).first():
+            return jsonify({"error": "Collection already exists"}), 409
         c.name = name
     if "description" in payload:
         c.description = optional_str(payload, "description")
     if "color" in payload:
         c.color = optional_str(payload, "color") or None
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Closes the (single-worker, narrow) race between the pre-check and commit.
+        db.session.rollback()
+        return jsonify({"error": "Collection already exists"}), 409
     return jsonify({"id": c.id, "name": c.name})
 
 

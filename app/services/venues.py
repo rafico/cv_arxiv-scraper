@@ -84,10 +84,23 @@ def _find_year(comment: str, *, search_from: int) -> int | None:
 
 
 def _nearest_distance(pattern: re.Pattern[str], comment: str, venue: re.Match[str]) -> int | None:
-    """Distance from the venue mention to the closest occurrence of ``pattern``."""
+    """Edge-aware distance from the venue *span* to the closest match of ``pattern``.
+
+    Measuring against the venue's start only mis-ranks long-form aliases
+    ("International Journal of Computer Vision"): a genuine acceptance phrase that
+    *follows* the venue sits far from ``venue.start()``, so a preceding submission
+    word looks closer. Compare against the nearest venue edge instead — 0 if the
+    spans overlap, the gap before ``venue.start()`` for a preceding match, or the
+    gap after ``venue.end()`` for a following match.
+    """
     best: int | None = None
     for m in pattern.finditer(comment):
-        distance = abs(m.start() - venue.start())
+        if m.start() >= venue.end():
+            distance = m.start() - venue.end()
+        elif m.end() <= venue.start():
+            distance = venue.start() - m.end()
+        else:
+            distance = 0
         if best is None or distance < best:
             best = distance
     return best
