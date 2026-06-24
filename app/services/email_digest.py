@@ -391,7 +391,9 @@ def _build_gmail_service(creds):
 def _get_email_config(app: Flask) -> dict:
     """Read non-sensitive email settings from the scraper config."""
     scraper_config = app.config.get("SCRAPER_CONFIG", {})
-    email_cfg = scraper_config.get("email", {})
+    email_cfg = scraper_config.get("email")
+    if not isinstance(email_cfg, dict):
+        email_cfg = {}
     return {
         "recipient": email_cfg.get("recipient", ""),
         "subject_prefix": email_cfg.get("subject_prefix", "ArXiv Digest"),

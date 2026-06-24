@@ -332,6 +332,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             publication_dt=paper.publication_dt,
             resource_count=len(paper.resource_links_list),
             llm_relevance_score=paper.llm_relevance_score,
+            citation_count=paper.citation_count,
             acceptance_status=paper.acceptance_status,
             interest_similarity=paper.interest_similarity,
             feedback_score=int(paper.feedback_score or 0),
@@ -468,7 +469,7 @@ def index():
     if sort not in valid_sorts or sort not in SORT_OPTIONS:
         sort = default_sort
 
-    if sort == "saved" and view == "saved":
+    if sort == "saved" and view == "saved" and not collection_id:
         query = query.order_by(
             PaperFeedback.created_at.desc(),
             Paper.publication_dt.desc(),

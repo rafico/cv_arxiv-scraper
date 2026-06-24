@@ -126,3 +126,83 @@ distinct from the 35 fixed in rounds 1–2.
 - **(S3) no negative caching** — OpenAlex / Semantic-Scholar "not found" results aren't
   cached, so unmatched ids re-hit the API every run (the GitHub provider already
   negative-caches its 404s). Efficiency, not a correctness defect. Deferred.
+
+---
+
+# Pre-Release QA Findings — Round 4
+
+Round: `qa/pre-release-sweep-3` (fourth sweep). Baseline before this round: **853 passed**,
+8 e2e deselected; `mypy`/`ruff`/`ruff format` all clean. After this round: **906 passed**
+(53 regression tests added across 16 new `test_qa_round4_*.py` modules). 20 defects fixed;
+every fix has a regression test verified to fail on the pre-fix code and pass on the fix.
+
+Method: 14 finder agents swept disjoint subsystems, then every candidate was put through two
+independent adversarial verifiers — a correctness/reachability lens and a duplicate/already-
+handled lens. 18 candidates survived (16 confirmed, 2 contested), each traced against the real
+code path before fixing. Two further defects (G19, G20) were surfaced by a live run getting
+429-throttled by arXiv. All findings are distinct from the 52 fixed in rounds 1–3.
+
+## High-impact (S1 / S2)
+
+| # | Sev | Area | Defect | File |
+|---|-----|------|--------|------|
+| G1 | S2 | cli/cron | `scrape_cli.py`/`sync_cli.py`/`backfill_cli.py` lost their `__main__` guard in the package reorg → pure alias shims. `python scrape_cli.py` (written by cron mode="scrape" and documented in the README) aliases the module and exits 0 **without calling `main()`** — a silent no-op, so a scheduled "Scrape only" cron never scrapes (exit 0 → cron records success) | scrape_cli.py, sync_cli.py, backfill_cli.py |
+| G2 | S2 | enrichment | Semantic Scholar `fetch_batch` sent every id in one `/paper/batch` POST with no chunking; >500 ids (CLI `--batch-size`, broad-whitelist scrape) exceed the API cap and the broad `except` drops **all** citation data for the run | enrichment_providers/semantic_scholar.py |
+| G3 | S2 | mendeley | `check_connection()` dereferenced `token['access_token']` under a `try` that caught only `RequestException`; a stored token missing that key → uncaught `KeyError` → **the whole Settings page 500s**, locking the user out of the re-auth UI | mendeley.py |
+| G4 | S2 | api/collections | Renaming a collection to an existing name → uncaught `IntegrityError` (UNIQUE) → 500 + failed session. Create already guarded duplicates; update didn't | api/collections.py |
+| G5 | S2 | dashboard | `GET /?view=saved&collection=<id>` 500s: the `view="saved"` PaperFeedback join is mutually exclusive with the collection join, but the default `sort="saved"` still issues `ORDER BY paper_feedback.created_at` → `OperationalError` | dashboard.py |
+| G6 | S2 | preferences | `get_preferences()` read the muted lists with bare `list()`: a scalar `muted: {authors: "Jane Doe"}` shatters into single chars (silent filter corruption that passes validation); a non-iterable `muted: {topics: 5}` raises `TypeError` inside `_validate_config` → **app startup crash** | preferences.py |
+| G7 | S2 | digest/settings | A malformed `email:` section (null or scalar) → `AttributeError` in both `_get_email_config` and `view_settings` → Settings page, digest preview, send-test, and the digest CLI all 500 | email_digest.py, settings.py |
+| G9 | S2 | scrape/faiss | `execute_historical_scrape` (POST /search/historical) runs the pipeline in the request thread, outside the job-manager gate; its FAISS read-append-rename can overlap a daily/scheduled scrape's and the later `os.replace` silently drops the other run's vectors/sections — the F10 race via a still-ungated entry point | scrape_engine.py |
+| G13 | S2 | embeddings | `add_papers` deduped only against the persisted reverse map (updated *after* the loop), so the same id twice in one batch (paper cross-listed across two RSS feeds — no cross-feed dedup) added the vector twice → orphaned FAISS row, inflated count, duplicate search/related cards | embeddings.py |
+| G20 | S2 | enrichment/http | On an arXiv **429**, `_fetch_api_metadata_batch` recursively halves the batch ("retry in smaller chunks") — issuing *more* requests during a rate-limit window (observed live: 20→10→5), amplifying the throttling instead of backing off | enrichment.py |
+
+## Lower / edge (S3)
+
+| # | Sev | Area | Defect | File |
+|---|-----|------|--------|------|
+| G8 | S3 | api | Oversized integer query/path params (`collection_id`, bulk-bibtex `ids`, any `<int:>` PK) → uncaught `OverflowError` (not in the api error-handler set) → 500 instead of 400 | api/__init__.py |
+| G10 | S3 | api/ingest | `POST /search/historical` `categories` unvalidated: a JSON string iterates char-by-char into a wrong arXiv query (silent empty result); a non-iterable → `TypeError` masked as a misleading **502 "arXiv unavailable"** | api/scrape.py |
+| G11 | S3 | ranking/ui | Dashboard "Why this ranked here" called `explain_score` without `citation_count`, so the Citations chip was always 0.0 and the breakdown never summed to the shown total | dashboard.py |
+| G12 | S3 | venues | `_nearest_distance` measured distance to the venue's *start* only, so for long-form aliases (IJCV, TPAMI, RSS, ACM-MM) a trailing acceptance cue lost to a preceding "submitted" word → real acceptance demoted to "mentioned" (lost bonus). Made edge-aware | venues.py |
+| G14 | S3 | rate-limit | `_positive_int` caught only `(TypeError, ValueError)`; `burst: .inf` (YAML infinity) → `int(inf)` raises uncaught `OverflowError`, breaking all HTTP fetching | rate_limiter.py |
+| G15 | S3 | rate-limit | `resolve_rate_limit_settings` guarded that `ingest` is a Mapping but not the nested `rate_limit`; `ingest.rate_limit: fast` (scalar/None/list) → `AttributeError`, breaking all fetching. Mirrors the existing `resolve_user_agent` guard (contested) | rate_limiter.py |
+| G16 | S3 | thumbnails | Legacy slash-form arXiv ids (`cs/9901001`, allowed by the id/storage-key regexes) write to `thumbnails/cs/9901001.png` but only the top dir is created → swallowed `FileNotFoundError` → thumbnails **never** appear and every warm/backfill re-downloads + re-fails | thumbnail_generator.py |
+| G17 | S3 | thumbnails | PNGs were written in place; a timeout/native crash mid-`im.save` leaves a truncated PNG that satisfies `.exists()` and is served forever. Now temp-write + `os.replace` | thumbnail_generator.py |
+| G18 | S3 | embeddings | `get_embedding_service(app=None)` derived the index dir from CWD, which can diverge from `app.config['FAISS_INDEX_DIR']` under a non-default CWD/instance; now prefers `current_app` config inside an app context (defensive; contested) | embeddings.py |
+| G19 | S3 | http | `request_with_backoff` retried 429s on a fixed `1.25·2ⁿ` backoff, ignoring the server's `Retry-After` → retries fire before arXiv is ready and keep getting throttled. Now honors `Retry-After` (seconds or HTTP-date), clamped | http_client.py |
+
+## Fix notes (judgment-call items)
+
+- **G9** — deliberately did NOT route the historical scrape through `SCRAPE_JOB_MANAGER` (it is
+  fire-and-forget and would break the endpoint's synchronous summary-return contract). Instead a
+  module-level `threading.Lock` serializes the FAISS read-append-rename inside `_generate_embeddings`
+  / `_extract_sections`; every scrape path (daily, scheduled, historical) funnels through those two
+  functions, so guarding inside them covers all paths with no duplication and no deadlock. A cross-
+  *process* CLI-sync-vs-server write is a separate, lower-priority concern.
+- **G13 over-reach, caught by the suite** — the finding was `add_papers` only, but the fix agent
+  also added a paper-id `seen` set to `add_sections`. That is wrong (a paper contributes many
+  section rows) and broke the round-3 F11 invariant (`add_sections([(1,intro),(1,method)])` must
+  return 2). The full-suite gate caught it; `add_sections` was reverted to its per-paper-across-
+  calls form with a regression guard added. The realistic intra-batch section-dup path isn't
+  reachable — `_extract_sections` builds entries from distinct `PaperSection` rows.
+- **G8** — fixed at the `api_bp` error handler (`OverflowError → 400`) rather than per-call bounds,
+  so every `<int:>` PK lookup and `IN`-list degrades cleanly, not just the two named endpoints.
+- **G10** — a bare-string `categories` is *rejected* (400), not silently coerced, matching the
+  input-type-validation posture established in round 2.
+- **G19 / G20** — surfaced by a live run getting 429-throttled by arXiv. Together they make the
+  client back off politely (honor `Retry-After`) and stop *amplifying* a rate-limit storm (no
+  batch-splitting on 429). The arXiv paths already use the `bulk` profile (1 req / 3 s); these
+  address the *response* to throttling, not the request rate.
+- **G15 / G18** — "contested" in verification (one skeptic deemed each already-handled or not
+  reachable in shipped configs). Kept as low-risk one-line defensive hardening, consistent with
+  sibling code (`resolve_user_agent`; the app-passed index-dir branch).
+
+## Concurrent-edit note (not part of this round)
+
+While this sweep ran, the working tree separately gained an **unrelated scrape progress-bar
+feature** authored outside this QA session: `app/templates/partials/_shell_scripts.html`,
+`app/templates/partials/_scrape_progress.html`, the `downloading`/`progress_total` streaming
+in `scrape_engine.py`, and added cases in `tests/test_scrape_engine.py`. No QA agent touched
+those and they are left intact. Of the `scrape_engine.py` changes, only `_INDEX_WRITE_LOCK`
+(G9) belongs to this round.

@@ -55,7 +55,19 @@ def search_historical():
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
 
-    categories = payload.get("categories", ["cs.CV"])
+    raw_categories = payload.get("categories", ["cs.CV"])
+    # Require a list of non-empty strings. Validate BEFORE the scrape so a
+    # wrong-typed value yields a clean 400 instead of a garbage query (a bare
+    # string iterated char-by-char) or a misleading 502 (a non-iterable raising
+    # TypeError inside the engine). An empty list normalizes to the default.
+    if not isinstance(raw_categories, list):
+        return jsonify({"error": "categories must be a list of non-empty strings"}), 400
+    categories = [c.strip() for c in raw_categories if isinstance(c, str) and c.strip()]
+    if len(categories) != len(raw_categories):
+        return jsonify({"error": "categories must be a list of non-empty strings"}), 400
+    if not categories:
+        categories = ["cs.CV"]
+
     start_date_str = payload.get("start_date")
     end_date_str = payload.get("end_date")
 

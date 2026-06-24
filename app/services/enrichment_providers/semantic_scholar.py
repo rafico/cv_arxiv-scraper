@@ -16,6 +16,10 @@ LOGGER = logging.getLogger(__name__)
 
 SEMANTIC_SCHOLAR_BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"
 
+# The Semantic Scholar batch endpoint caps each request at 500 ids; larger
+# payloads error (400/413). Chunk to stay under the cap.
+SEMANTIC_SCHOLAR_BATCH_LIMIT = 500
+
 
 class SemanticScholarProvider(EnrichmentProvider):
     source = "semantic_scholar"
@@ -35,40 +39,45 @@ class SemanticScholarProvider(EnrichmentProvider):
         if not missing_ids:
             return cached
 
-        payload = {"ids": [f"ARXIV:{arxiv_id}" for arxiv_id in missing_ids]}
         params = {"fields": "citationCount,influentialCitationCount,paperId"}
+        fetched: dict[str, dict[str, Any]] = {}
 
-        try:
-            response = request_fn(
-                "POST",
-                SEMANTIC_SCHOLAR_BATCH_URL,
-                json=payload,
-                params=params,
-                session=session,
-                timeout=15,
-            )
-            if not response:
-                return cached
+        for i in range(0, len(missing_ids), SEMANTIC_SCHOLAR_BATCH_LIMIT):
+            batch = missing_ids[i : i + SEMANTIC_SCHOLAR_BATCH_LIMIT]
+            payload = {"ids": [f"ARXIV:{arxiv_id}" for arxiv_id in batch]}
 
-            data = response.json()
-            fetched: dict[str, dict[str, Any]] = {}
-            for idx, item in enumerate(data):
-                if item is None:
+            try:
+                response = request_fn(
+                    "POST",
+                    SEMANTIC_SCHOLAR_BATCH_URL,
+                    json=payload,
+                    params=params,
+                    session=session,
+                    timeout=15,
+                )
+                if not response:
                     continue
-                arxiv_id = missing_ids[idx]
-                fetched[arxiv_id] = {
-                    "citation_count": item.get("citationCount"),
-                    "influential_citation_count": item.get("influentialCitationCount"),
-                    "semantic_scholar_id": item.get("paperId"),
-                }
 
-            store_cached_payloads(
-                fetched,
-                source=self.source,
-                paper_by_arxiv_id=paper_by_arxiv_id,
-                ttl_hours=self.ttl_hours,
-            )
-            return {**cached, **fetched}
-        except Exception as exc:
-            LOGGER.warning("Failed to fetch citations from Semantic Scholar: %s", exc)
-            return cached
+                data = response.json()
+                for idx, item in enumerate(data):
+                    if item is None:
+                        continue
+                    # Map by position WITHIN the current chunk; missing_ids[idx]
+                    # would misattribute every chunk after the first.
+                    arxiv_id = batch[idx]
+                    fetched[arxiv_id] = {
+                        "citation_count": item.get("citationCount"),
+                        "influential_citation_count": item.get("influentialCitationCount"),
+                        "semantic_scholar_id": item.get("paperId"),
+                    }
+            except Exception as exc:
+                # One failed chunk must not abandon the rest of the batch.
+                LOGGER.warning("Failed to fetch citations from Semantic Scholar: %s", exc)
+
+        store_cached_payloads(
+            fetched,
+            source=self.source,
+            paper_by_arxiv_id=paper_by_arxiv_id,
+            ttl_hours=self.ttl_hours,
+        )
+        return {**cached, **fetched}

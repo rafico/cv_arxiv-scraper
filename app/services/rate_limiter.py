@@ -97,7 +97,7 @@ def _positive_int(value: Any) -> int | None:
         parsed = int(value)
         if float(parsed) != float(value):
             return None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return parsed if parsed > 0 else None
 
@@ -113,7 +113,8 @@ def resolve_rate_limit_settings(
         raise ValueError(f"Unknown rate limit profile: {profile}")
 
     ingest = scraper_config.get("ingest", {}) if isinstance(scraper_config, Mapping) else {}
-    rate_limit = ingest.get("rate_limit", {}) if isinstance(ingest, Mapping) else {}
+    rl = ingest.get("rate_limit") if isinstance(ingest, Mapping) else None
+    rate_limit = rl if isinstance(rl, Mapping) else {}
 
     configured_rps = _positive_float(rate_limit.get("requests_per_second"))
     configured_burst = _positive_int(rate_limit.get("burst"))

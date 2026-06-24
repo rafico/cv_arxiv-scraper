@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import requests
@@ -20,6 +22,48 @@ DEFAULT_USER_AGENT = "cv-arxiv-scraper/1.0"
 # a 404/403/400 just wastes a request and a backoff sleep, and (for arXiv PDFs of
 # freshly announced papers) spams the log with pointless retries.
 _RETRYABLE_4XX = frozenset({408, 425, 429})
+
+# Upper bound on how long we'll honour a server-supplied ``Retry-After`` header.
+# arXiv (and other origins) can send large or even hostile values; sleeping for
+# minutes/hours would hang the worker, so clamp to something sane.
+_MAX_RETRY_AFTER_SECONDS = 120.0
+
+
+def _parse_retry_after(exc: Exception) -> float | None:
+    """Extract a ``Retry-After`` delay (seconds) from an HTTP error response.
+
+    Honours both supported forms — an integer number of seconds and an
+    HTTP-date — and clamps the result to ``[0, _MAX_RETRY_AFTER_SECONDS]``.
+    Returns ``None`` when the response has no usable header so the caller can
+    fall back to its computed backoff.
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    raw = headers.get("Retry-After")
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    seconds: float | None = None
+    try:
+        seconds = float(int(raw))
+    except (TypeError, ValueError):
+        try:
+            parsed = parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            parsed = None
+        if parsed is not None:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            seconds = (parsed - datetime.now(timezone.utc)).total_seconds()
+
+    if seconds is None:
+        return None
+    return max(0.0, min(seconds, _MAX_RETRY_AFTER_SECONDS))
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -134,6 +178,9 @@ def request_with_backoff(
                 break
 
             delay = base_delay * (2 ** (attempt - 1))
+            retry_after = _parse_retry_after(exc)
+            if retry_after is not None:
+                delay = max(delay, retry_after)
             LOGGER.warning(
                 "HTTP retry %s/%s for %s %s after error: %s",
                 attempt,

@@ -103,7 +103,9 @@ def view_settings():
     )
 
     config = current_app.config["SCRAPER_CONFIG"]
-    email_cfg = config.get("email", {})
+    email_cfg = config.get("email")
+    if not isinstance(email_cfg, dict):
+        email_cfg = {}
     gmail_status = check_gmail_auth_status()
     llm_key_path = Path(current_app.config["LLM_KEY_PATH"])
     section = request.args.get("section", "interests")

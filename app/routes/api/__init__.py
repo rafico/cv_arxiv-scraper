@@ -24,12 +24,14 @@ def _handle_http_exception(exc: HTTPException):
 @api_bp.errorhandler(ValueError)
 @api_bp.errorhandler(KeyError)
 @api_bp.errorhandler(AttributeError)
+@api_bp.errorhandler(OverflowError)
 def _handle_bad_input(exc: Exception):
     """Safety net behind per-route validation: turn input-type errors into a clean 400.
 
     Per-route guards remain the primary defense; this catches anything they miss
-    (e.g. a wrong-typed JSON body) so it returns 400 instead of an opaque 500. The
-    exception is logged so genuine bugs stay visible.
+    (e.g. a wrong-typed JSON body, or an oversized integer id that overflows
+    SQLite's signed-64-bit range in a ``get``/``IN`` lookup) so it returns 400
+    instead of an opaque 500. The exception is logged so genuine bugs stay visible.
     """
     current_app.logger.exception("Unhandled %s in API route", type(exc).__name__)
     return jsonify({"error": "Invalid request"}), 400
