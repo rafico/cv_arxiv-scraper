@@ -143,9 +143,6 @@ opening the PDF:
 
 ![Visual grid](app/static/help/paper_cards.png)
 
-> Prefer the older look? A **Classic UI** link at the bottom of the sidebar switches the whole
-> app back to the pre-redesign interface; the choice is remembered per browser.
-
 ---
 
 ## 🧩 Features

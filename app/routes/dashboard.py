@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Blueprint, current_app, request, send_file
+from flask import Blueprint, current_app, render_template, request, send_file
 from flask_sqlalchemy.query import Query
 
 from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
@@ -29,7 +29,6 @@ from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_sc
 from app.services.related import build_vector, top_related_papers
 from app.services.text import now_utc
 from app.services.thumbnail_warmer import THUMBNAIL_WARMER
-from app.ui import render_ui
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -526,7 +525,7 @@ def index():
     _enrich_cards_with_feedback_and_related(papers, candidate_pool, config)
     mendeley_connected = _mendeley_connected()
 
-    return render_ui(
+    return render_template(
         "dashboard.html",
         papers=papers,
         pagination=pagination,
