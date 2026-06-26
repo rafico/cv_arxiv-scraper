@@ -343,7 +343,12 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             feedback_score=int(paper.feedback_score or 0),
             config=config,
         )
-        paper.top_contributors = top_score_contributors(paper.score_breakdown)
+        # Reconcile the bars to the stored paper_score the headline shows (and the
+        # feed sorts by), so they agree even if ranking weights changed since the
+        # last recompute.
+        paper.top_contributors = top_score_contributors(
+            paper.score_breakdown, target_total=float(paper.paper_score or 0.0)
+        )
         primary_author = first_author_name(paper.authors)
         primary_topic = next((topic for topic in paper.topic_tags_list if topic), "")
         paper.follow_recommendation = {

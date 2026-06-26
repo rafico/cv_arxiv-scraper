@@ -250,7 +250,9 @@ _SCORE_FACTORS: list[tuple[str, str, str]] = [
 ]
 
 
-def top_score_contributors(breakdown: dict[str, float] | None, *, limit: int = 3) -> list[dict]:
+def top_score_contributors(
+    breakdown: dict[str, float] | None, *, limit: int = 3, target_total: float | None = None
+) -> list[dict]:
     """Return the largest positive score contributors for a compact inline card.
 
     Each entry exposes ``label``, ``value`` (points), ``color`` (a semantic token
@@ -264,18 +266,39 @@ def top_score_contributors(breakdown: dict[str, float] | None, *, limit: int = 3
     actually contributed — otherwise an old paper's bars would massively overstate
     its score and contradict the recency-discounted headline. ``feedback_bonus`` is
     added *after* recency in the score, so it is surfaced unscaled.
+
+    ``target_total`` is the stored ``paper_score`` that actually ranked the paper
+    (what the headline shows and the feed sorts by). When given, the additive
+    factors are reconciled to sum to it, so the bars and the headline can never
+    disagree — even in the window after a ranking-weight change and before the next
+    ``recompute_all_paper_scores``, where the live breakdown would otherwise drift
+    from the stored score. It is a no-op when they already agree (the common case).
     """
     if not breakdown:
         return []
     recency_raw = breakdown.get("recency_multiplier", 1.0)
     recency = float(recency_raw) if recency_raw is not None else 1.0
-    factors: list[dict] = []
+
+    # Pass 1: recency-adjusted contribution of each additive factor (feedback_bonus
+    # is added after recency in the score, so it is never recency-scaled).
+    contributions: list[tuple[str, str, str, float]] = []
+    additive_total = 0.0
     for key, label, color in _SCORE_FACTORS:
         raw = float(breakdown.get(key, 0.0) or 0.0)
-        scaled = raw if key == "feedback_bonus" else raw * recency
-        value = round(scaled, 1)
-        if value > 0:
-            factors.append({"key": key, "label": label, "value": value, "color": color})
+        value = raw if key == "feedback_bonus" else raw * recency
+        contributions.append((key, label, color, value))
+        if key != "feedback_bonus":
+            additive_total += value
+
+    # Reconcile the additive factors to the stored score that ranked the paper.
+    scale = float(target_total) / additive_total if target_total is not None and additive_total > 0 else 1.0
+
+    factors: list[dict] = []
+    for key, label, color, value in contributions:
+        adjusted = value if key == "feedback_bonus" else value * scale
+        rounded = round(adjusted, 1)
+        if rounded > 0:
+            factors.append({"key": key, "label": label, "value": rounded, "color": color})
     factors.sort(key=lambda factor: factor["value"], reverse=True)
     top = factors[:limit]
     strongest = max((factor["value"] for factor in top), default=0.0)
