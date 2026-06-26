@@ -14,14 +14,17 @@ belongs in [app/services](../services).
 - `_shell.py` — a context processor injecting `shell` (collections, saved
   searches, inbox/saved counts) into **every** template so the sidebar renders
   app-wide. Queries are guarded against a missing DB.
-- `discover.py` — discovery/recommendations/corpus views.
+- `discover.py` — discovery/recommendations/corpus views, incl. the **chat with
+  your saved papers** panel (posts to `/api/corpus/chat`).
 - `settings.py` — settings UI + credential uploads, Gmail OAuth callback, config
   writes (via `save_config`). Note: credential files are written with `0600`.
 - `help.py` — static help/onboarding pages.
 - `api/` — JSON API under `/api`, one shared `api_bp` blueprint assembled from
   feature modules (`scrape`, `search`, `papers`, `export`, `collections`,
-  `saved_searches`, `feed_sources`). Add new endpoints to the matching module;
-  routes register on import via `api/__init__.py`.
+  `saved_searches`, `feed_sources`, `chat` (corpus RAG), `onboarding`
+  (cold-start bootstrap + active-learning), `backup` (export/import snapshot)).
+  Add new endpoints to the matching module; routes register on import via
+  `api/__init__.py`.
 
 ## Conventions
 

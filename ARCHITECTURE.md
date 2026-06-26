@@ -74,6 +74,14 @@ window degrades to `[]`.
   across workers; `run.py` defaults to 1 and warns otherwise.
 - **Runtime config writes** — `save_config` is atomic (temp+rename) with an
   in-place fallback for non-renameable destinations (Docker single-file mount).
+- **Backup/restore is atomic and cross-device-safe** — `app/services/backup.py`
+  exports a tarball (consistent SQLite snapshot via the backup API + a `copytree`
+  snapshot of the FAISS index + config). Restore *stages* each component onto its
+  target filesystem first, then *commits* with same-fs renames and rolls back every
+  committed component on any failure (so a partial restore never destroys the live
+  DB), and rejects oversized archives before extraction (decompression-bomb guard).
+  Don't reintroduce a bare `os.replace` straight out of the extraction tempdir — it
+  fails with `EXDEV` whenever `/tmp` is a separate mount.
 
 ## Extension recipes
 

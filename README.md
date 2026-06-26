@@ -109,6 +109,10 @@ ranking is never a black box.
 Search by exact terms, by meaning (SPECTER2 + FAISS), or both combined — so you can find the
 paper you half-remember even when you don't have its words.
 
+**💬 Ask your own library questions.**
+Chat with the papers you've saved (**Discover → Chat with your saved papers**): grounded,
+cited answers when an LLM is enabled, and the most relevant saved papers listed when it isn't.
+
 **🔒 Private and offline-first.**
 Everything runs on localhost with no account. The core — scraping, ranking, semantic search,
 and an extractive TL;DR — works with *zero* external APIs. Enrichment and AI features are all
@@ -150,10 +154,11 @@ opening the PDF:
 | Area | What you get |
 |---|---|
 | **Finding papers** | Daily/on-demand arXiv scrape with interest matching · hybrid search (keyword · semantic · combined) · historical backfill of any date range · monitor extra arXiv categories beyond cs.CV |
-| **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · learned interest profile · per-paper "why it ranked" explanations · optional AI relevance scoring |
+| **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · learned interest profile · per-paper "why it ranked" explanations + optional inline score-factor bars · optional AI relevance scoring |
+| **Chat & cold-start** | Chat with your saved papers (grounded, cited RAG answers) · seed your profile from a pasted list of arXiv IDs · active-learning prompts surface borderline papers to sharpen ranking |
 | **Summaries** | Extractive TL;DR with no API needed · optional AI TL;DR + structured insights when an LLM is enabled |
 | **Organization** | Save / skip / prioritize / share to train rankings · collections · custom tags · notes · reading status · saved searches |
-| **Export & sync** | BibTeX (single or bulk) · Mendeley · Zotero · HTML report · daily Gmail digest |
+| **Export & sync** | BibTeX (single or bulk) · Mendeley · Zotero · HTML report · daily Gmail digest · one-click full backup & restore (DB + search index + config) |
 | **Enrichment** | Citation counts (Semantic Scholar, OpenAlex) · topic classifications & open-access status · GitHub repo stars/license · PDF thumbnails · related-paper recommendations · corpus analytics (clusters & emerging trends) |
 
 ---
@@ -185,8 +190,10 @@ Full REST API at `/api/`. Key endpoints:
 | Papers | `/api/papers/<id>/feedback`, `explain`, `notes`, `tags`, `bibtex` |
 | Collections | `GET/POST /api/collections`, manage papers in collections |
 | Saved searches | `GET/POST /api/saved-searches`, `POST .../run` |
-| Corpus | `/api/corpus/clusters`, `emerging`, `neighbors` |
+| Corpus | `/api/corpus/clusters`, `emerging`, `neighbors`, `POST /api/corpus/chat` |
+| Onboarding | `POST /api/onboarding/bootstrap`, `GET /api/onboarding/uncertain` |
 | Export | `GET /api/export`, `GET /api/export/bibtex` |
+| Backup | `GET /api/backup/export`, `POST /api/backup/import` |
 | Feed sources | `GET/POST /api/feed-sources` |
 
 See the in-app help at `/help` for full documentation.
