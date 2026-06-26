@@ -159,3 +159,28 @@ class TestTopScoreContributors:
         by_label = {c["label"]: c["value"] for c in top_score_contributors(breakdown)}
         assert by_label["Match"] == 5.0  # 10 * 0.5
         assert by_label["Feedback"] == 8.0  # unscaled
+
+    def test_contributors_reconcile_to_stored_score(self):
+        # When the live breakdown base disagrees with the stored paper_score that
+        # actually ranked the paper (ranking weights changed since the last
+        # recompute), the additive bars are scaled to sum to the stored score so
+        # they match the headline instead of overstating it.
+        breakdown = {"match_score": 58.0, "term_score": 6.0, "recency_multiplier": 1.0, "base_score": 64.0}
+        top = top_score_contributors(breakdown, target_total=50.0)
+        by_label = {c["label"]: c["value"] for c in top}
+        assert by_label["Match"] == round(58.0 * 50.0 / 64.0, 1)  # 45.3
+        assert by_label["Terms"] == round(6.0 * 50.0 / 64.0, 1)  # 4.7
+        assert abs(sum(by_label.values()) - 50.0) < 0.2
+
+    def test_reconciliation_excludes_feedback_bonus(self):
+        # Only the additive factors are reconciled to the stored score; the
+        # feedback bonus (added after the base score) is left at full value.
+        breakdown = {"match_score": 58.0, "feedback_bonus": 10.0, "base_score": 58.0}
+        by_label = {c["label"]: c["value"] for c in top_score_contributors(breakdown, target_total=29.0)}
+        assert by_label["Match"] == 29.0  # 58 * 29/58
+        assert by_label["Feedback"] == 10.0  # unscaled
+
+    def test_no_target_total_leaves_bars_unscaled(self):
+        # Backward-compatible: without a target the bars are just recency-scaled.
+        breakdown = {"match_score": 40.0, "recency_multiplier": 1.0}
+        assert top_score_contributors(breakdown)[0]["value"] == 40.0

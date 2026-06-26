@@ -328,13 +328,22 @@ Severity: **S1** crash/data-loss/security · **S2** wrong user-visible behavior 
   the `copytree` duration; combined with the single-worker constraint it is effectively safe.
   Not given a bespoke red→green test (deterministic concurrency is impractical here).
 
-## Investigated, not fixed (transparency)
+## Follow-up — live verification (drove the running app)
 
-- **(deferred, low) Headline vs bars after a live weight change** *(ranking-ui-2, rejected
-  1/3)* — the headline uses the **stored** `paper_score` while the bars recompute from the
-  **current** config, so they can disagree in the window between a weight edit and the next
-  `recompute_all_paper_scores`. Real but transient and self-correcting; out of scope for this
-  round (separate from the W6 recency bug, which is fixed).
+A live `/verify` run of all four features (isolated instance, real HTTP) confirmed the
+fixes hold: backup export→import round-trips with clean `400`s on junk/no-CSRF (no `500`s)
+and data surviving; chat degrades to saved-only retrieval with `llm_used:false`; the
+score-bars toggle gates rendering; and bootstrap is idempotent on a real re-run
+(`saved_total` stayed 3, not toggled back to 2). One follow-up defect surfaced and was fixed:
+
+| # | Sev | Area | Defect | File | Test |
+|---|-----|------|--------|------|------|
+| W12 | S2 | ranking/score cards | Headline vs bars could disagree: the headline shows the **stored** `paper_score` (what the feed sorts by) while the bars recomputed from the **current** config, so a weight change before the next `recompute_all_paper_scores` left the bars summing to a different number than the headline (live-observed: `Score 50.0` beside bars summing to 64). `top_score_contributors` now takes a `target_total` and reconciles the additive bars to the stored score — a no-op when they already agree (the common case). *(ranking-ui-2, promoted from deferred after the live run)* | app/services/ranking.py, app/routes/dashboard.py | `test_contributors_reconcile_to_stored_score`, `test_reconciliation_excludes_feedback_bonus` |
+
+Live confirmation after the fix: each paper's bars now sum to its headline
+(`Score 50.0 — Match +45.3, Terms +4.7`).
+
+## Investigated, not fixed (transparency)
 - **(false positive) `_synthesize` bypasses the LLM concurrency semaphore** *(rag-1, rejected
   1/3)* — the semaphore is **per-`LLMClient`-instance** and the RAG path builds its own client
   issuing exactly one completion, so there is no shared global cap to defeat.
