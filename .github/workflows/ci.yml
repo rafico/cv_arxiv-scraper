@@ -79,6 +79,13 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # faiss-cpu, torch, and scikit-learn each vendor their own GNU OpenMP runtime
+    # (libgomp). Loading several into one process can call abort() (exit 134 /
+    # SIGABRT) depending on the runner's load order — this intermittently crashed
+    # the 3.12 leg while 3.10/3.11 (and local runs with the same wheels) passed.
+    # Constraining OpenMP to a single thread avoids the duplicate-runtime abort.
+    env:
+      OMP_NUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:
