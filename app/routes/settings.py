@@ -23,9 +23,9 @@ from flask import (
 from app.constants import DEFAULT_LLM_MODEL, GEMMA_MODELS
 from app.csrf import get_or_create_csrf_token, validate_csrf_token
 from app.models import Paper, db
-from app.routes._config import activate_saved_config, config_write_lock, persist_config
+from app.routes._config import config_write_lock, persist_config
 from app.services.llm_client import has_api_key, write_api_key
-from app.services.preferences import get_preferences, save_config, update_preferences_from_form
+from app.services.preferences import get_preferences, update_preferences_from_form
 from app.services.ranking import recompute_all_paper_scores
 
 LOGGER = logging.getLogger(__name__)
@@ -40,14 +40,18 @@ def _normalize_multiline(value: str) -> list[str]:
 
 
 def _save_config_key(key: str, value) -> None:
-    """Update a top-level key in config.yaml and in-memory config."""
-    config_path = Path(current_app.config["CONFIG_PATH"])
+    """Update a top-level key in config.yaml and the in-memory config.
+
+    Goes through ``persist_config`` so the full document is validated before it is
+    written/activated — like the other mutating settings routes. Without this, a
+    config.yaml that has drifted to a semantically-invalid (but dict-shaped) state
+    would be silently re-activated by an unrelated email-settings save. Raises
+    ``ValueError`` on validation failure (nothing written); callers flash it.
+    """
     with config_write_lock():
         full_config = _load_full_config()
         full_config[key] = value
-
-        save_config(config_path, full_config)
-        activate_saved_config(full_config)
+        persist_config(full_config)
 
 
 def _load_full_config() -> dict:
@@ -288,9 +292,13 @@ def save_email_settings():
     subject_prefix = request.form.get("email_subject_prefix", "ArXiv Digest").strip()
 
     email_cfg = {"recipient": recipient, "subject_prefix": subject_prefix}
-    _save_config_key("email", email_cfg)
-
     session["settings_csrf_token"] = token_urlsafe(32)
+    try:
+        _save_config_key("email", email_cfg)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("settings.view_settings", section="automation"))
+
     flash("Email settings saved.", "success")
     return redirect(url_for("settings.view_settings", section="automation"))
 

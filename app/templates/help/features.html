@@ -29,6 +29,26 @@
         <li class="pl-1">&ldquo;Highly cited (342 citations)&rdquo;</li>
         <li class="pl-1">&ldquo;Similar to saved: NeRF in the Wild&rdquo;</li>
     </ul>
+    <div class="mt-4 rounded-xl border border-edge bg-surface p-5 shadow-sm">
+        <h3 class="text-sm font-bold text-fg mb-2">Inline score-factor bars</h3>
+        <p class="text-sm text-fg-muted">Turn on <strong>Settings &rarr; Ranking &rarr; Show score factor bars on papers</strong> to see the top few contributors (e.g. <em>Match</em>, <em>For you</em>, <em>Terms</em>) as small colored bars right on each row or card &mdash; an at-a-glance &ldquo;why this ranked&rdquo; without expanding the full breakdown. The points shown are recency-adjusted, so they line up with the headline score.</p>
+    </div>
+</section>
+
+<!-- Cold-Start & Active Learning -->
+<section id="cold-start" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Cold-Start &amp; Active Learning</h2>
+    <p class="text-sm text-fg-muted mb-4">The learned interest profile needs about five saved papers before it kicks in. These two tools get you there faster on a fresh install.</p>
+    <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-fg mb-2">Bootstrap from arXiv IDs</h3>
+            <p class="text-sm text-fg-muted">In <a href="{{ url_for('settings.view_settings', section='interests') }}" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Research Setup</a>, paste a list of arXiv IDs or links and click <strong>Bootstrap interests</strong>. They are fetched, embedded, and recorded as positive signals, so the profile activates immediately. Re-running it is safe &mdash; already-saved papers stay saved.</p>
+        </div>
+        <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-fg mb-2">Help ranking learn</h3>
+            <p class="text-sm text-fg-muted">Once you have a few saves, the dashboard sidebar shows a <strong>Help ranking learn</strong> widget with a couple of borderline papers &mdash; the ones the model is most unsure about. Saving or skipping them is the most informative feedback you can give.</p>
+        </div>
+    </div>
 </section>
 
 <!-- Enrichment -->

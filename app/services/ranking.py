@@ -235,6 +235,55 @@ def explain_score(
     }
 
 
+# Additive score factors surfaced in the compact inline "score card", with a
+# short label and a semantic colour token (resolved as ``var(--<color>)``).
+# Recency is a multiplier rather than an additive contributor, so it is excluded.
+_SCORE_FACTORS: list[tuple[str, str, str]] = [
+    ("match_score", "Match", "accent"),
+    ("interest_bonus", "For you", "info"),
+    ("term_score", "Terms", "priority"),
+    ("ai_bonus", "AI", "accent"),
+    ("citation_bonus", "Citations", "info"),
+    ("venue_bonus", "Venue", "priority"),
+    ("resource_score", "Resources", "save"),
+    ("feedback_bonus", "Feedback", "save"),
+]
+
+
+def top_score_contributors(breakdown: dict[str, float] | None, *, limit: int = 3) -> list[dict]:
+    """Return the largest positive score contributors for a compact inline card.
+
+    Each entry exposes ``label``, ``value`` (points), ``color`` (a semantic token
+    name), and ``pct`` (0-100 bar width relative to the strongest surfaced
+    factor). Used to render an at-a-glance "why this ranked" indicator on each
+    paper row/card without expanding the full breakdown.
+
+    The additive factors in ``breakdown`` are pre-recency values; the final score
+    multiplies them by the recency decay (see :func:`explain_score`). So each
+    factor is scaled by ``recency_multiplier`` here to surface the points it
+    actually contributed — otherwise an old paper's bars would massively overstate
+    its score and contradict the recency-discounted headline. ``feedback_bonus`` is
+    added *after* recency in the score, so it is surfaced unscaled.
+    """
+    if not breakdown:
+        return []
+    recency_raw = breakdown.get("recency_multiplier", 1.0)
+    recency = float(recency_raw) if recency_raw is not None else 1.0
+    factors: list[dict] = []
+    for key, label, color in _SCORE_FACTORS:
+        raw = float(breakdown.get(key, 0.0) or 0.0)
+        scaled = raw if key == "feedback_bonus" else raw * recency
+        value = round(scaled, 1)
+        if value > 0:
+            factors.append({"key": key, "label": label, "value": value, "color": color})
+    factors.sort(key=lambda factor: factor["value"], reverse=True)
+    top = factors[:limit]
+    strongest = max((factor["value"] for factor in top), default=0.0)
+    for factor in top:
+        factor["pct"] = int(round(factor["value"] / strongest * 100)) if strongest > 0 else 0
+    return top
+
+
 def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
     from app.models import Paper, db
 

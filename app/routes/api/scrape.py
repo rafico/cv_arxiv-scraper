@@ -75,9 +75,12 @@ def search_historical():
         return jsonify({"error": "start_date and end_date are required"}), 400
 
     try:
+        # A non-string date (e.g. an int/list) makes strptime raise TypeError, not
+        # ValueError; catch both so it yields the specific format error, not a
+        # generic safety-net 400 with a logged traceback.
         start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").date()
         end_dt = datetime.strptime(end_date_str, "%Y-%m-%d").date()
-    except ValueError:
+    except (ValueError, TypeError):
         return jsonify({"error": "Dates must be in YYYY-MM-DD format"}), 400
 
     app = current_app._get_current_object()

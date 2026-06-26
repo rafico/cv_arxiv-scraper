@@ -82,7 +82,8 @@ run.py / wsgi.py ── create_app() ── blueprints (app/routes/*) ── ser
   `help`, `api`. Thin; delegates to services. See
   [app/routes/AGENTS.md](app/routes/AGENTS.md).
 - **app/services/** — the business logic ("the heart"). Ingestion, enrichment,
-  ranking, search/embeddings, digests, jobs, persistence. See
+  ranking, search/embeddings, corpus chat (RAG), cold-start onboarding +
+  active-learning, backup/restore, digests, jobs, persistence. See
   [app/services/AGENTS.md](app/services/AGENTS.md).
 - **app/models.py** — SQLAlchemy models (`Paper`, `Collection`, feedback, etc.).
 - **app/cli/** — installable console scripts (`cv-arxiv-scrape`, `-sync`,

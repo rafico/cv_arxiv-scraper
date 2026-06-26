@@ -43,6 +43,25 @@
     </ul>
 </section>
 
+<!-- Full Backup & Restore -->
+<section id="backup" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Full Backup &amp; Restore</h2>
+    <p class="text-sm text-fg-muted mb-4">Use this to move your whole setup to another machine or keep a safety copy. From <a href="{{ url_for('settings.view_settings', section='backup') }}" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Backup</a>:</p>
+    <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-fg mb-2">Export backup</h3>
+            <p class="text-sm text-fg-muted"><strong>Download backup</strong> writes a single <code>.tar.gz</code> snapshot of your database, the search index, and <code>config.yaml</code> &mdash; everything needed to reproduce your library.</p>
+        </div>
+        <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-fg mb-2">Restore backup</h3>
+            <p class="text-sm text-fg-muted"><strong>Restore from file</strong> swaps a snapshot back into place atomically &mdash; if anything goes wrong mid-restore it rolls back, so a failed restore never leaves you with a half-overwritten database. Restart the app afterward to fully reload the index.</p>
+        </div>
+    </div>
+    <div class="help-admonition bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg mt-4">
+        <p class="text-sm text-blue-800">Restore <strong>replaces</strong> your current database, index, and config with the backup&rsquo;s. Export a fresh backup first if the current state matters.</p>
+    </div>
+</section>
+
 <!-- Email Digest -->
 <section id="email-digest" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Daily Email Digest</h2>

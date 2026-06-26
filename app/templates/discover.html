@@ -302,4 +302,67 @@
         }
     }
 </script>
+
+{# ── Chat with your saved papers (RAG) ── #}
+<div class="max-w-2xl mx-auto mt-10" id="chat-panel">
+    <h2 class="text-lg font-bold text-fg mb-1">Chat with your saved papers</h2>
+    <p class="text-sm text-fg-muted mb-4">Ask a question grounded in the papers you've saved. AI synthesis needs an LLM enabled in Settings — otherwise the most relevant saved papers are listed.</p>
+    <div class="rounded-xl border border-edge bg-surface p-6">
+        <div class="flex gap-2">
+            <input id="chat-input" type="text"
+                   placeholder="e.g. What low-light methods do my saved papers use?"
+                   class="flex-1 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-sm
+                          focus:ring-2 focus:ring-accent focus:border-transparent focus:bg-surface outline-none">
+            <button id="chat-send" class="btn-primary text-sm shrink-0">Ask</button>
+        </div>
+        <div id="chat-answer" class="hidden mt-4 text-sm text-fg leading-relaxed whitespace-pre-wrap rounded-lg border border-edge bg-surface-2 p-3"></div>
+        <div id="chat-sources" class="hidden mt-3 space-y-1"></div>
+    </div>
+</div>
+<script>
+(function () {
+    const input = document.getElementById("chat-input");
+    const btn = document.getElementById("chat-send");
+    const answerEl = document.getElementById("chat-answer");
+    const sourcesEl = document.getElementById("chat-sources");
+    if (!btn) return;
+    async function sendChat() {
+        const query = input.value.trim();
+        if (!query) return;
+        btn.disabled = true;
+        answerEl.classList.remove("hidden");
+        answerEl.textContent = "Thinking…";
+        sourcesEl.classList.add("hidden");
+        sourcesEl.innerHTML = "";
+        try {
+            const response = await fetch("/api/corpus/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ query: query }),
+            });
+            const data = await response.json();
+            if (!response.ok) { answerEl.textContent = data.error || "Something went wrong."; return; }
+            if (data.no_saved_papers) {
+                answerEl.textContent = data.message || "Save a few papers first, then ask again.";
+                return;
+            }
+            answerEl.textContent = data.synthesis || "AI synthesis is off — here are your most relevant saved papers.";
+            (data.sources || []).forEach(function (s) {
+                const row = document.createElement("div");
+                row.className = "text-xs text-fg-muted";
+                const score = (s.score !== undefined && s.score !== null) ? " · score " + s.score : "";
+                row.textContent = "• " + s.title + score;
+                sourcesEl.appendChild(row);
+            });
+            if ((data.sources || []).length) sourcesEl.classList.remove("hidden");
+        } catch (e) {
+            answerEl.textContent = "Could not reach the server. Please try again.";
+        } finally {
+            btn.disabled = false;
+        }
+    }
+    btn.addEventListener("click", sendChat);
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") sendChat(); });
+})();
+</script>
 {% endblock %}

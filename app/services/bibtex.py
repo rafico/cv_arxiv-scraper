@@ -52,8 +52,12 @@ def _make_cite_key(paper: Paper) -> str:
     """Generate a BibTeX cite key from the arxiv_id or paper link."""
     if paper.arxiv_id:
         return paper.arxiv_id.replace(".", "_").replace("/", "_")
-    # Fallback to last segment of link
-    return paper.link.rstrip("/").split("/")[-1].replace(".", "_")
+    # Fallback to last segment of link, sanitized: a non-arXiv link can contain
+    # characters illegal in a BibTeX key (spaces, '?', '&', '#', …) — or be empty —
+    # which would emit a malformed/un-citable @article{...} entry.
+    segment = paper.link.rstrip("/").split("/")[-1] if paper.link else ""
+    sanitized = re.sub(r"[^A-Za-z0-9_-]", "_", segment).strip("_")
+    return sanitized or f"paper_{paper.id}"
 
 
 def paper_to_bibtex(paper: Paper) -> str:

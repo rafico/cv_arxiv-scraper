@@ -16,6 +16,18 @@ from app.services.text import now_utc, utc_today
 
 LOGGER = logging.getLogger(__name__)
 
+
+def _merge_dedup_key(candidate: PaperCandidate) -> str:
+    """Dedup key for merging RSS + rolling-window candidates.
+
+    ``arxiv_id`` is the natural key, ``link`` the fallback. A non-arXiv feed item
+    can have neither (``arxiv_id=None``, ``link=""``); without a per-object key all
+    such candidates would collapse under the empty string and all but one would be
+    silently dropped before save (and a NULL-``arxiv_id`` paper *is* persistable).
+    """
+    return candidate.arxiv_id or candidate.link or f"\x00candidate-{id(candidate)}"
+
+
 RssCandidateFetcher = Callable[..., list[PaperCandidate]]
 RollingWindowFetcher = Callable[..., list[PaperCandidate]]
 BackendRegistry = Mapping[str, type]
@@ -293,9 +305,9 @@ class IngestOrchestrator:
     ) -> list[PaperCandidate]:
         merged_candidates: dict[str, PaperCandidate] = {}
         for candidate in primary:
-            merged_candidates[candidate.arxiv_id or candidate.link] = candidate
+            merged_candidates[_merge_dedup_key(candidate)] = candidate
         for candidate in secondary:
-            merged_candidates.setdefault(candidate.arxiv_id or candidate.link, candidate)
+            merged_candidates.setdefault(_merge_dedup_key(candidate), candidate)
         return list(merged_candidates.values())
 
     def _resolve_backend_names(self, backend_names: Sequence[str] | None) -> list[str]:

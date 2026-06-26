@@ -25,7 +25,13 @@ from app.models import (
 )
 from app.services.feedback import get_feedback_snapshot
 from app.services.preferences import first_author_name, get_preferences
-from app.services.ranking import FEEDBACK_BOOST, combined_rank_score, explain_score, generate_ranking_explanation
+from app.services.ranking import (
+    FEEDBACK_BOOST,
+    combined_rank_score,
+    explain_score,
+    generate_ranking_explanation,
+    top_score_contributors,
+)
 from app.services.related import build_vector, top_related_papers
 from app.services.text import now_utc
 from app.services.thumbnail_warmer import THUMBNAIL_WARMER
@@ -337,6 +343,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             feedback_score=int(paper.feedback_score or 0),
             config=config,
         )
+        paper.top_contributors = top_score_contributors(paper.score_breakdown)
         primary_author = first_author_name(paper.authors)
         primary_topic = next((topic for topic in paper.topic_tags_list if topic), "")
         paper.follow_recommendation = {

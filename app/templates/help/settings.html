@@ -10,14 +10,14 @@
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-accent px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Start Here</span></div>
             <div>
                 <h3 class="text-base font-bold text-fg">Research Setup</h3>
-                <p class="mt-1 text-sm text-fg-muted">Add the authors, labs, and topic keywords you care about. One item per line. This is what decides what lands in your inbox.</p>
+                <p class="mt-1 text-sm text-fg-muted">Add the authors, labs, and topic keywords you care about. One item per line. This is what decides what lands in your inbox. You can also paste a list of arXiv IDs here and <strong>Bootstrap interests</strong> to seed your learned profile in one step.</p>
             </div>
         </div>
         <div class="rounded-xl border border-edge bg-surface p-5 flex gap-4 items-start shadow-sm">
             <div class="mt-0.5 shrink-0"><span class="rounded-full bg-surface-2 text-fg-muted border border-edge px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
             <div>
                 <h3 class="text-base font-bold text-fg">Ranking</h3>
-                <p class="mt-1 text-sm text-fg-muted">Fine-tune how strongly the app reacts to authors, labs, topics, freshness, citations, AI relevance, and muted terms. Most users can keep the defaults until they have some feedback history.</p>
+                <p class="mt-1 text-sm text-fg-muted">Fine-tune how strongly the app reacts to authors, labs, topics, freshness, citations, AI relevance, and muted terms. Most users can keep the defaults until they have some feedback history. It is also where you toggle the inline <strong>score factor bars</strong> shown on paper rows.</p>
             </div>
         </div>
         <div class="rounded-xl border border-edge bg-surface p-5 flex gap-4 items-start shadow-sm">
@@ -32,6 +32,13 @@
             <div>
                 <h3 class="text-base font-bold text-fg">LLM / AI</h3>
                 <p class="mt-1 text-sm text-fg-muted">AI-powered summaries and relevance scores. Useful if you want richer summaries or another ranking signal, but not required. See <a href="{{ url_for('help.view_page', page='cli') }}#llm-summaries" class="font-medium text-blue-600 hover:text-blue-800">CLI &rarr; AI Summaries</a> for setup details.</p>
+            </div>
+        </div>
+        <div class="rounded-xl border border-edge bg-surface p-5 flex gap-4 items-start shadow-sm">
+            <div class="mt-0.5 shrink-0"><span class="rounded-full bg-surface-2 text-fg-muted border border-edge px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">Optional</span></div>
+            <div>
+                <h3 class="text-base font-bold text-fg">Backup</h3>
+                <p class="mt-1 text-sm text-fg-muted">Download a full snapshot (database, search index, and config) or restore one &mdash; for moving to another machine or keeping a safety copy. See <a href="{{ url_for('help.view_page', page='export') }}#backup" class="font-medium text-blue-600 hover:text-blue-800">Export &amp; Sync &rarr; Full Backup &amp; Restore</a> for details.</p>
             </div>
         </div>
     </div>

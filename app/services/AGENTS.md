@@ -35,20 +35,30 @@ from here — add logic here, not there.
   (`parse_venue` detects conference acceptance from arXiv comments),
   `interest_model.py` (learned interest centroids from feedback + the FAISS
   index; inert below 5 saved papers), `feedback.py`
-  (save/skip/priority/shared actions), `metrics.py`, `recommendations.py`,
+  (save/skip/priority/shared actions — **toggling**: re-applying an action clears
+  it), `onboarding.py` (cold-start: ingests pasted arXiv IDs as implicit saves to
+  seed the profile; active-learning `select_uncertain_papers` surfaces boundary
+  papers), `metrics.py`, `recommendations.py`,
   `preferences.py` (reads/writes `config.yaml` via `save_config` — atomic with an
   in-place fallback for bind-mounted destinations).
 
 **Search / embeddings / corpus**
 - `embeddings.py` (`EmbeddingService`, FAISS index; singleton via
   `get_embedding_service`), `embed_backfill.py`, `search.py` (BM25 + semantic +
-  hybrid/RRF), `related.py`, `corpus_analysis.py`, `saved_search.py`,
-  `pdf_extraction.py` (`extract_and_store_sections`), `summary.py`, `text.py`.
+  hybrid/RRF), `rag.py` (chat-with-saved-papers: retrieves over the **saved**
+  corpus via hybrid search, optionally synthesizes via the LLM client; degrades to
+  retrieval-only when `llm.enabled` is false), `related.py`, `corpus_analysis.py`,
+  `saved_search.py`, `pdf_extraction.py` (`extract_and_store_sections`),
+  `summary.py`, `text.py`.
 
 **Outputs / integrations**
 - `email_digest.py` (Gmail OAuth + digest send; `DEFAULT_CREDENTIALS_PATH`),
   `export.py` (HTML report), `bibtex.py`, `zotero.py`, `mendeley.py`,
-  `thumbnail_generator.py`.
+  `thumbnail_generator.py`, `backup.py` (one-click backup/restore: consistent
+  SQLite snapshot + FAISS index + config tarball. Restore is **staged-then-
+  committed** — every component is copied onto its target filesystem first so the
+  commit is a same-fs rename: cross-device-safe, all-or-nothing with rollback, and
+  size-bounded against decompression bombs).
 
 **Persistence helpers**
 - `_save_results` in `scrape_engine.py` maps explicit fields onto `Paper` (it

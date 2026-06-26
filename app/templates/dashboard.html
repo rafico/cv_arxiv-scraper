@@ -126,6 +126,72 @@
 </div>
 {% endblock %}
 
+{# ════════════ Active-learning: refine the interest profile ════════════ #}
+{% block sidebar_extra %}
+<div id="active-learning" class="mt-4 hidden">
+    <div class="side-heading">Help ranking learn</div>
+    <p class="px-3 text-xs text-fg-subtle">A couple of borderline papers — your call sharpens recommendations.</p>
+    <div id="al-list" class="mt-2 px-2 space-y-2"></div>
+</div>
+<script>
+(function () {
+    const wrap = document.getElementById("active-learning");
+    const list = document.getElementById("al-list");
+    if (!wrap || !list) return;
+
+    async function feedback(paperId, action, card) {
+        try {
+            const res = await fetch("/api/papers/" + paperId + "/feedback", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ action: action }),
+            });
+            if (res.ok) { card.remove(); if (!list.children.length) load(); }
+        } catch (e) { /* non-fatal */ }
+    }
+
+    function render(papers) {
+        list.innerHTML = "";
+        if (!papers.length) { wrap.classList.add("hidden"); return; }
+        wrap.classList.remove("hidden");
+        papers.forEach(function (p) {
+            const card = document.createElement("div");
+            card.className = "rounded-lg border border-edge bg-surface p-2";
+            const title = document.createElement("div");
+            title.className = "text-xs font-medium text-fg line-clamp-2";
+            title.textContent = p.title;
+            const meta = document.createElement("div");
+            meta.className = "mt-0.5 text-[11px] text-fg-muted line-clamp-1";
+            meta.textContent = p.authors || "";
+            const row = document.createElement("div");
+            row.className = "mt-2 flex gap-2";
+            const save = document.createElement("button");
+            save.className = "px-2 py-1 text-[11px] rounded-lg bg-accent text-accent-fg";
+            save.textContent = "Save";
+            save.onclick = function () { feedback(p.paper_id, "save", card); };
+            const skip = document.createElement("button");
+            skip.className = "px-2 py-1 text-[11px] rounded-lg border border-edge text-fg-muted hover:bg-surface-2";
+            skip.textContent = "Skip";
+            skip.onclick = function () { feedback(p.paper_id, "skip", card); };
+            row.append(save, skip);
+            card.append(title, meta, row);
+            list.append(card);
+        });
+    }
+
+    async function load() {
+        try {
+            const res = await fetch("/api/onboarding/uncertain?limit=2");
+            if (!res.ok) return;
+            const data = await res.json();
+            render(data.papers || []);
+        } catch (e) { /* non-fatal */ }
+    }
+    load();
+})();
+</script>
+{% endblock %}
+
 {% block content %}
 {# ── Onboarding (only for new users) ── #}
 {% set incomplete_steps = dashboard_overview.onboarding_steps | selectattr('complete', 'equalto', false) | list %}

@@ -22,6 +22,19 @@ DEFAULT_DELAY_SECONDS = 1.0
 EMBEDDINGS_BATCH_SIZE = 64
 
 
+def _positive_int(value: str) -> int:
+    """argparse type for --batch-size: reject <= 0.
+
+    A non-positive batch size makes SQLite read ``LIMIT -1`` as unlimited while the
+    offset cursor never advances, so the offset-paginated backfill loops spin
+    forever. Fail fast at parse time instead.
+    """
+    ivalue = int(value)
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return ivalue
+
+
 def _recompute_paper_score(paper: Paper, config: dict | None) -> float:
     from app.services.ranking import compute_paper_score
 
@@ -588,18 +601,18 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     embeddings = subparsers.add_parser("embeddings", help="Backfill missing embeddings")
-    embeddings.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
+    embeddings.add_argument("--batch-size", type=_positive_int, default=EMBEDDINGS_BATCH_SIZE)
     index_rebuild = subparsers.add_parser("index-rebuild", help="Rebuild the semantic paper index from the DB")
-    index_rebuild.add_argument("--batch-size", type=int, default=EMBEDDINGS_BATCH_SIZE)
+    index_rebuild.add_argument("--batch-size", type=_positive_int, default=EMBEDDINGS_BATCH_SIZE)
     abstracts = subparsers.add_parser("abstracts", help="Re-clean stored abstracts (strip arXiv RSS boilerplate)")
-    abstracts.add_argument("--batch-size", type=int, default=200)
+    abstracts.add_argument("--batch-size", type=_positive_int, default=200)
     subparsers.add_parser("interest", help="Recompute learned-interest similarities from feedback")
     insights = subparsers.add_parser("insights", help="Run structured LLM extraction for papers without insights")
     insights.add_argument("--limit", type=int, default=200, help="Max papers to analyze (one LLM call each)")
 
     for command in ("citations", "openalex", "comments", "github", "thumbnails", "all"):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
-        subparser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+        subparser.add_argument("--batch-size", type=_positive_int, default=DEFAULT_BATCH_SIZE)
         subparser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
         if command == "thumbnails":
             subparser.add_argument("--teasers-only", action="store_true", help="Only generate missing teaser figures")

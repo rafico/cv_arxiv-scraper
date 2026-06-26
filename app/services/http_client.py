@@ -101,6 +101,16 @@ def _headers_with_user_agent(headers: Mapping[str, str] | None, *, user_agent: s
     return merged
 
 
+def _apply_session_config(session: requests.Session, *, settings, user_agent: str):
+    """Stamp resolved rate-limit settings + User-Agent onto a session."""
+    limiter = get_shared_rate_limiter(settings)
+    session.headers["User-Agent"] = user_agent
+    setattr(session, _SESSION_LIMITER_ATTR, limiter)
+    setattr(session, _SESSION_RATE_LIMIT_ATTR, settings)
+    setattr(session, _SESSION_USER_AGENT_ATTR, user_agent)
+    return limiter
+
+
 def _configure_session(
     session: requests.Session,
     *,
@@ -110,12 +120,7 @@ def _configure_session(
 ):
     effective_user_agent = user_agent or resolve_user_agent(scraper_config)
     effective_settings = resolve_rate_limit_settings(scraper_config, profile=rate_limit_profile)
-    limiter = get_shared_rate_limiter(effective_settings)
-
-    session.headers["User-Agent"] = effective_user_agent
-    setattr(session, _SESSION_LIMITER_ATTR, limiter)
-    setattr(session, _SESSION_RATE_LIMIT_ATTR, effective_settings)
-    setattr(session, _SESSION_USER_AGENT_ATTR, effective_user_agent)
+    limiter = _apply_session_config(session, settings=effective_settings, user_agent=effective_user_agent)
     return limiter, effective_user_agent
 
 
@@ -128,7 +133,7 @@ def request_with_backoff(
     timeout: int = 30,
     session: requests.Session | None = None,
     scraper_config: Mapping[str, Any] | None = None,
-    rate_limit_profile: str = "interactive",
+    rate_limit_profile: str | None = None,
     user_agent: str | None = None,
     **kwargs: Any,
 ) -> requests.Response:
@@ -138,24 +143,29 @@ def request_with_backoff(
     # last_exc`` with last_exc still None → confusing ``TypeError``, no request made.
     attempts = max(1, attempts)
     last_exc: Exception | None = None
-    requested_settings = resolve_rate_limit_settings(scraper_config, profile=rate_limit_profile)
+    requested_settings = resolve_rate_limit_settings(scraper_config, profile=rate_limit_profile or "interactive")
     requested_user_agent = user_agent or resolve_user_agent(scraper_config)
     if session is not None:
         limiter = getattr(session, _SESSION_LIMITER_ATTR, None)
         session_settings = getattr(session, _SESSION_RATE_LIMIT_ATTR, None)
         effective_user_agent = getattr(session, _SESSION_USER_AGENT_ATTR, None)
-        if (
-            limiter is None
-            or effective_user_agent is None
-            or session_settings != requested_settings
-            or effective_user_agent != requested_user_agent
-        ):
-            limiter, effective_user_agent = _configure_session(
-                session,
-                scraper_config=scraper_config,
-                rate_limit_profile=rate_limit_profile,
-                user_agent=user_agent,
-            )
+        # Reconfigure each dimension only when the caller actually specified it; for
+        # the rest, inherit the session's existing configuration rather than reset it
+        # to library defaults. A configured scrape session is reused across calls that
+        # specify different subsets: the RSS/PDF backends pass only ``session=`` (must
+        # keep both the configured User-Agent and rate limit), while the enrichment /
+        # arxiv_api backends pass an explicit ``rate_limit_profile="bulk"`` (must
+        # re-tune the throttle) — and sometimes ``user_agent`` — but no scraper_config.
+        # Without per-dimension intent, the first bare call clobbered a configured
+        # ``ingest.user_agent`` (and a non-default profile call wiped the rate limit).
+        unconfigured = limiter is None or session_settings is None or effective_user_agent is None
+        wants_settings = unconfigured or scraper_config is not None or rate_limit_profile is not None
+        wants_user_agent = unconfigured or user_agent is not None or scraper_config is not None
+        target_settings = requested_settings if wants_settings else session_settings
+        target_user_agent = requested_user_agent if wants_user_agent else effective_user_agent
+        if unconfigured or session_settings != target_settings or effective_user_agent != target_user_agent:
+            limiter = _apply_session_config(session, settings=target_settings, user_agent=target_user_agent)
+            effective_user_agent = target_user_agent
         do_request = session.request
         request_headers = kwargs.get("headers")
         if request_headers is not None:

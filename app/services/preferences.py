@@ -26,6 +26,7 @@ DEFAULT_PREFERENCES: dict[str, dict] = {
     },
     "display": {
         "summary_lines": 3,
+        "show_score_breakdown_bars": True,
     },
     "muted": {
         "authors": [],
@@ -78,6 +79,9 @@ def get_preferences(config: dict | None) -> dict:
     if isinstance(display, dict):
         for key, default_value in merged["display"].items():
             value = display.get(key)
+            if isinstance(default_value, bool):
+                merged["display"][key] = default_value if value is None else bool(value)
+                continue
             try:
                 if value is not None:
                     merged["display"][key] = max(1, min(10, int(value)))
@@ -105,6 +109,10 @@ def update_preferences_from_form(config: dict, form) -> dict:
 
     display = preferences["display"]
     for key in display:
+        if isinstance(display[key], bool):
+            # Checkbox: only present in the form payload when ticked.
+            display[key] = f"display_{key}" in form
+            continue
         raw = form.get(f"display_{key}", "").strip()
         if raw:
             try:

@@ -206,3 +206,141 @@ feature** authored outside this QA session: `app/templates/partials/_shell_scrip
 in `scrape_engine.py`, and added cases in `tests/test_scrape_engine.py`. No QA agent touched
 those and they are left intact. Of the `scrape_engine.py` changes, only `_INDEX_WRITE_LOCK`
 (G9) belongs to this round.
+
+---
+
+# Pre-Release QA Findings — Round 5
+
+Round: `qa/pre-release-sweep-5`. Baseline before this round: **905 passed**, 8 e2e
+deselected; `ruff`/`ruff format`/`mypy` all clean. After this round: **943 passed**
+(38 regression tests across 13 new `test_qa_round5_*.py` modules). 16 defects fixed;
+every fix has a regression test verified to fail on the pre-fix code and pass on the
+fix. Distinct from the 72 fixed in rounds 1–4.
+
+Method: a plan-mode Explore pre-sweep seeded 3 input-validation defects; then a
+multi-agent finder sweep over disjoint subsystems fed every candidate through two
+independent adversarial verifiers (correctness/reachability + duplicate/already-
+handled). The first finder run was throttled by an API burst rate-limit (only the
+ingest lane completed — surfacing H1/H11, verified by hand); a second **waved** run
+covered the remaining 12 lanes and returned 12 confirmed + 1 contested. One contested
+item and one false positive were investigated and not fixed (see below).
+
+## High-impact (S1 / S2)
+
+| # | Sev | Area | Defect | File |
+|---|-----|------|--------|------|
+| H1 | S2 | ingest/http | A configured `ingest.user_agent` was silently dropped on the default daily/scheduled scrape: the RSS backend's bare `request_with_backoff(session=session)` resolved the "requested" UA to the library default, mismatched the session's configured UA, and the reconfigure branch reset the live session's User-Agent **and** rate-limit settings to defaults for the rest of the scrape (arXiv UA-compliance lost; throttle profile dropped). Fix is dimension-aware: only (re)configure the dimension the caller specified, else inherit the session's. Also covers the `user_agent`-only facet (`arxiv_api_backend`) that reset the rate limit | app/services/http_client.py |
+| H2 | S2 | enrichment | `fetch_recent_papers` discarded **all** already-paginated entries when arXiv failed (exhausted retries) or returned malformed XML mid-pagination — the per-page fetch+parse had no isolation, so the exception unwound the whole call. Now keeps collected entries and stops, mirroring the orchestrator's per-feed isolation | app/services/enrichment.py |
+| H3 | S2 | venues | `parse_venue` attributed a submit/accept/qualifier/workshop cue to the (dict-order) first-matched venue whenever it sat within the proximity window — even when the cue was **nearer a co-mentioned venue** ("Accepted to CVPR 2024. Our ICCV oral paper…" → CVPR mis-tagged *oral*). Rounds 3/4 gated by window; this gates by nearest-venue ownership | app/services/venues.py |
+| H4 | S2 | config/llm | A hand-edited scalar `llm.enabled` ("false"/"no"/"off") read truthy: app startup crashed when no API key was configured, and the LLM **silently ran while "disabled"** (token cost). Routed `llm.enabled` through `_is_truthy_flag` at the validator and the client factory, mirroring the round-3 F19 `scheduler.enabled` fix | app/__init__.py, app/services/scrape_engine.py |
+| H5 | S2 | cli/embeddings | A non-positive `--batch-size` made the offset-paginated backfill loops spin forever (SQLite reads `LIMIT -1` as unlimited and the offset cursor never advances). Reject `<= 0` at the argparse `--batch-size` type, and clamp the `backfill_embeddings` library entry | app/cli/backfill.py, app/services/embed_backfill.py |
+| H6 | S2 | settings | Saving **Email** settings activated the loaded config without validation (the one mutating route that didn't go through `persist_config`), so an unrelated email save silently re-activated a `config.yaml` that had drifted to a dict-but-invalid state. Routed `_save_config_key` through `persist_config` (validate before activate); the email route now flashes the error like its siblings | app/routes/settings.py |
+| H7 | S2 | pdf/sections | The known-heading regex's trailing `\|\s+` branch matched any wrapped body line that merely *starts* with a section keyword ("Results show our approach…"), fabricating a section boundary and truncating the real section. Added the same short-line guard the all-caps heading branch already uses | app/services/pdf_extraction.py |
+
+## Lower / edge (S3)
+
+| # | Sev | Area | Defect | File |
+|---|-----|------|--------|------|
+| H8 | S3 | api/collections | `add_paper_to_collection` accepted a boolean `paper_id` (`bool` ⊂ `int`): `{"paper_id": true}` resolved to `db.session.get(Paper, True)` → silently added Paper **#1**. Excludes bool, mirroring the round-2 `bulk_feedback` guard | app/routes/api/collections.py |
+| H9 | S3 | api/saved-search | A non-string `name` in saved-search create/update raised `AttributeError` (`(123 or "").strip()`), caught by the safety net as a generic 400 + a logged traceback on every malformed request. Now `require_str`/`optional_str` → a specific 400, no log noise | app/routes/api/saved_searches.py |
+| H10 | S3 | api/scrape | A non-string `start_date`/`end_date` in historical scrape raised `TypeError` (`strptime`), not `ValueError`, so it missed the format-error branch and fell to the generic safety-net 400. Now catches both | app/routes/api/scrape.py |
+| H11 | S3 | ingest | `_merge_candidates` keyed dedup on `arxiv_id or link`; a non-arXiv feed item with neither (`arxiv_id=None`, `link=""`) hashed to `""`, so **all** link-less candidates collapsed to one and the rest were dropped before save (a NULL-`arxiv_id` paper is persistable — the unique index is partial). Falls back to a per-candidate key | app/services/ingest/orchestrator.py |
+| H12 | S3 | scrape/sections | `_extract_sections` didn't dedup result targets by link, so a cross-listed paper (same link twice in a batch) had the second copy's bulk `delete()` autoflush + wipe the `PaperSection` rows the first just added, and `total_sections` double-counted. Dedup targets by link | app/services/scrape_engine.py |
+| H13 | S3 | jobs | `get_status_snapshot` could momentarily report a finishing job as a spurious non-terminal `{"running": False}`: `_publish` cleared `_active_job_id` (under `_lock`) before setting `finished_at` (under `job.condition`). Now clears the active id only after the job is marked finished | app/services/jobs.py |
+| H14 | S3 | ranking/matching | An empty/whitespace whitelist term (hand-edited `config.yaml`) compiled to `r"\b\b"`, which matches at every word boundary → a false Author/Title match on **all** papers. Empty terms now compile to a never-matching pattern | app/services/matching.py |
+| H15 | S3 | cli/sync | An oversized `--chunk-days` overflowed date/`timedelta` arithmetic in `iter_date_chunks` (`OverflowError`, not `ValueError`), so the sync CLI's handler missed it → traceback. Now caught and reported cleanly | app/cli/sync.py |
+| H16 | S3 | bibtex/export | A BibTeX cite key derived from a non-arXiv link was unsanitized (spaces/`?`/`&` …) — or empty — emitting a malformed/un-citable `@article{…}`. Sanitizes to BibTeX-legal chars with a `paper_<id>` fallback | app/services/bibtex.py |
+
+## Fix notes (judgment-call items)
+
+- **H1** — the fix is at the root in `request_with_backoff` rather than threading
+  `user_agent`/`scraper_config` through six ingest signatures: each call now reconfigures
+  only the dimensions it actually specified (`scraper_config`/explicit `rate_limit_profile`
+  → settings; `user_agent`/`scraper_config` → UA) and inherits the rest from the session.
+  This preserves the **intended** bulk re-tune for the enrichment/arxiv backends (which
+  pass `rate_limit_profile="bulk"` with no config) while fixing the RSS backend's reset —
+  and subsumes the separately-found "user_agent-only call resets the rate limit" facet.
+- **H3** — added `_venue_owns_signal` (a cue belongs to the matched venue only if no other
+  co-mentioned venue is strictly nearer; ties go to the matched venue). With a single venue
+  in the comment this is a no-op, so all 12 pre-existing venue tests still pass.
+- **H4** — `_create_llm_client` imports `_is_truthy_flag` from `app` locally (the in-function
+  import pattern this repo already uses) to avoid an import cycle.
+
+## Investigated, not fixed (transparency)
+
+- **(contested) `subprocess_runner.run_isolated` unbounded post-timeout `join()`** — claim
+  was that a wedged native child ignores `SIGTERM` and hangs the worker forever (holding
+  `_INDEX_WRITE_LOCK`). The reachability verifier **refuted the premise**: `Process.terminate()`
+  sends a real `SIGTERM` via `os.kill` (not a Python-level handler that needs the interpreter
+  to regain control), so a normally-terminating child is reaped. A bounded join + `SIGKILL`
+  escalation is defensible hardening but the asserted hang is not reachable; deferred.
+- **(false positive) Mendeley "empty author names"** — `"".rsplit(None, 1)` returns `[]`, so
+  the existing walrus guard already drops empty author components. Discarded in verification.
+
+---
+
+# Round — discovery first-wave (commit `c12aadc`)
+
+QA sweep targeting the "discovery first-wave" feature (score cards, RAG chat,
+cold-start/active-learning, one-click backup/restore). Method: 7 parallel finders
+across the changed subsystems → 3-lens adversarial verification of each candidate
+(correctness / edge-repro / severity-impact) → **14 of 20** candidates confirmed,
+6 rejected. Every code defect below is **fixed with a regression test verified to
+fail pre-fix and pass post-fix**; three "weak test" findings were hardened.
+
+Severity: **S1** crash/data-loss/security · **S2** wrong user-visible behavior ·
+**S3** cosmetic/edge.
+
+## Defects fixed (S1 / S2)
+
+| # | Sev | Area | Defect | File | Test |
+|---|-----|------|--------|------|------|
+| W1 | S1 | backup/restore | `restore_backup` moved the DB & FAISS out of the extraction tempdir with `os.replace`, which raises `OSError: Invalid cross-device link` whenever `/tmp` is a separate mount (Docker, systemd `PrivateTmp`, tmpfs) — so **import 500s on most deployments**. Now stages every component onto its target filesystem (copy) first, so commits are same-fs renames. *(backup-core-1 / wiring-1 / tests-backup-1)* | app/services/backup.py | `test_restore_survives_cross_device_tempdir` |
+| W2 | S1 | backup/restore | Restore was non-atomic: DB was `os.replace`d **first**, so a later failure (FAISS/config) left the live DB already overwritten and the **old DB unrecoverable**, paired with a stale index. Now two-phase (stage → commit) with LIFO rollback of every committed component on any failure. *(backup-core-2 / backup-sec-2)* | app/services/backup.py | `test_restore_rolls_back_when_a_later_step_fails` |
+| W3 | S1 | backup/restore (sec) | Decompression bomb: a sub-2 MiB upload (passes `MAX_CONTENT_LENGTH`) could declare gigabytes of members and `extractall` wrote them all to disk — unauthenticated local disk-exhaustion DoS. Now sums declared member sizes against a budget (`min(1 GiB, max(16 MiB, compressed×100))`) and rejects before writing a byte. *(backup-sec-1)* | app/services/backup.py | `test_rejects_oversized_archive` |
+| W4 | S2 | onboarding | Cold-start bootstrap called `apply_feedback_action(pid, "save")` unconditionally, but that helper **toggles** — re-running bootstrap (or pasting an already-saved id) **deleted** the existing save and dropped `saved_total`. Now guarded by `_has_save_feedback`, making bootstrap idempotent. *(onboarding-1)* | app/services/onboarding.py | `test_bootstrap_does_not_unsave_already_saved_paper` |
+| W5 | S2 | onboarding | `normalize_arxiv_id` corrupted legacy ids: the 2-letter subclass regex turned `cond-mat.str-el/0309136` into `str-el/0309136` (and kept a `.SUBJ` the arXiv `id_list` query doesn't resolve). Now captures the hyphenated archive + optional subclass and **drops the subclass** → `cond-mat/0309136`, the canonical resolvable id. *(onboarding-2; also the real bug behind rejected tests-onboarding-1)* | app/services/onboarding.py | `test_legacy_scheme*` |
+| W6 | S2 | ranking/score cards | The inline score bars rendered **raw, pre-recency** factor points next to a recency-discounted headline, so an old paper's bars read e.g. "Match +44" beside a headline of "1". `top_score_contributors` now scales additive factors by `recency_multiplier` (feedback bonus stays unscaled, matching the score formula). *(ranking-ui-1)* | app/services/ranking.py | `test_additive_factors_scaled_by_recency`, `test_feedback_bonus_not_scaled_by_recency` |
+| W7 | S2 | backup/import API | `backup_import` caught only `ValueError`, so any `OSError` from restore (disk full, permissions) escaped as an **unhandled 500 with a traceback**. Now returns a clean JSON 500. *(backup-core-3)* | app/routes/api/backup.py | `test_import_os_error_returns_clean_500` |
+| W8 | S2 | backup/export | `create_backup` streamed FAISS files into the tar one-by-one over the (long) write, so a concurrent index rewrite could capture `papers.index` and `id_map.json` from **different generations** (a half-written index). Now snapshots the index dir with `copytree` up front, then tars the snapshot. *(backup-core-4)* | app/services/backup.py | covered by round-trip tests (timing-dependent; mitigation, see notes) |
+
+## Tests hardened (weak-test findings; no code bug)
+
+| # | Area | Gap closed | File |
+|---|------|------------|------|
+| W9 | backup endpoint | `test_export_then_import_round_trip` asserted only response metadata — a restore that truncated the DB would still pass. Now seeds a row and re-opens the on-disk DB after import to assert real data survived the HTTP round-trip. *(tests-backup-2)* | tests/test_backup.py |
+| W10 | onboarding endpoint | No happy-path coverage for `/api/onboarding/uncertain` (only the empty case), so the populated response shape / JSON-serializable `similarity` / limit clamp were untested. Added a 3-save + candidate test. *(tests-onboarding-2)* | tests/test_onboarding.py |
+| W11 | RAG chat endpoint | `test_chat_returns_200_json_with_sources` passed via the single-saved-paper fallback even if saved-only filtering broke. Now hybrid surfaces an **unsaved** paper that must be filtered out. *(tests-rag-1)* | tests/test_rag.py |
+
+## Fix notes (judgment calls)
+
+- **W1/W2** — restore was restructured into *phase 1 stage* (the only cross-device
+  copies, before anything destructive) and *phase 2 commit* (same-fs renames with a
+  rollback/cleanup closure stack). `config.yaml` stays on the existing `_atomic_write`
+  (it is committed last, needs no undo, and keeps the single-file-bind-mount in-place
+  fallback). The old `_swap_faiss_dir` is replaced by generic `_stage_dir` / `_commit_swap`.
+- **W3** — the cap is a *ratio* (×100) with a 16 MiB floor and 1 GiB ceiling rather than a
+  flat number, so legitimate backups (binary FAISS compresses ~1×) always fit while
+  pathological ratios are rejected. The regression test shrinks `_MAX_EXTRACT_BYTES` to make
+  a normal archive trip the guard (avoids materializing a real multi-GB bomb in CI).
+- **W8** — a true consistency guarantee needs coordination with the index writer (no lock
+  primitive is exposed), so this is a **mitigation** that shrinks the inconsistency window to
+  the `copytree` duration; combined with the single-worker constraint it is effectively safe.
+  Not given a bespoke red→green test (deterministic concurrency is impractical here).
+
+## Investigated, not fixed (transparency)
+
+- **(deferred, low) Headline vs bars after a live weight change** *(ranking-ui-2, rejected
+  1/3)* — the headline uses the **stored** `paper_score` while the bars recompute from the
+  **current** config, so they can disagree in the window between a weight edit and the next
+  `recompute_all_paper_scores`. Real but transient and self-correcting; out of scope for this
+  round (separate from the W6 recency bug, which is fixed).
+- **(false positive) `_synthesize` bypasses the LLM concurrency semaphore** *(rag-1, rejected
+  1/3)* — the semaphore is **per-`LLMClient`-instance** and the RAG path builds its own client
+  issuing exactly one completion, so there is no shared global cap to defeat.
+- **(false positive) `/api/onboarding/uncertain` offline-degradation gap** *(wiring-2, 0/3)* —
+  `get_paper_vectors` reconstructs from the FAISS index and never loads SPECTER2; an empty
+  index returns `[]` and the endpoint degrades to a clean 200.
+- **(not-a-bug) `_swap_faiss_dir` rollback untested / LLM-client wiring stubbed**
+  *(tests-backup-3, tests-rag-2, 0/3)* — coverage gaps over already-correct code, no false
+  assertion. (The FAISS-rollback path is now exercised anyway via W2's test.)

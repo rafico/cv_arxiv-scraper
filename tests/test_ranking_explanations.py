@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-from app.services.ranking import generate_ranking_explanation
+from app.services.ranking import generate_ranking_explanation, top_score_contributors
 
 
 def _make_paper(**kwargs):
@@ -103,3 +103,59 @@ class TestGenerateRankingExplanation:
         explanations = generate_ranking_explanation(paper)
         # Should still work, just no match explanations
         assert isinstance(explanations, list)
+
+
+class TestTopScoreContributors:
+    def test_returns_top_three_sorted_descending(self):
+        breakdown = {
+            "match_score": 44.0,
+            "term_score": 6.0,
+            "interest_bonus": 12.0,
+            "venue_bonus": 8.0,
+            "ai_bonus": 2.0,
+        }
+        top = top_score_contributors(breakdown)
+        assert [c["label"] for c in top] == ["Match", "For you", "Venue"]
+        assert [c["value"] for c in top] == [44.0, 12.0, 8.0]
+
+    def test_excludes_zero_and_negative_factors(self):
+        breakdown = {"match_score": 10.0, "term_score": 0.0, "interest_bonus": -3.0}
+        top = top_score_contributors(breakdown)
+        assert [c["label"] for c in top] == ["Match"]
+
+    def test_empty_or_none_breakdown_returns_empty(self):
+        assert top_score_contributors(None) == []
+        assert top_score_contributors({}) == []
+        assert top_score_contributors({"match_score": 0.0, "recency_multiplier": 0.9}) == []
+
+    def test_pct_is_normalised_to_strongest(self):
+        breakdown = {"match_score": 40.0, "interest_bonus": 20.0, "term_score": 10.0}
+        top = top_score_contributors(breakdown)
+        assert top[0]["pct"] == 100
+        assert top[1]["pct"] == 50
+        assert top[2]["pct"] == 25
+
+    def test_limit_is_respected(self):
+        breakdown = {"match_score": 5.0, "interest_bonus": 4.0, "term_score": 3.0, "venue_bonus": 2.0}
+        assert len(top_score_contributors(breakdown, limit=2)) == 2
+
+    def test_each_factor_has_a_colour_token(self):
+        top = top_score_contributors({"match_score": 10.0, "interest_bonus": 5.0})
+        assert all(c["color"] in {"accent", "info", "priority", "save"} for c in top)
+
+    def test_additive_factors_scaled_by_recency(self):
+        # explain_score returns pre-recency factors; the surfaced points must be
+        # recency-discounted so the bars reconcile with the headline score instead
+        # of overstating an old paper's contribution.
+        breakdown = {"match_score": 40.0, "term_score": 6.0, "recency_multiplier": 0.5}
+        by_label = {c["label"]: c["value"] for c in top_score_contributors(breakdown)}
+        assert by_label["Match"] == 20.0  # 40 * 0.5
+        assert by_label["Terms"] == 3.0  # 6 * 0.5
+
+    def test_feedback_bonus_not_scaled_by_recency(self):
+        # feedback_bonus is added AFTER recency in the final score, so it is shown
+        # at full value while the additive factors are discounted.
+        breakdown = {"match_score": 10.0, "feedback_bonus": 8.0, "recency_multiplier": 0.5}
+        by_label = {c["label"]: c["value"] for c in top_score_contributors(breakdown)}
+        assert by_label["Match"] == 5.0  # 10 * 0.5
+        assert by_label["Feedback"] == 8.0  # unscaled
