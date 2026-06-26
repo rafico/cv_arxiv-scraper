@@ -39,17 +39,25 @@ _ARXIV_API_BASE_DELAY = 2.0
 
 # Matches a bare arXiv id (new "2401.01234" or old "math.GT/0309136" scheme),
 # stripping any leading "arXiv:" label, surrounding abs/pdf URL, or trailing
-# version suffix ("v2") so the same paper normalizes to one canonical id.
+# version suffix ("v2") so the same paper normalizes to one canonical id. The
+# legacy archive name may contain hyphens (``cond-mat``, ``q-bio``) and an
+# optional subject-class component (``.GT``, ``.str-el``) that is captured
+# separately so it can be dropped — see normalize_arxiv_id.
 _NEW_ID_RE = re.compile(r"(\d{4}\.\d{4,5})")
-_OLD_ID_RE = re.compile(r"([a-z\-]+(?:\.[A-Z]{2})?/\d{7})", re.IGNORECASE)
+_OLD_ID_RE = re.compile(r"([a-z][a-z\-]*)(?:\.[a-z][a-z\-]*)?/(\d{7})", re.IGNORECASE)
 
 
 def normalize_arxiv_id(raw: str) -> str | None:
     """Normalize a raw arXiv reference to a canonical id (no version/URL/prefix).
 
     Accepts bare ids, ``arXiv:`` prefixes, and abs/pdf URLs in either the new
-    (``2401.01234``) or legacy (``math.GT/0309136``) scheme. Returns ``None``
-    when no id can be extracted.
+    (``2401.01234``) or legacy (``cond-mat.str-el/0309136``) scheme. Returns
+    ``None`` when no id can be extracted.
+
+    For legacy ids the canonical identifier is ``archive/NNNNNNN`` — the subject
+    class (``.GT``, ``.str-el``) is metadata, not part of the id the arXiv API
+    ``id_list`` query resolves — so it is stripped and the archive lowercased
+    (``cond-mat.str-el/0309136`` -> ``cond-mat/0309136``).
     """
     if not isinstance(raw, str):
         return None
@@ -64,7 +72,7 @@ def normalize_arxiv_id(raw: str) -> str | None:
         return new_match.group(1)
     old_match = _OLD_ID_RE.search(text)
     if old_match:
-        return old_match.group(1).lower()
+        return f"{old_match.group(1).lower()}/{old_match.group(2)}"
     return None
 
 
@@ -193,6 +201,18 @@ def _saved_paper_count() -> int:
     )
 
 
+def _has_save_feedback(paper_id: int) -> bool:
+    """True when ``paper_id`` already carries a ``save`` feedback row."""
+    from app.models import PaperFeedback, db
+
+    return (
+        db.session.query(PaperFeedback.id)
+        .filter(PaperFeedback.paper_id == paper_id, PaperFeedback.action == "save")
+        .first()
+        is not None
+    )
+
+
 def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
     """Ingest ``arxiv_ids`` as implicit saves to seed the interest profile.
 
@@ -252,12 +272,17 @@ def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
                 continue
 
         _embed_paper(app, paper)
-        try:
-            apply_feedback_action(paper.id, "save")
-        except Exception:
-            LOGGER.warning("Bootstrap save failed for %s (non-fatal)", arxiv_id, exc_info=True)
-            summary["failed"].append(arxiv_id)
-            continue
+        # apply_feedback_action TOGGLES, so calling it on a paper that is already
+        # saved would UNSAVE it (and corrupt saved_total). Only add a save when the
+        # paper does not already carry one — re-running bootstrap or pasting an
+        # already-saved id is then idempotent.
+        if not _has_save_feedback(paper.id):
+            try:
+                apply_feedback_action(paper.id, "save")
+            except Exception:
+                LOGGER.warning("Bootstrap save failed for %s (non-fatal)", arxiv_id, exc_info=True)
+                summary["failed"].append(arxiv_id)
+                continue
 
         if already_present:
             summary["already_present"].append(arxiv_id)

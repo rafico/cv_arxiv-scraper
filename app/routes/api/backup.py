@@ -51,7 +51,13 @@ def backup_import():
             config_path=config_path,
         )
     except ValueError as exc:
+        # Malformed / unsupported / oversized archive — a client error.
         return jsonify({"error": str(exc)}), 400
+    except OSError as exc:
+        # I/O failure during restore (disk full, permissions, read-only fs). The
+        # restore rolls back on its own; surface a clean error instead of a 500.
+        current_app.logger.exception("Backup restore failed with an OS error")
+        return jsonify({"error": f"Restore failed: {exc}"}), 500
 
     # Best-effort reset of the embedding singleton so the freshly restored FAISS
     # index is reloaded without a full process restart. The reload is still only

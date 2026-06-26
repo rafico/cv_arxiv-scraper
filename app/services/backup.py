@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import sqlite3
 import tarfile
 import tempfile
@@ -17,6 +18,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = 1
+
+# Upper bound on the total *decompressed* size of an imported archive. Caps a
+# decompression bomb (a tiny gzip expanding to gigabytes) that would otherwise
+# fill the disk during extraction — MAX_CONTENT_LENGTH only limits the compressed
+# upload. The effective budget is the smaller of this ceiling and
+# ``compressed_size * _MAX_COMPRESSION_RATIO`` (with a small floor), so legitimate
+# backups always fit while pathological ratios are rejected before any bytes land.
+_MAX_EXTRACT_BYTES = 1024 * 1024 * 1024
+_MAX_COMPRESSION_RATIO = 100
+_MIN_EXTRACT_BUDGET = 16 * 1024 * 1024
 
 # Archive member names (kept stable so older/newer backups stay readable).
 _DB_MEMBER = "arxiv_papers.db"
@@ -71,13 +82,24 @@ def create_backup(
         snapshot_path = Path(tmp_dir) / _DB_MEMBER
         has_db = _snapshot_database(db_path, snapshot_path)
 
+        # Snapshot the FAISS index into the temp dir up front so the archive holds a
+        # single point-in-time copy of the index files. Streaming them straight from
+        # the live dir during the (longer) tar write could otherwise capture
+        # papers.index and id_map.json from different generations, or a half-written
+        # file, if a scrape rewrites the index concurrently — yielding a backup whose
+        # index disagrees with its DB snapshot.
+        faiss_snapshot: Path | None = None
+        if faiss_dir.is_dir():
+            faiss_snapshot = Path(tmp_dir) / "faiss_index"
+            shutil.copytree(faiss_dir, faiss_snapshot)
+
         with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
             if has_db:
                 tar.add(snapshot_path, arcname=_DB_MEMBER)
                 contents.append(_DB_MEMBER)
 
-            if faiss_dir.is_dir():
-                for entry in sorted(faiss_dir.iterdir()):
+            if faiss_snapshot is not None:
+                for entry in sorted(faiss_snapshot.iterdir()):
                     if entry.is_file():
                         arcname = _FAISS_PREFIX + entry.name
                         tar.add(entry, arcname=arcname)
@@ -110,15 +132,19 @@ def _is_within(base: Path, target: Path) -> bool:
     return True
 
 
-def _safe_extract(tar: tarfile.TarFile, dest_dir: Path) -> None:
-    """Extract ``tar`` into ``dest_dir`` with path-traversal protection.
+def _safe_extract(tar: tarfile.TarFile, dest_dir: Path, *, max_total_bytes: int) -> None:
+    """Extract ``tar`` into ``dest_dir`` with path-traversal and size protection.
 
     Rejects any member that is absolute, contains a ``..`` component, or whose
-    resolved destination escapes ``dest_dir``. ``tarfile.data_filter`` is only
-    available on Python 3.12+, so the guard is implemented explicitly to keep the
+    resolved destination escapes ``dest_dir``; rejects symlink/device members; and
+    rejects the archive outright when the declared total size of its file members
+    exceeds ``max_total_bytes`` (decompression-bomb guard — checked from the tar
+    headers before a single byte is written). ``tarfile.data_filter`` is only
+    available on Python 3.12+, so the guards are implemented explicitly to keep the
     3.10 floor.
     """
     dest_root = dest_dir.resolve()
+    total_bytes = 0
     for member in tar.getmembers():
         name = member.name
         member_path = Path(name)
@@ -130,7 +156,14 @@ def _safe_extract(tar: tarfile.TarFile, dest_dir: Path) -> None:
         # Reject symlinks/hardlinks/devices: only regular files and dirs belong here.
         if not (member.isfile() or member.isdir()):
             raise ValueError(f"Unsupported archive member type: {name!r}")
-    # Members are validated above (no traversal, no links); safe to extract.
+        if member.isfile():
+            total_bytes += member.size
+            if total_bytes > max_total_bytes:
+                raise ValueError(
+                    f"Backup archive too large to restore safely "
+                    f"({total_bytes} bytes exceeds the {max_total_bytes}-byte limit)"
+                )
+    # Members are validated above (no traversal, no links, within size budget); extract.
     # Pass the stdlib "data" filter on 3.12+ as defence-in-depth; the kwarg does
     # not exist on the 3.10 floor, where our explicit guard above is the safeguard.
     if hasattr(tarfile, "data_filter"):
@@ -153,7 +186,8 @@ def _atomic_write(target: Path, data: bytes) -> None:
     """Write ``data`` to ``target`` atomically (tempfile + replace, in-place fallback).
 
     Mirrors ``app.services.preferences.save_config``: the rename fallback covers a
-    single-file bind mount where ``os.replace`` over the mount point fails.
+    single-file bind mount where ``os.replace`` over the mount point fails. The
+    tempfile lives next to ``target``, so the replace never crosses a filesystem.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=str(target.parent), suffix=target.suffix)
@@ -172,35 +206,86 @@ def _atomic_write(target: Path, data: bytes) -> None:
             pass
 
 
-def _swap_faiss_dir(restored_dir: Path, faiss_dir: Path) -> None:
-    """Replace ``faiss_dir`` with ``restored_dir`` via a tempfile-sibling swap."""
-    faiss_dir.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(dir=str(faiss_dir.parent), prefix=".faiss_new_"))
-    # mkdtemp made an empty dir; replace it with the restored contents.
-    staging.rmdir()
-    os.replace(restored_dir, staging)
-
-    backup_old: Path | None = None
-    if faiss_dir.exists():
-        backup_old = Path(tempfile.mkdtemp(dir=str(faiss_dir.parent), prefix=".faiss_old_"))
-        backup_old.rmdir()
-        os.replace(faiss_dir, backup_old)
+def _unlink(path: Path) -> None:
+    """Best-effort removal of a single file (staged / old-backup cleanup)."""
     try:
-        os.replace(staging, faiss_dir)
+        path.unlink()
     except OSError:
-        # Roll back to the previous dir if the final swap fails.
-        if backup_old is not None and backup_old.exists():
-            os.replace(backup_old, faiss_dir)
-        raise
-    else:
-        if backup_old is not None:
-            _rmtree(backup_old)
+        pass
 
 
 def _rmtree(path: Path) -> None:
-    import shutil
-
     shutil.rmtree(path, ignore_errors=True)
+
+
+def _stage_file(src: Path, target: Path) -> Path:
+    """Copy ``src`` onto ``target``'s filesystem; return the staged sibling path.
+
+    The copy is the only cross-device-prone step, so it is done up front (before
+    any destructive swap) into ``target.parent`` — guaranteeing the later commit is
+    a same-filesystem ``os.replace`` that cannot fail with EXDEV.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, staged = tempfile.mkstemp(dir=str(target.parent), prefix="." + target.name + ".new_")
+    os.close(fd)
+    staged_path = Path(staged)
+    shutil.copy2(src, staged_path)
+    return staged_path
+
+
+def _stage_dir(src: Path, target: Path) -> Path:
+    """Copy directory ``src`` onto ``target``'s filesystem; return the staged path."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(dir=str(target.parent), prefix="." + target.name + ".new_"))
+    staging.rmdir()  # copytree requires a non-existent destination
+    shutil.copytree(src, staging)
+    return staging
+
+
+def _commit_swap(staged: Path, target: Path, *, is_dir: bool, rollbacks: list, cleanups: list) -> None:
+    """Swap a pre-staged sibling into ``target`` via same-filesystem renames.
+
+    ``staged`` and ``target`` share a filesystem, so every rename here is a cheap,
+    near-atomic ``os.replace``. The prior target (if any) is moved aside first and
+    restored immediately if the final rename fails. On success a *rollback* closure
+    (to undo this swap should a *later* component fail) and a *cleanup* closure (to
+    drop the old backup) are recorded, giving the whole restore all-or-nothing
+    semantics so the live DB is never left half-replaced.
+    """
+    old_backup: Path | None = None
+    try:
+        if target.exists():
+            prefix = "." + target.name + ".old_"
+            if is_dir:
+                old_backup = Path(tempfile.mkdtemp(dir=str(target.parent), prefix=prefix))
+                old_backup.rmdir()
+            else:
+                fd, ob = tempfile.mkstemp(dir=str(target.parent), prefix=prefix)
+                os.close(fd)
+                old_backup = Path(ob)
+                old_backup.unlink()
+            os.replace(target, old_backup)
+        os.replace(staged, target)
+    except OSError:
+        # Restore this component's original state, then surface the error.
+        if old_backup is not None and old_backup.exists():
+            os.replace(old_backup, target)
+        raise
+
+    if old_backup is not None:
+        backup = old_backup  # bind for the closures below
+
+        def _rollback() -> None:
+            # A non-empty dir cannot be a rename destination, so drop the new
+            # target before restoring the old one.
+            if target.exists():
+                _rmtree(target) if is_dir else _unlink(target)
+            os.replace(backup, target)
+
+        rollbacks.append(_rollback)
+        cleanups.append(lambda: _rmtree(backup) if is_dir else _unlink(backup))
+    else:
+        rollbacks.append(lambda: _rmtree(target) if is_dir else _unlink(target))
 
 
 def restore_backup(
@@ -212,9 +297,11 @@ def restore_backup(
 ) -> dict:
     """Restore a backup archive over the live DB, FAISS index, and config.
 
-    Raises ``ValueError`` on malformed or unsupported archives. On success the
-    restored files are swapped into place atomically and a summary dict is
-    returned.
+    Raises ``ValueError`` on malformed, unsupported, or oversized archives. The
+    restore is staged then committed as a unit: every component is first copied
+    onto its target filesystem (so the commit renames never cross a device
+    boundary), then swapped in. If any swap fails, the components already swapped
+    are rolled back, so the live DB is never left half-replaced.
     """
     db_path = Path(db_path)
     faiss_dir = Path(faiss_dir)
@@ -223,9 +310,10 @@ def restore_backup(
     restored: list[str] = []
     with tempfile.TemporaryDirectory() as tmp_dir:
         extract_dir = Path(tmp_dir)
+        max_total = min(_MAX_EXTRACT_BYTES, max(_MIN_EXTRACT_BUDGET, len(archive_bytes) * _MAX_COMPRESSION_RATIO))
         try:
             with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as tar:
-                _safe_extract(tar, extract_dir)
+                _safe_extract(tar, extract_dir, max_total_bytes=max_total)
         except tarfile.TarError as exc:
             raise ValueError(f"Not a valid backup archive: {exc}") from exc
 
@@ -242,25 +330,52 @@ def restore_backup(
         if schema_version != SCHEMA_VERSION:
             raise ValueError(f"Unsupported backup schema_version: {schema_version!r}")
 
-        # Database: atomic replace, then drop stale WAL sidecars from the old DB.
         restored_db = extract_dir / _DB_MEMBER
-        if restored_db.is_file():
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(restored_db, db_path)
-            _remove_wal_sidecars(db_path)
-            restored.append(_DB_MEMBER)
-
-        # FAISS index dir: swap the whole directory atomically.
         restored_faiss = extract_dir / "faiss_index"
-        if restored_faiss.is_dir():
-            _swap_faiss_dir(restored_faiss, faiss_dir)
-            restored.append("faiss_index/")
-
-        # config.yaml: same atomic write approach as save_config().
         restored_config = extract_dir / _CONFIG_MEMBER
-        if restored_config.is_file():
-            _atomic_write(config_path, restored_config.read_bytes())
-            restored.append(_CONFIG_MEMBER)
+
+        # Phase 1 — stage each present component onto its target filesystem. These
+        # copies are the only cross-device-prone work and run before anything
+        # destructive, so a failure here leaves the live data untouched.
+        staged_db = _stage_file(restored_db, db_path) if restored_db.is_file() else None
+        staged_faiss = _stage_dir(restored_faiss, faiss_dir) if restored_faiss.is_dir() else None
+        config_bytes = restored_config.read_bytes() if restored_config.is_file() else None
+
+        # Phase 2 — commit the staged components, rolling back everything already
+        # swapped if any step fails.
+        rollbacks: list = []
+        cleanups: list = []
+        try:
+            if staged_db is not None:
+                _commit_swap(staged_db, db_path, is_dir=False, rollbacks=rollbacks, cleanups=cleanups)
+                _remove_wal_sidecars(db_path)
+                restored.append(_DB_MEMBER)
+            if staged_faiss is not None:
+                _commit_swap(staged_faiss, faiss_dir, is_dir=True, rollbacks=rollbacks, cleanups=cleanups)
+                restored.append("faiss_index/")
+            if config_bytes is not None:
+                # config.yaml is committed last via the same atomic write as
+                # save_config(); nothing follows it, so it needs no undo backup.
+                _atomic_write(config_path, config_bytes)
+                restored.append(_CONFIG_MEMBER)
+        except BaseException:
+            for undo in reversed(rollbacks):
+                try:
+                    undo()
+                except OSError:
+                    pass
+            # Drop any staged artifacts that were never committed.
+            if staged_db is not None:
+                _unlink(staged_db)
+            if staged_faiss is not None:
+                _rmtree(staged_faiss)
+            raise
+        else:
+            for done in cleanups:
+                try:
+                    done()
+                except OSError:
+                    pass
 
     return {
         "restored": restored,

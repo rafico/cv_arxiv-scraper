@@ -276,3 +276,71 @@ item and one false positive were investigated and not fixed (see below).
   escalation is defensible hardening but the asserted hang is not reachable; deferred.
 - **(false positive) Mendeley "empty author names"** — `"".rsplit(None, 1)` returns `[]`, so
   the existing walrus guard already drops empty author components. Discarded in verification.
+
+---
+
+# Round — discovery first-wave (commit `c12aadc`)
+
+QA sweep targeting the "discovery first-wave" feature (score cards, RAG chat,
+cold-start/active-learning, one-click backup/restore). Method: 7 parallel finders
+across the changed subsystems → 3-lens adversarial verification of each candidate
+(correctness / edge-repro / severity-impact) → **14 of 20** candidates confirmed,
+6 rejected. Every code defect below is **fixed with a regression test verified to
+fail pre-fix and pass post-fix**; three "weak test" findings were hardened.
+
+Severity: **S1** crash/data-loss/security · **S2** wrong user-visible behavior ·
+**S3** cosmetic/edge.
+
+## Defects fixed (S1 / S2)
+
+| # | Sev | Area | Defect | File | Test |
+|---|-----|------|--------|------|------|
+| W1 | S1 | backup/restore | `restore_backup` moved the DB & FAISS out of the extraction tempdir with `os.replace`, which raises `OSError: Invalid cross-device link` whenever `/tmp` is a separate mount (Docker, systemd `PrivateTmp`, tmpfs) — so **import 500s on most deployments**. Now stages every component onto its target filesystem (copy) first, so commits are same-fs renames. *(backup-core-1 / wiring-1 / tests-backup-1)* | app/services/backup.py | `test_restore_survives_cross_device_tempdir` |
+| W2 | S1 | backup/restore | Restore was non-atomic: DB was `os.replace`d **first**, so a later failure (FAISS/config) left the live DB already overwritten and the **old DB unrecoverable**, paired with a stale index. Now two-phase (stage → commit) with LIFO rollback of every committed component on any failure. *(backup-core-2 / backup-sec-2)* | app/services/backup.py | `test_restore_rolls_back_when_a_later_step_fails` |
+| W3 | S1 | backup/restore (sec) | Decompression bomb: a sub-2 MiB upload (passes `MAX_CONTENT_LENGTH`) could declare gigabytes of members and `extractall` wrote them all to disk — unauthenticated local disk-exhaustion DoS. Now sums declared member sizes against a budget (`min(1 GiB, max(16 MiB, compressed×100))`) and rejects before writing a byte. *(backup-sec-1)* | app/services/backup.py | `test_rejects_oversized_archive` |
+| W4 | S2 | onboarding | Cold-start bootstrap called `apply_feedback_action(pid, "save")` unconditionally, but that helper **toggles** — re-running bootstrap (or pasting an already-saved id) **deleted** the existing save and dropped `saved_total`. Now guarded by `_has_save_feedback`, making bootstrap idempotent. *(onboarding-1)* | app/services/onboarding.py | `test_bootstrap_does_not_unsave_already_saved_paper` |
+| W5 | S2 | onboarding | `normalize_arxiv_id` corrupted legacy ids: the 2-letter subclass regex turned `cond-mat.str-el/0309136` into `str-el/0309136` (and kept a `.SUBJ` the arXiv `id_list` query doesn't resolve). Now captures the hyphenated archive + optional subclass and **drops the subclass** → `cond-mat/0309136`, the canonical resolvable id. *(onboarding-2; also the real bug behind rejected tests-onboarding-1)* | app/services/onboarding.py | `test_legacy_scheme*` |
+| W6 | S2 | ranking/score cards | The inline score bars rendered **raw, pre-recency** factor points next to a recency-discounted headline, so an old paper's bars read e.g. "Match +44" beside a headline of "1". `top_score_contributors` now scales additive factors by `recency_multiplier` (feedback bonus stays unscaled, matching the score formula). *(ranking-ui-1)* | app/services/ranking.py | `test_additive_factors_scaled_by_recency`, `test_feedback_bonus_not_scaled_by_recency` |
+| W7 | S2 | backup/import API | `backup_import` caught only `ValueError`, so any `OSError` from restore (disk full, permissions) escaped as an **unhandled 500 with a traceback**. Now returns a clean JSON 500. *(backup-core-3)* | app/routes/api/backup.py | `test_import_os_error_returns_clean_500` |
+| W8 | S2 | backup/export | `create_backup` streamed FAISS files into the tar one-by-one over the (long) write, so a concurrent index rewrite could capture `papers.index` and `id_map.json` from **different generations** (a half-written index). Now snapshots the index dir with `copytree` up front, then tars the snapshot. *(backup-core-4)* | app/services/backup.py | covered by round-trip tests (timing-dependent; mitigation, see notes) |
+
+## Tests hardened (weak-test findings; no code bug)
+
+| # | Area | Gap closed | File |
+|---|------|------------|------|
+| W9 | backup endpoint | `test_export_then_import_round_trip` asserted only response metadata — a restore that truncated the DB would still pass. Now seeds a row and re-opens the on-disk DB after import to assert real data survived the HTTP round-trip. *(tests-backup-2)* | tests/test_backup.py |
+| W10 | onboarding endpoint | No happy-path coverage for `/api/onboarding/uncertain` (only the empty case), so the populated response shape / JSON-serializable `similarity` / limit clamp were untested. Added a 3-save + candidate test. *(tests-onboarding-2)* | tests/test_onboarding.py |
+| W11 | RAG chat endpoint | `test_chat_returns_200_json_with_sources` passed via the single-saved-paper fallback even if saved-only filtering broke. Now hybrid surfaces an **unsaved** paper that must be filtered out. *(tests-rag-1)* | tests/test_rag.py |
+
+## Fix notes (judgment calls)
+
+- **W1/W2** — restore was restructured into *phase 1 stage* (the only cross-device
+  copies, before anything destructive) and *phase 2 commit* (same-fs renames with a
+  rollback/cleanup closure stack). `config.yaml` stays on the existing `_atomic_write`
+  (it is committed last, needs no undo, and keeps the single-file-bind-mount in-place
+  fallback). The old `_swap_faiss_dir` is replaced by generic `_stage_dir` / `_commit_swap`.
+- **W3** — the cap is a *ratio* (×100) with a 16 MiB floor and 1 GiB ceiling rather than a
+  flat number, so legitimate backups (binary FAISS compresses ~1×) always fit while
+  pathological ratios are rejected. The regression test shrinks `_MAX_EXTRACT_BYTES` to make
+  a normal archive trip the guard (avoids materializing a real multi-GB bomb in CI).
+- **W8** — a true consistency guarantee needs coordination with the index writer (no lock
+  primitive is exposed), so this is a **mitigation** that shrinks the inconsistency window to
+  the `copytree` duration; combined with the single-worker constraint it is effectively safe.
+  Not given a bespoke red→green test (deterministic concurrency is impractical here).
+
+## Investigated, not fixed (transparency)
+
+- **(deferred, low) Headline vs bars after a live weight change** *(ranking-ui-2, rejected
+  1/3)* — the headline uses the **stored** `paper_score` while the bars recompute from the
+  **current** config, so they can disagree in the window between a weight edit and the next
+  `recompute_all_paper_scores`. Real but transient and self-correcting; out of scope for this
+  round (separate from the W6 recency bug, which is fixed).
+- **(false positive) `_synthesize` bypasses the LLM concurrency semaphore** *(rag-1, rejected
+  1/3)* — the semaphore is **per-`LLMClient`-instance** and the RAG path builds its own client
+  issuing exactly one completion, so there is no shared global cap to defeat.
+- **(false positive) `/api/onboarding/uncertain` offline-degradation gap** *(wiring-2, 0/3)* —
+  `get_paper_vectors` reconstructs from the FAISS index and never loads SPECTER2; an empty
+  index returns `[]` and the endpoint degrades to a clean 200.
+- **(not-a-bug) `_swap_faiss_dir` rollback untested / LLM-client wiring stubbed**
+  *(tests-backup-3, tests-rag-2, 0/3)* — coverage gaps over already-correct code, no false
+  assertion. (The FAISS-rollback path is now exercised anyway via W2's test.)

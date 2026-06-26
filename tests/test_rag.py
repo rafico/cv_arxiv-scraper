@@ -178,7 +178,17 @@ class ChatEndpointTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_chat_returns_200_json_with_sources(self):
-        ranked = [{"paper_id": 1, "rrf_score": 0.5, "bm25_rank": 1, "semantic_rank": 1}]
+        # Add an UNSAVED paper and have hybrid surface it first: the endpoint must
+        # filter it out so chat is genuinely scoped to saved papers (and not just
+        # passing via the empty-results fallback).
+        saved = Paper.query.one()
+        unsaved = _make_paper(1)
+        db.session.add(unsaved)
+        db.session.commit()
+        ranked = [
+            {"paper_id": unsaved.id, "rrf_score": 0.9, "bm25_rank": 1, "semantic_rank": 1},
+            {"paper_id": saved.id, "rrf_score": 0.5, "bm25_rank": 2, "semantic_rank": 2},
+        ]
         with patch("app.services.rag.search_hybrid", return_value=ranked):
             response = self.client.post(
                 "/api/corpus/chat",
@@ -191,7 +201,9 @@ class ChatEndpointTests(FlaskDBTestCase):
         self.assertFalse(data["no_saved_papers"])
         self.assertFalse(data["llm_used"])
         self.assertIsNone(data["synthesis"])
-        self.assertEqual(len(data["sources"]), 1)
+        source_ids = [s["paper_id"] for s in data["sources"]]
+        self.assertEqual(source_ids, [saved.id])
+        self.assertNotIn(unsaved.id, source_ids)
 
     def test_chat_no_saved_papers_friendly_payload(self):
         PaperFeedback.query.delete()

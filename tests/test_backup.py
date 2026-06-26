@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
 import sqlite3
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 # Importing the route module attaches /api/backup/* to the shared api_bp blueprint
 # before FlaskDBTestCase.setUp() registers the blueprint via create_app().
@@ -106,6 +109,104 @@ class BackupServiceTests(unittest.TestCase):
         self.assertIn("arxiv_papers.db", meta["contents"])
         self.assertIn("config.yaml", meta["contents"])
         self.assertIn("faiss_index/papers.index", meta["contents"])
+
+    def test_restore_survives_cross_device_tempdir(self):
+        """Restore must work when the extraction tempdir is on another filesystem.
+
+        Regression for the EXDEV crash: restore used to ``os.replace`` files
+        straight out of the extraction tempdir into the instance dir, which fails
+        with 'Invalid cross-device link' whenever /tmp is a separate mount (Docker,
+        systemd PrivateTmp, tmpfs). We simulate a cross-fs boundary by rejecting any
+        ``os.replace`` whose source and destination live in different directories —
+        in this module those are exactly the extract->dest moves the bug performed;
+        the fix only ever renames within the destination dir.
+        """
+        db_path, faiss_dir, config_path = self._build_source()
+        archive = create_backup(
+            db_path=db_path,
+            faiss_dir=faiss_dir,
+            config_path=config_path,
+            created_at="2026-06-26T00:00:00+00:00",
+        )
+        dest = self.root / "dest"
+        dest.mkdir()
+        real_replace = os.replace
+
+        def _exdev_replace(src, dst, *args, **kwargs):
+            if os.path.dirname(os.path.realpath(src)) != os.path.dirname(os.path.realpath(dst)):
+                raise OSError(errno.EXDEV, "Invalid cross-device link")
+            return real_replace(src, dst, *args, **kwargs)
+
+        with patch("app.services.backup.os.replace", side_effect=_exdev_replace):
+            summary = restore_backup(
+                archive,
+                db_path=dest / "arxiv_papers.db",
+                faiss_dir=dest / "faiss_index",
+                config_path=dest / "config.yaml",
+            )
+
+        self.assertIn("arxiv_papers.db", summary["restored"])
+        self.assertEqual(_read_db_names(dest / "arxiv_papers.db"), ["hello-row"])
+        self.assertEqual((dest / "faiss_index" / "papers.index").read_bytes(), b"\x00\x01\x02index-bytes")
+        self.assertIn("Jane Doe", (dest / "config.yaml").read_text())
+
+    def test_restore_rolls_back_when_a_later_step_fails(self):
+        """A failure after the DB swap must leave the prior DB and FAISS intact.
+
+        Restore is all-or-nothing: if a later component fails, the DB already
+        swapped in is rolled back so the previous database is never lost.
+        """
+        db_path, faiss_dir, config_path = self._build_source()
+        archive = create_backup(
+            db_path=db_path,
+            faiss_dir=faiss_dir,
+            config_path=config_path,
+            created_at="2026-06-26T00:00:00+00:00",
+        )
+        dest = self.root / "dest"
+        dest.mkdir()
+        new_db = dest / "arxiv_papers.db"
+        new_faiss = dest / "faiss_index"
+        new_config = dest / "config.yaml"
+        # Pre-existing install that must survive a failed restore.
+        _make_db(new_db, "OLD-ROW")
+        new_faiss.mkdir()
+        (new_faiss / "papers.index").write_bytes(b"OLD-INDEX")
+        new_config.write_text("old: true\n", encoding="utf-8")
+
+        # config.yaml is committed last; make that step fail.
+        with patch("app.services.backup._atomic_write", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                restore_backup(archive, db_path=new_db, faiss_dir=new_faiss, config_path=new_config)
+
+        # The old DB and FAISS index must be intact (rolled back), not the new ones.
+        self.assertEqual(_read_db_names(new_db), ["OLD-ROW"])
+        self.assertEqual((new_faiss / "papers.index").read_bytes(), b"OLD-INDEX")
+
+    def test_rejects_oversized_archive(self):
+        """A decompression bomb (huge declared size) is rejected before extraction."""
+        db_path, faiss_dir, config_path = self._build_source()
+        archive = create_backup(
+            db_path=db_path,
+            faiss_dir=faiss_dir,
+            config_path=config_path,
+            created_at="2026-06-26T00:00:00+00:00",
+        )
+        dest = self.root / "dest"
+        dest.mkdir()
+        # Shrink the budget so the (legitimate) archive trips the size guard,
+        # standing in for a bomb whose declared member sizes exceed the cap.
+        with patch("app.services.backup._MAX_EXTRACT_BYTES", 8):
+            with self.assertRaises(ValueError) as ctx:
+                restore_backup(
+                    archive,
+                    db_path=dest / "arxiv_papers.db",
+                    faiss_dir=dest / "faiss_index",
+                    config_path=dest / "config.yaml",
+                )
+        self.assertIn("too large", str(ctx.exception))
+        # Nothing was written to the destination.
+        self.assertFalse((dest / "arxiv_papers.db").exists())
 
     def test_restore_removes_stale_wal_sidecars(self):
         db_path, faiss_dir, config_path = self._build_source()
@@ -244,6 +345,26 @@ class BackupEndpointTests(FlaskDBTestCase):
 
     def test_export_then_import_round_trip(self):
         token = self._csrf_token()
+
+        # Seed a known row so we can prove real DB data survives the HTTP round-trip
+        # (not just that the response metadata looks right).
+        from app.models import Paper, db
+
+        db.session.add(
+            Paper(
+                arxiv_id="2606.99999",
+                title="Round Trip",
+                authors="A. Author",
+                link="https://arxiv.org/abs/2606.99999",
+                pdf_link="https://arxiv.org/pdf/2606.99999",
+                match_type="Title",
+                paper_score=1.0,
+                publication_date="2026-01-01",
+                scraped_date="2026-01-01",
+            )
+        )
+        db.session.commit()
+
         export = self.client.get("/api/backup/export")
         self.assertEqual(export.status_code, 200)
 
@@ -257,6 +378,29 @@ class BackupEndpointTests(FlaskDBTestCase):
         payload = response.get_json()
         self.assertEqual(payload["schema_version"], SCHEMA_VERSION)
         self.assertIn("Restart the app", payload["note"])
+
+        # The restored DB on disk must actually contain the seeded row.
+        db_file = db.engine.url.database
+        conn = sqlite3.connect(db_file)
+        try:
+            rows = conn.execute("SELECT arxiv_id FROM papers WHERE arxiv_id = ?", ("2606.99999",)).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(rows, [("2606.99999",)])
+
+    def test_import_os_error_returns_clean_500(self):
+        """An OSError during restore is surfaced as JSON, not an unhandled 500."""
+        token = self._csrf_token()
+        export = self.client.get("/api/backup/export")
+        with patch("app.routes.api.backup.restore_backup", side_effect=OSError("disk full")):
+            response = self.client.post(
+                "/api/backup/import",
+                data={"backup": (io.BytesIO(export.data), "backup.tar.gz")},
+                headers={"X-CSRF-Token": token},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("error", response.get_json())
 
 
 if __name__ == "__main__":

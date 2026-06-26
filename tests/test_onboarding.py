@@ -124,7 +124,17 @@ class NormalizeArxivIdTests(unittest.TestCase):
         self.assertEqual(normalize_arxiv_id("http://arxiv.org/pdf/2401.01234"), "2401.01234")
 
     def test_legacy_scheme(self):
-        self.assertEqual(normalize_arxiv_id("arXiv:math.GT/0309136"), "math.gt/0309136")
+        # The subject class (".GT") is metadata, not part of the canonical id the
+        # arXiv API resolves, so it is stripped: math.GT/0309136 -> math/0309136.
+        self.assertEqual(normalize_arxiv_id("arXiv:math.GT/0309136"), "math/0309136")
+
+    def test_legacy_scheme_multichar_subcategory(self):
+        # cond-mat.str-el used to corrupt to "str-el/0309136" (the greedy 2-letter
+        # subclass match); the hyphenated archive must be preserved and the subclass
+        # dropped.
+        self.assertEqual(normalize_arxiv_id("cond-mat.str-el/0309136"), "cond-mat/0309136")
+        self.assertEqual(normalize_arxiv_id("arXiv:q-bio.NC/0511032"), "q-bio/0511032")
+        self.assertEqual(normalize_arxiv_id("https://arxiv.org/abs/math/0309136"), "math/0309136")
 
     def test_empty_and_garbage(self):
         self.assertIsNone(normalize_arxiv_id(""))
@@ -202,6 +212,34 @@ class BootstrapTests(FlaskDBTestCase):
         self.assertEqual(summary["requested"], 0)
         self.assertEqual(summary["ingested"], [])
         self.assertFalse(summary["profile_active"])
+
+    def test_bootstrap_does_not_unsave_already_saved_paper(self):
+        # A paper the user already saved must stay saved when bootstrapped again —
+        # apply_feedback_action is a TOGGLE, so an unguarded call would unsave it.
+        existing = _make_paper("2401.00001")
+        db.session.add(existing)
+        db.session.commit()
+        existing_id = existing.id
+        db.session.add(PaperFeedback(paper_id=existing_id, action="save"))
+        db.session.commit()
+
+        recompute = MagicMock(return_value=0)
+        patches = self._patches()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patch("app.services.interest_model.recompute_interest_similarities", recompute),
+        ):
+            summary = bootstrap_from_arxiv_ids(["2401.00001"], app=self.app)
+
+        self.assertEqual(
+            PaperFeedback.query.filter_by(paper_id=existing_id, action="save").count(),
+            1,
+        )
+        self.assertEqual(summary["already_present"], ["2401.00001"])
+        self.assertEqual(summary["failed"], [])
+        self.assertEqual(summary["saved_total"], 1)
 
 
 class SelectUncertainTests(FlaskDBTestCase):
@@ -328,6 +366,33 @@ class OnboardingEndpointTests(FlaskDBTestCase):
         self.assertEqual(data["papers"], [])
         self.assertEqual(data["min_saves"], 3)
         self.assertEqual(data["saved_total"], 0)
+
+    def test_uncertain_endpoint_returns_papers(self):
+        # 3 saved papers (centroid on axis 0) + one clean orthogonal candidate.
+        for i in range(3):
+            paper = _make_paper(f"2401.6000{i}")
+            db.session.add(paper)
+            db.session.flush()
+            db.session.add(PaperFeedback(paper_id=paper.id, action="save"))
+            self.service.vectors_by_id[paper.id] = _basis_vector(0)
+        candidate = _make_paper("2401.70001")
+        db.session.add(candidate)
+        db.session.flush()
+        self.service.vectors_by_id[candidate.id] = _basis_vector(1)
+        db.session.commit()
+
+        with patch("app.services.onboarding.get_embedding_service", return_value=self.service):
+            response = self.client.get("/api/onboarding/uncertain?limit=1")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["saved_total"], 3)
+        self.assertEqual(len(data["papers"]), 1)
+        entry = data["papers"][0]
+        self.assertEqual(entry["paper_id"], candidate.id)
+        self.assertIn("title", entry)
+        self.assertIn("authors", entry)
+        self.assertIsInstance(entry["similarity"], float)
 
 
 if __name__ == "__main__":
