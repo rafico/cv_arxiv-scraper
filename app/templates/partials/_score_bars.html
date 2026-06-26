@@ -1,0 +1,17 @@
+{# Compact inline "score card": the top score contributors as colored bars.
+   Visible at a glance on the row/card without expanding the full breakdown.
+   Gated by the `display.show_score_breakdown_bars` preference.
+   Context: `paper` (needs `top_contributors`, `rank_score_value`), `preferences`. #}
+{% if preferences.display.show_score_breakdown_bars and paper.top_contributors %}
+<div class="score-bars mt-1.5 flex items-center gap-2 flex-wrap"
+     title="Score {{ '%.1f'|format(paper.rank_score_value) }} — top factors: {% for c in paper.top_contributors %}{{ c.label }} +{{ '%.1f'|format(c.value) }}{% if not loop.last %}, {% endif %}{% endfor %}">
+    <span class="text-[11px] font-semibold text-fg-subtle tabular-nums">{{ '%.0f'|format(paper.rank_score_value) }}</span>
+    {% for c in paper.top_contributors %}
+    <span class="inline-flex items-center gap-1" aria-hidden="true">
+        <span class="inline-block h-1.5 rounded-full"
+              style="width: {{ 10 + (c.pct * 28 / 100)|round|int }}px; background: var(--{{ c.color }});"></span>
+        <span class="text-[11px] text-fg-subtle">{{ c.label }} +{{ '%.0f'|format(c.value) }}</span>
+    </span>
+    {% endfor %}
+</div>
+{% endif %}
