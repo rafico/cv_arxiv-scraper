@@ -30,6 +30,7 @@ from app.services.ranking import (
     combined_rank_score,
     explain_score,
     generate_ranking_explanation,
+    get_active_ranking_config,
     top_score_contributors,
 )
 from app.services.related import build_vector, top_related_papers
@@ -323,6 +324,10 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
     }
     candidate_by_id = {paper.id: paper for paper in candidate_pool}
 
+    # Resolve the active RankingConfig once for the whole page instead of issuing a
+    # fresh query + DEFAULT_PREFERENCES deepcopy inside explain_score for every row.
+    active_ranking_config = get_active_ranking_config()
+
     for paper in papers:
         feedback = feedback_snapshot.get(
             paper.id,
@@ -342,6 +347,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             interest_similarity=paper.interest_similarity,
             feedback_score=int(paper.feedback_score or 0),
             config=config,
+            ranking_config=active_ranking_config,
         )
         # Reconcile the bars to the stored paper_score the headline shows (and the
         # feed sorts by), so they agree even if ranking weights changed since the
@@ -480,7 +486,13 @@ def index():
     if sort not in valid_sorts or sort not in SORT_OPTIONS:
         sort = default_sort
 
-    if sort == "saved" and view == "saved" and not collection_id:
+    # A collection query joins PaperCollection, not PaperFeedback, so it cannot order
+    # by save-date; coerce "saved" to a real order so the sort control never advertises
+    # an ordering the query does not apply.
+    if sort == "saved" and collection_id:
+        sort = "newest"
+
+    if sort == "saved" and view == "saved":
         query = query.order_by(
             PaperFeedback.created_at.desc(),
             Paper.publication_dt.desc(),

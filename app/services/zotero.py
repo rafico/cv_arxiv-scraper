@@ -189,6 +189,21 @@ class ZoteroClient:
             return body["failed"]
         return {}
 
+    @staticmethod
+    def _successful_items(resp: requests.Response) -> dict:
+        """Extract Zotero's per-item ``successful`` map (batch-index -> created item).
+
+        Each created item carries a ``key`` we persist on the Paper so a re-sync skips
+        it instead of creating a duplicate. Defensive against non-JSON/non-dict bodies.
+        """
+        try:
+            body = resp.json()
+        except (ValueError, TypeError):
+            return {}
+        if isinstance(body, dict) and isinstance(body.get("successful"), dict):
+            return body["successful"]
+        return {}
+
     def add_item(self, paper: Paper, collection_key: str | None = None) -> dict:
         """Add a paper to the user's Zotero library.
 
@@ -221,11 +236,14 @@ class ZoteroClient:
     ) -> dict:
         """Batch sync papers to Zotero (max 50 per request).
 
-        Returns dict with ``success``, ``message``, ``synced_count``.
+        Returns dict with ``success``, ``message``, ``synced_count``, and ``item_keys``
+        (a map of the input-``papers`` index -> created Zotero item key). Callers persist
+        those keys so a re-sync skips already-synced papers instead of duplicating them.
         """
         items = [self._paper_to_zotero_item(p, collection_key) for p in papers]
         synced = 0
         rejected = 0
+        item_keys: dict[int, str] = {}
 
         for i in range(0, len(items), ZOTERO_BATCH_LIMIT):
             batch = items[i : i + ZOTERO_BATCH_LIMIT]
@@ -242,20 +260,33 @@ class ZoteroClient:
                     "success": False,
                     "message": f"Sync failed after {synced} items: {exc}",
                     "synced_count": synced,
+                    "item_keys": item_keys,
                 }
             # A 200 can still reject individual items; only count the accepted ones.
             failed = len(self._failed_items(resp))
             synced += len(batch) - failed
             rejected += failed
+            # Record the created item keys against their global paper index so the caller
+            # can persist them (batch-local index + batch offset = position in `papers`).
+            for local_idx, created in self._successful_items(resp).items():
+                try:
+                    global_idx = i + int(local_idx)
+                except (TypeError, ValueError):
+                    continue
+                key = created.get("key") if isinstance(created, dict) else None
+                if key:
+                    item_keys[global_idx] = key
 
         if rejected:
             return {
                 "success": False,
                 "message": f"Synced {synced} of {len(items)} papers; Zotero rejected {rejected}.",
                 "synced_count": synced,
+                "item_keys": item_keys,
             }
         return {
             "success": True,
             "message": f"Synced {synced} papers to Zotero.",
             "synced_count": synced,
+            "item_keys": item_keys,
         }

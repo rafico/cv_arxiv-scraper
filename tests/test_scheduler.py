@@ -67,6 +67,26 @@ class SchedulerLockTests(unittest.TestCase):
 
             scheduler.stop()
 
+    def test_schedule_next_supersedes_existing_timer(self):
+        # A reschedule must cancel the previously scheduled timer before creating a new
+        # one, else a race can leave two live timers that both fire next cycle.
+        scheduler = ScrapeScheduler()
+        scheduler._enabled = True
+        scheduler._daily_at = "08:00"
+        try:
+            scheduler._schedule_next()
+            first = scheduler._timer
+            scheduler._schedule_next()
+            second = scheduler._timer
+
+            self.assertIsNotNone(first)
+            self.assertIsNot(first, second)
+            # threading.Timer.cancel() sets its `finished` event.
+            self.assertTrue(first.finished.is_set(), "superseded timer was not cancelled")
+        finally:
+            if scheduler._timer is not None:
+                scheduler._timer.cancel()
+
 
 class SchedulerDailyAtParsingTests(unittest.TestCase):
     def test_parse_daily_at_falls_back_on_invalid_values(self):

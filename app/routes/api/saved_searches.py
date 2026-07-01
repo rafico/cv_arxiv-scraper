@@ -35,7 +35,7 @@ def list_saved_searches():
 
 @api_bp.route("/saved-searches", methods=["POST"])
 def create_saved_search():
-    from app.services.saved_search import validate_saved_search
+    from app.services.saved_search import coerce_int_field, validate_saved_search
 
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
@@ -59,8 +59,8 @@ def create_saved_search():
         include_keywords=payload.get("include_keywords", []),
         exclude_keywords=payload.get("exclude_keywords", []),
         author_filters=payload.get("author_filters", []),
-        date_window_days=payload.get("date_window_days"),
-        min_citations=payload.get("min_citations"),
+        date_window_days=coerce_int_field(payload.get("date_window_days")),
+        min_citations=coerce_int_field(payload.get("min_citations")),
         methods_mentions=payload.get("methods_mentions", []),
         is_active=payload.get("is_active", True),
         notify_on_match=payload.get("notify_on_match", False),
@@ -78,7 +78,7 @@ def get_saved_search(search_id: int):
 
 @api_bp.route("/saved-searches/<int:search_id>", methods=["PUT"])
 def update_saved_search(search_id: int):
-    from app.services.saved_search import validate_saved_search
+    from app.services.saved_search import coerce_int_field, validate_saved_search
 
     validate_csrf_token()
     s = db.session.get(SavedSearch, search_id) or abort(404)
@@ -102,9 +102,9 @@ def update_saved_search(search_id: int):
         if field in payload:
             setattr(s, field, payload[field])
     if "date_window_days" in payload:
-        s.date_window_days = payload["date_window_days"]
+        s.date_window_days = coerce_int_field(payload["date_window_days"])
     if "min_citations" in payload:
-        s.min_citations = payload["min_citations"]
+        s.min_citations = coerce_int_field(payload["min_citations"])
     if "is_active" in payload:
         s.is_active = bool(payload["is_active"])
     if "notify_on_match" in payload:

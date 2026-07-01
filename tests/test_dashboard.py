@@ -58,6 +58,22 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertIn("Inbox", text)
         self.assertNotIn("Paper 29", text)
 
+    def test_pagination_preserves_active_filters(self):
+        # All 30 seeded papers have authors="Author A"; with timeframe=all that is two
+        # pages (per_page=24). The "Next" link must keep the author filter, else page 2
+        # is computed against the unfiltered query (regression: it dropped it).
+        import re
+
+        response = self.client.get("/?author=Author+A&timeframe=all&view=inbox")
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        next_hrefs = re.findall(r'href="([^"]*page=2[^"]*)"', text)
+        self.assertTrue(next_hrefs, "expected a page=2 pagination link")
+        self.assertTrue(
+            any("author=Author" in href for href in next_hrefs),
+            f"pagination link dropped the author filter: {next_hrefs}",
+        )
+
     def _add_paper(self, *, title: str, arxiv_id: str, published_days_ago: int) -> None:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         publication_dt = date.today() - timedelta(days=published_days_ago)
@@ -149,6 +165,79 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertIn("Saved", text)
         self.assertIn("Paper 0", text)
         self.assertIn("Recently Saved", text)
+
+    def test_saved_sort_in_collection_reflects_effective_order(self):
+        # A collection query joins PaperCollection, not PaperFeedback, so it cannot
+        # order by save-date. The "saved" sort inside a collection must not silently
+        # fall through to score order while the sort control still advertises "Recently
+        # Saved" — it is coerced to "newest", so the shown selection and the applied
+        # order agree (regression: label said saved, papers came back score-ordered).
+        from app.models import Collection, PaperCollection
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        newer = Paper(
+            arxiv_id="2603.5001",
+            title="Newer Lower Score",
+            authors="Author C",
+            link="https://arxiv.org/abs/2603.5001",
+            pdf_link="https://arxiv.org/pdf/2603.5001",
+            abstract_text="x",
+            match_type="Title",
+            matched_terms=["vision"],
+            paper_score=1.0,  # low score
+            feedback_score=0,
+            is_hidden=False,
+            publication_date=date.today().isoformat(),
+            publication_dt=date.today(),
+            scraped_date=date.today().isoformat(),
+            scraped_at=now,
+        )
+        older = Paper(
+            arxiv_id="2603.5002",
+            title="Older Higher Score",
+            authors="Author C",
+            link="https://arxiv.org/abs/2603.5002",
+            pdf_link="https://arxiv.org/pdf/2603.5002",
+            abstract_text="x",
+            match_type="Title",
+            matched_terms=["vision"],
+            paper_score=500.0,  # high score would win a silent score-ordered fallback
+            feedback_score=0,
+            is_hidden=False,
+            publication_date=(date.today() - timedelta(days=100)).isoformat(),
+            publication_dt=date.today() - timedelta(days=100),
+            scraped_date=date.today().isoformat(),
+            scraped_at=now,
+        )
+        db.session.add_all([newer, older])
+        db.session.commit()
+
+        collection = Collection(name="My Collection")
+        db.session.add(collection)
+        db.session.commit()
+        db.session.add_all(
+            [
+                PaperCollection(paper_id=newer.id, collection_id=collection.id),
+                PaperCollection(paper_id=older.id, collection_id=collection.id),
+            ]
+        )
+        db.session.commit()
+
+        response = self.client.get(f"/?view=saved&collection={collection.id}&sort=saved&timeframe=all")
+        text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Newer Lower Score", text)
+        self.assertIn("Older Higher Score", text)
+        # Newest-first, not score-first: the coerced "newest" order is applied.
+        self.assertLess(
+            text.index("Newer Lower Score"),
+            text.index("Older Higher Score"),
+            "collection + saved sort should coerce to newest-first, not silent score order",
+        )
+        # And the sort control advertises the order actually applied.
+        self.assertIn('value="newest" selected', text)
+        self.assertNotIn('value="saved" selected', text)
 
     def test_category_filter_limits_results(self):
         response = self.client.get("/?timeframe=all&category=cs.RO")

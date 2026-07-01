@@ -124,6 +124,9 @@ class Paper(db.Model):
     openalex_cited_by_count = db.Column(db.Integer, nullable=True)
 
     mendeley_doc_id = db.Column(db.Text, nullable=True)
+    # Zotero item key of the created library item, so re-syncing skips already-synced
+    # papers instead of duplicating them (mirrors mendeley_doc_id).
+    zotero_item_key = db.Column(db.Text, nullable=True)
 
     github_repo = db.Column(db.Text, nullable=True)
     github_stars = db.Column(db.Integer, nullable=True)

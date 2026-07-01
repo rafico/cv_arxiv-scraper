@@ -114,7 +114,7 @@ class AnswerQueryTests(FlaskDBTestCase):
         fake_response = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="Grounded answer citing RAG Paper 0."))]
         )
-        fake_client = SimpleNamespace(_create_completion=lambda **kwargs: fake_response)
+        fake_client = SimpleNamespace(complete=lambda **kwargs: fake_response)
 
         with (
             patch("app.services.rag.search_hybrid", return_value=self.ranked),
@@ -130,7 +130,7 @@ class AnswerQueryTests(FlaskDBTestCase):
         def _boom(**kwargs):
             raise RuntimeError("network down")
 
-        fake_client = SimpleNamespace(_create_completion=_boom)
+        fake_client = SimpleNamespace(complete=_boom)
         with (
             patch("app.services.rag.search_hybrid", return_value=self.ranked),
             patch("app.services.rag._build_client", return_value=fake_client),
@@ -139,6 +139,20 @@ class AnswerQueryTests(FlaskDBTestCase):
 
         self.assertIsNone(result["synthesis"])
         self.assertFalse(result["llm_used"])
+
+    def test_synthesize_uses_throttled_complete_not_private_helper(self):
+        # Regression: _synthesize must go through the throttled public complete() so chat
+        # respects max_concurrent, not reach into the private _create_completion.
+        from unittest.mock import Mock
+
+        client = Mock()
+        client.complete.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))]
+        )
+        out = rag._synthesize(client, "q", "ctx")
+        self.assertEqual(out, "answer")
+        client.complete.assert_called_once()
+        client._create_completion.assert_not_called()
 
     def test_no_saved_papers_returns_friendly_empty(self):
         # Remove all save feedback.

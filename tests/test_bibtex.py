@@ -70,6 +70,22 @@ class PaperToBibtexTests(unittest.TestCase):
         self.assertIn(r"model\_\{x\}", bib)
         self.assertIn(r"Testing \& escaping", bib)
 
+    def test_url_field_is_escaped(self):
+        # An unescaped '}'/'\'/'%'/'&' in a link closes the field early or comments out
+        # the line, corrupting the entry. The url must be escaped like the other fields.
+        paper = _make_paper(link="http://x/a}b\\c?d=e%20f&g=1")
+        bib = paper_to_bibtex(paper)
+        self.assertNotIn("url = {http://x/a}b", bib)  # the raw '}' must not appear
+        self.assertIn(r"\}", bib)
+        self.assertIn(r"\%", bib)
+        self.assertIn(r"\&", bib)
+
+    def test_authors_with_and_separator_not_re_split(self):
+        # A "Last, First"-style list joined by " and " must be passed through verbatim,
+        # not mangled by comma-splitting into bogus separate authors.
+        result = _format_bibtex_authors("Smith, John and Doe, Jane")
+        self.assertEqual(result, "Smith, John and Doe, Jane")
+
     def test_missing_optional_fields(self):
         paper = _make_paper(abstract_text="", publication_dt=None)
         bib = paper_to_bibtex(paper)

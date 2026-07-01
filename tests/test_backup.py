@@ -92,6 +92,44 @@ class BackupServiceTests(unittest.TestCase):
         self.assertEqual(json.loads((new_faiss / "id_map.json").read_text()), [1, 2, 3])
         self.assertIn("Jane Doe", new_config.read_text())
 
+    def test_db_only_restore_clears_stale_live_index(self):
+        # A DB-only backup (taken before any scrape) restored over a populated install
+        # must clear the live FAISS index — otherwise the stale index references paper
+        # ids from the previous corpus.
+        src = self.root / "src_dbonly"
+        src.mkdir()
+        db_path = src / "arxiv_papers.db"
+        _make_db(db_path, "fresh-corpus")
+        # No faiss_dir in the source, so the archive carries only the DB.
+        archive = create_backup(
+            db_path=db_path,
+            faiss_dir=src / "faiss_index",  # does not exist
+            config_path=src / "config.yaml",  # does not exist
+            created_at="2026-06-26T00:00:00+00:00",
+        )
+
+        dest = self.root / "dest_populated"
+        dest.mkdir()
+        live_db = dest / "arxiv_papers.db"
+        _make_db(live_db, "old-corpus")
+        live_faiss = dest / "faiss_index"
+        live_faiss.mkdir()
+        (live_faiss / "papers.index").write_bytes(b"stale-index")
+        (live_faiss / "id_map.json").write_text(json.dumps([10, 11, 12]))
+
+        summary = restore_backup(
+            archive,
+            db_path=live_db,
+            faiss_dir=live_faiss,
+            config_path=dest / "config.yaml",
+        )
+
+        self.assertEqual(_read_db_names(live_db), ["fresh-corpus"])
+        # The stale index files must be gone (not left disagreeing with the restored DB).
+        self.assertFalse((live_faiss / "papers.index").exists())
+        self.assertFalse((live_faiss / "id_map.json").exists())
+        self.assertIn("faiss_index/ (cleared stale)", summary["restored"])
+
     def test_metadata_contents_and_created_at(self):
         db_path, faiss_dir, config_path = self._build_source()
         archive = create_backup(
@@ -387,6 +425,23 @@ class BackupEndpointTests(FlaskDBTestCase):
         finally:
             conn.close()
         self.assertEqual(rows, [("2606.99999",)])
+
+    def test_import_accepts_archive_larger_than_default_cap(self):
+        """A real backup exceeds the 2 MiB global MAX_CONTENT_LENGTH; the import route
+        must raise its own limit so restore_backup's guard is the real limiter."""
+        token = self._csrf_token()
+        # Body larger than DEFAULT_MAX_CONTENT_LENGTH (2 MiB). Garbage bytes: the point
+        # is that the view runs (413 would mean the global cap rejected it first).
+        oversized = b"\x00" * (2 * 1024 * 1024 + 4096)
+        response = self.client.post(
+            "/api/backup/import",
+            data={"backup": (io.BytesIO(oversized), "backup.tar.gz")},
+            headers={"X-CSRF-Token": token},
+            content_type="multipart/form-data",
+        )
+        self.assertNotEqual(response.status_code, 413)
+        # The view ran and rejected the non-gzip archive as a client error.
+        self.assertEqual(response.status_code, 400)
 
     def test_import_os_error_returns_clean_500(self):
         """An OSError during restore is surfaced as JSON, not an unhandled 500."""

@@ -272,7 +272,10 @@
             ('next', pagination.has_next, pagination.next_num, 'Next'),
         ] %}
             {% if has %}
-            <a href="{{ url_for('dashboard.index', page=num, view=current_filters.view, q=current_filters.q, match_type=current_filters.match_type, timeframe=current_filters.timeframe, sort=current_filters.sort, density=current_filters.density, include_hidden='1' if current_filters.include_hidden else None, category=current_filters.category or None, resource_filter=current_filters.resource_filter if current_filters.resource_filter != 'all' else None) }}"
+            {# Carry ALL active query params (collection/venue/dataset/reading_status/#}
+            {# author/search_mode/…), overriding only page — same pattern as the density#}
+            {# toggle above. Hand-listing a subset silently dropped filters on paging. #}
+            <a href="{{ url_for('dashboard.index', **(dict(request.args.to_dict(), page=num) | safe_url_args)) }}"
                class="btn-ghost py-1.5 text-sm">{{ label }}</a>
             {% else %}
             <span class="px-3 py-1.5 text-sm rounded-lg border border-edge text-fg-subtle">{{ label }}</span>

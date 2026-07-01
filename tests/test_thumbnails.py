@@ -216,3 +216,14 @@ def test_thumbnail_warmer_dedupes_in_flight_keys(monkeypatch):
         release.set()
 
     assert calls == ["1234.5678"]
+
+
+def test_thumbnail_warmer_clears_in_flight_when_submit_fails():
+    # If submit() raises (e.g. executor shut down), _run — which clears _in_flight —
+    # never runs, so the key must be discarded here or the paper is blocked forever.
+    from app.services import thumbnail_warmer as tw
+
+    warmer = tw.ThumbnailWarmer(max_workers=1)
+    with patch.object(warmer._executor, "submit", side_effect=RuntimeError("shutdown")):
+        warmer.warm("9999.0001", "http://example/pdf", "/tmp")
+    assert "9999.0001" not in warmer._in_flight

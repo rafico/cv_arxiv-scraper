@@ -19,7 +19,7 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
 
-from app.models import Paper, db
+from app.models import Paper, RankingConfig, db
 from app.services.ranking import (
     FEEDBACK_BOOST,
     RESOURCE_SIGNAL_WEIGHT,
@@ -362,6 +362,36 @@ class CustomRankingWeightsTests(FlaskDBTestCase):
 
         refreshed = db.session.get(Paper, paper.id)
         self.assertNotAlmostEqual(refreshed.paper_score, 999.0, places=1)
+
+    def test_recompute_resolves_active_ranking_config_once(self):
+        import app.services.ranking as ranking_mod
+
+        db.session.add(RankingConfig(name="active", weights={"author_weight": 50}, is_active=True))
+        for i in range(5):
+            db.session.add(
+                Paper(
+                    arxiv_id=f"2607.{i:04d}",
+                    title=f"P{i}",
+                    authors="Alice",
+                    link=f"https://arxiv.org/abs/2607.{i:04d}",
+                    pdf_link=f"https://arxiv.org/pdf/2607.{i:04d}",
+                    match_type="Title",
+                    matched_terms=["Vision"],
+                    paper_score=1.0,
+                    feedback_score=0,
+                    is_hidden=False,
+                    publication_date=date.today().isoformat(),
+                    publication_dt=date.today(),
+                    scraped_date=date.today().isoformat(),
+                )
+            )
+        db.session.commit()
+
+        with patch.object(ranking_mod, "get_active_ranking_config", wraps=ranking_mod.get_active_ranking_config) as spy:
+            recompute_all_paper_scores(self.app)
+
+        # Resolved once for the whole recompute — not once per paper (regression: N).
+        self.assertEqual(spy.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -147,6 +147,47 @@ class SavedSearchNonStringNameTests(_ApiTestCase):
         self.assertEqual(resp.get_json()["name"], "Good Name")
 
 
+class SavedSearchIntCoercionTests(_ApiTestCase):
+    def test_int_parseable_string_persists_as_int_and_run_succeeds(self):
+        # int("1_0") == 10 passes validation, but SQLite's INTEGER affinity does NOT
+        # coerce "1_0" — it would persist as TEXT and later crash timedelta(days=...)
+        # on /run. The route must store the coerced int.
+        create = self.client.post(
+            "/api/saved-searches",
+            json={"name": "underscored", "date_window_days": "1_0"},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+        self.assertEqual(create.status_code, 201)
+        sid = create.get_json()["id"]
+
+        stored = db.session.get(SavedSearch, sid)
+        self.assertIsInstance(stored.date_window_days, int)
+        self.assertEqual(stored.date_window_days, 10)
+
+        run = self.client.post(
+            f"/api/saved-searches/{sid}/run",
+            json={},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+        self.assertEqual(run.status_code, 200)
+
+    def test_update_int_parseable_string_persists_as_int(self):
+        s = SavedSearch(name="Original", filters={})
+        db.session.add(s)
+        db.session.commit()
+        sid = s.id
+
+        resp = self.client.put(
+            f"/api/saved-searches/{sid}",
+            json={"min_citations": "1_0"},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+        self.assertEqual(resp.status_code, 200)
+        stored = db.session.get(SavedSearch, sid)
+        self.assertIsInstance(stored.min_citations, int)
+        self.assertEqual(stored.min_citations, 10)
+
+
 class HistoricalScrapeNonStringDateTests(_ApiTestCase):
     def test_non_string_start_date_returns_format_error(self):
         resp = self.client.post(

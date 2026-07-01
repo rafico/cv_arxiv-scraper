@@ -23,7 +23,11 @@ GITHUB_CACHE_TTL_HOURS = 336
 # Unauthenticated GitHub API allows 60 requests/hour.
 DEFAULT_MAX_FETCHES_PER_RUN = 25
 
-_REPO_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+# The negative lookahead rejects dot-only segments (``.``/``..``). Without it, an
+# attacker-supplied link like ``https://github.com/../user`` yields repo ``../user``,
+# and requests normalizes ``/repos/../user`` -> ``/user``, hitting unintended
+# (token-authenticated) api.github.com endpoints and corrupting enrichment fields.
+_REPO_SEGMENT_RE = re.compile(r"^(?!\.+$)[A-Za-z0-9_.-]+$")
 
 
 def extract_github_repo(resource_links: list[dict] | None) -> str | None:

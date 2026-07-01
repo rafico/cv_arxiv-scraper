@@ -11,13 +11,12 @@ This script is a fallback for headless / CLI-only environments. It will:
 Prerequisites:
   - Create a Google Cloud project: https://console.cloud.google.com/
   - Enable the Gmail API for the project.
-  - Create OAuth Client ID credentials (Web application type).
+  - Create OAuth Client ID credentials (Desktop application type).
   - Download the JSON file and save it as ``credentials.json`` in the project root.
   - Set the OAuth consent screen publishing status to "In production"
     so the refresh token does not expire after 7 days.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -55,11 +54,14 @@ def main() -> None:
     print(f"  Credentials: {CREDENTIALS_PATH}")
     print()
 
+    from app.services.secret_files import write_secret_file
+
     flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
     creds = flow.run_local_server(port=0)
 
-    TOKEN_PATH.write_text(creds.to_json())
-    os.chmod(TOKEN_PATH, 0o600)
+    # Write the OAuth refresh token atomically at 0600 — never briefly world-readable
+    # (matches the web flow in email_digest.py).
+    write_secret_file(TOKEN_PATH, creds.to_json())
 
     print(f"\nToken saved to: {TOKEN_PATH}")
     print("  Permissions: 600 (owner-only read/write)")
