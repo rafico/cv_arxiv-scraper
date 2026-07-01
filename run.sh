@@ -13,7 +13,7 @@
 #   ./run.sh export ...            # CLI: export a paper report to HTML
 #
 # Override the interpreter with: PYTHON_BIN=/path/to/python ./run.sh
-#   (or VENV=/path/to/venv ./run.sh — matches start.sh)
+#   (or VENV=/path/to/venv ./run.sh)
 set -euo pipefail
 cd "$(dirname "$0")"
 
