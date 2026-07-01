@@ -100,6 +100,7 @@ PAPER_COLUMN_DEFS = {
     "referenced_works_count": "INTEGER",
     "openalex_cited_by_count": "INTEGER",
     "mendeley_doc_id": "TEXT",
+    "zotero_item_key": "TEXT",
     "github_repo": "TEXT",
     "github_stars": "INTEGER",
     "github_license": "TEXT",

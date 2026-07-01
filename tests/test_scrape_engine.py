@@ -47,6 +47,36 @@ def _make_entry(link: str, title: str = "Paper", arxiv_id: str | None = None) ->
     }
 
 
+class ThumbnailTimeoutTests(FlaskDBTestCase):
+    def test_generation_returns_at_deadline_not_after_all_tasks(self):
+        # With slow PDF hosts, _generate_thumbnails must stop at its wall-clock deadline,
+        # not wait for every submitted task. (Regression: exiting the ThreadPoolExecutor
+        # `with` block called shutdown(wait=True), blocking on all tasks despite the
+        # map timeout — potentially for hours.)
+        import time
+
+        from app.services import scrape_engine
+
+        results = [
+            {"arxiv_id": f"2607.{i:04d}", "pdf_link": f"https://x/{i}.pdf", "pdf_content": None} for i in range(8)
+        ]
+
+        def slow_thumbnail(*args, **kwargs):
+            time.sleep(0.5)
+
+        with (
+            patch.object(scrape_engine, "_THUMBNAIL_TIMEOUT_SECONDS", 0.1),
+            patch("app.services.thumbnail_generator.generate_thumbnail", side_effect=slow_thumbnail),
+        ):
+            start = time.monotonic()
+            scrape_engine._generate_thumbnails(self.app, results, Mock())
+            elapsed = time.monotonic() - start
+
+        # New code returns ~0.1s (deadline). Old code waited for all 8 tasks across
+        # 2 batches of 4 workers = ~1.0s. A 0.5s bound cleanly separates the two.
+        self.assertLess(elapsed, 0.5, f"thumbnail fan-out blocked for {elapsed:.2f}s past its deadline")
+
+
 class SaveResultsDedupeTests(FlaskDBTestCase):
     def test_duplicate_links_in_batch_are_deduped(self):
         """Two results with the same link should not crash; second is skipped."""
@@ -90,6 +120,24 @@ class SaveResultsDedupeTests(FlaskDBTestCase):
         self.assertEqual(new_count, 1)
         self.assertEqual(skipped, 1)
         self.assertEqual(db.session.query(Paper).count(), 2)
+
+    def test_intra_batch_near_duplicate_titles_are_linked(self):
+        # Two near-duplicate NEW papers (distinct ids, same title) in one batch must be
+        # grouped: the first stays canonical, the second points at it. Regression: both
+        # got duplicate_of_id=None because existing_titles only held pre-batch rows.
+        from app.services.scrape_engine import _save_results
+
+        results = [
+            _make_result("https://arxiv.org/abs/1001", title="Vision Transformers for Dense Prediction"),
+            _make_result("https://arxiv.org/abs/1002", title="Vision Transformers for Dense Prediction"),
+        ]
+        new_count, skipped = _save_results(self.app, results)
+
+        self.assertEqual(new_count, 2)
+        self.assertEqual(skipped, 0)
+        papers = Paper.query.order_by(Paper.id).all()
+        self.assertIsNone(papers[0].duplicate_of_id)
+        self.assertEqual(papers[1].duplicate_of_id, papers[0].id)
 
     def test_all_unique_links_are_saved(self):
         """All results with unique links should be saved."""

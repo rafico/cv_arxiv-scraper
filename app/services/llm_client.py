@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import threading
@@ -101,6 +102,22 @@ class LLMClient:
             **request,
         )
 
+    def complete(self, *, system_prompt: str, user_prompt: str, max_tokens: int, temperature: float, **extra):
+        """Throttled public wrapper around ``_create_completion``.
+
+        Acquires the concurrency semaphore so external callers (e.g. the corpus chat)
+        respect ``max_concurrent`` instead of reaching into the private helper and
+        issuing an extra in-flight request beyond the configured cap.
+        """
+        with self._semaphore:
+            return self._create_completion(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **extra,
+            )
+
     def generate_tldr(self, title: str, abstract: str) -> str | None:
         system_prompt = "Produce a specific 1-2 sentence TLDR for a research paper. Keep it under 280 characters."
         user_prompt = f"Title: {title}\n\nAbstract: {abstract}"
@@ -185,7 +202,11 @@ class LLMClient:
         relevance = None
         try:
             if data.get("relevance") is not None:
-                relevance = max(1.0, min(10.0, float(data["relevance"])))
+                candidate = float(data["relevance"])
+                # A NaN survives float() and the min/max clamp silently becomes 10.0
+                # (top relevance); reject non-finite values so they fall back to None.
+                if math.isfinite(candidate):
+                    relevance = max(1.0, min(10.0, candidate))
         except (TypeError, ValueError):
             relevance = None
 

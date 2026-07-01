@@ -319,6 +319,39 @@ class AnalyzePaperTests(unittest.TestCase):
         self.assertIsNone(result["backbone"])
 
     @patch("app.services.llm_client.OpenAI")
+    def test_complete_acquires_semaphore_around_call(self, mock_openai):
+        # The public complete() wrapper must hold the concurrency semaphore for the whole
+        # call so external callers (chat) respect max_concurrent.
+        client = LLMClient("test-key", "model", "https://example.com")
+        events = []
+
+        class _TrackingSem:
+            def __enter__(self):
+                events.append("acquire")
+                return self
+
+            def __exit__(self, *exc):
+                events.append("release")
+                return False
+
+        client._semaphore = _TrackingSem()
+        mock_openai.return_value.chat.completions.create.return_value = Mock()
+
+        client.complete(system_prompt="s", user_prompt="u", max_tokens=10, temperature=0.0)
+
+        self.assertEqual(events, ["acquire", "release"])
+
+    @patch("app.services.llm_client.OpenAI")
+    def test_analyze_paper_rejects_non_finite_relevance(self, mock_openai):
+        # A NaN survives float() and the min/max clamp silently becomes 10.0 (top
+        # relevance); it must fall back to None instead of polluting ranking.
+        client = self._client_with_content(mock_openai, '{"tldr": "x", "relevance": NaN}')
+
+        result = client.analyze_paper("Title", "Abstract", "Vision")
+
+        self.assertIsNone(result["relevance"])
+
+    @patch("app.services.llm_client.OpenAI")
     def test_analyze_paper_retries_without_response_format(self, mock_openai):
         mock_create = mock_openai.return_value.chat.completions.create
         ok_response = Mock()

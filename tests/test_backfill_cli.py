@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -215,6 +216,38 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertEqual(service.index_count(), 2)
         self.assertTrue(service.has_paper(Paper.query.filter_by(arxiv_id="2601.00005").one().id))
         self.assertTrue(service.has_paper(Paper.query.filter_by(arxiv_id="2601.00006").one().id))
+
+    @patch("app.services.embeddings.EmbeddingService.encode", autospec=True)
+    def test_rebuild_does_not_predelete_live_index_before_swap(self, mock_encode):
+        # If a swap is interrupted, the live index must not have been pre-deleted
+        # (regression: it deleted papers.index/id_map.json before the os.replace calls,
+        # leaving the user with no usable index on any crash between steps).
+        index_dir = Path(self._tmpdir.name) / "faiss_index"
+        index_dir.mkdir(parents=True, exist_ok=True)
+        self.app.config["FAISS_INDEX_DIR"] = str(index_dir)
+        (index_dir / "papers.index").write_bytes(b"old-index")
+        (index_dir / "id_map.json").write_text("[999]", encoding="utf-8")
+
+        db.session.add_all([_paper("2601.00007"), _paper("2601.00008")])
+        db.session.commit()
+        mock_encode.side_effect = lambda _service, texts: np.zeros((len(texts), 768), dtype=np.float32)
+
+        real_replace = os.replace
+        calls = {"n": 0}
+
+        def flaky_replace(src, dst, *args, **kwargs):
+            # Let the first swap (papers.index) succeed, fail the second (id_map).
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("interrupted")
+            return real_replace(src, dst, *args, **kwargs)
+
+        with patch("app.cli.backfill.os.replace", side_effect=flaky_replace), self.assertRaises(OSError):
+            rebuild_semantic_index(self.app, batch_size=1, emit=lambda *_: None)
+
+        # The index dir still holds a papers.index (the first swap landed) — it was never
+        # blindly deleted up front.
+        self.assertTrue((index_dir / "papers.index").exists())
 
     @patch("app.services.enrichment._fetch_api_metadata")
     def test_backfill_comments_detects_venue_and_links(self, mock_fetch):

@@ -56,20 +56,6 @@ def _paper_index_paths(index_dir: Path) -> tuple[Path, Path]:
     return index_dir / "papers.index", index_dir / "id_map.json"
 
 
-def _remove_paper_index_files(index_dir: Path) -> int:
-    removed = 0
-    for path in (
-        index_dir / "papers.index",
-        index_dir / "id_map.json",
-        index_dir / "papers.index.tmp",
-        index_dir / "id_map.json.tmp",
-    ):
-        if path.exists():
-            path.unlink()
-            removed += 1
-    return removed
-
-
 def run_embeddings_backfill(app, *, batch_size: int = EMBEDDINGS_BATCH_SIZE, emit: Emit = print) -> int:
     from app.search_.embed_backfill import backfill_embeddings
 
@@ -112,7 +98,14 @@ def rebuild_semantic_index(app, *, batch_size: int = EMBEDDINGS_BATCH_SIZE, emit
         service.save()
         staging_index_path, staging_id_map_path = _paper_index_paths(Path(staging_dir))
         final_index_path, final_id_map_path = _paper_index_paths(index_dir)
-        removed = _remove_paper_index_files(index_dir)
+        # Count (do NOT delete) the live index files we're about to replace. os.replace
+        # overwrites atomically, so pre-deleting only widens a crash window that would
+        # leave the user with no usable index. Clean only stale .tmp leftovers, which
+        # os.replace won't overwrite.
+        removed = sum(1 for path in (final_index_path, final_id_map_path) if path.exists())
+        for tmp in (index_dir / "papers.index.tmp", index_dir / "id_map.json.tmp"):
+            if tmp.exists():
+                tmp.unlink()
 
         os.replace(staging_index_path, final_index_path)
         os.replace(staging_id_map_path, final_id_map_path)

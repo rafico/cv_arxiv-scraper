@@ -693,6 +693,25 @@ def zotero_sync():
         ),
     ).all()
 
-    result = client.sync_saved_papers(saved_papers, collection_key=collection_key)
-    flash(result["message"], "success" if result["success"] else "error")
+    # Skip papers already synced (they carry a Zotero item key), so re-running the sync
+    # never duplicates the library — mirrors the Mendeley dedup on mendeley_doc_id.
+    papers_to_sync = [paper for paper in saved_papers if not paper.zotero_item_key]
+    skipped_count = len(saved_papers) - len(papers_to_sync)
+
+    if not papers_to_sync:
+        flash(f"All {skipped_count} saved papers are already synced to Zotero.", "success")
+        return redirect(url_for("settings.view_settings", section="automation"))
+
+    result = client.sync_saved_papers(papers_to_sync, collection_key=collection_key)
+
+    item_keys = result.get("item_keys") or {}
+    for idx, key in item_keys.items():
+        papers_to_sync[idx].zotero_item_key = key
+    if item_keys:
+        db.session.commit()
+
+    message = result["message"]
+    if skipped_count:
+        message += f" ({skipped_count} already synced)"
+    flash(message, "success" if result["success"] else "error")
     return redirect(url_for("settings.view_settings", section="automation"))

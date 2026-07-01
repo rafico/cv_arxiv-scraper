@@ -288,6 +288,37 @@ def _commit_swap(staged: Path, target: Path, *, is_dir: bool, rollbacks: list, c
         rollbacks.append(lambda: _rmtree(target) if is_dir else _unlink(target))
 
 
+def _commit_removal(target: Path, *, is_dir: bool, rollbacks: list, cleanups: list) -> None:
+    """Move ``target`` aside so the restore *omits* it, recoverably.
+
+    Used when the archive restores a DB but carries no FAISS index: the live index
+    belongs to the previous corpus and its row->paper_id map would reference paper ids
+    the restored DB no longer has. We move it aside (same-fs rename, so cheap and
+    near-atomic) rather than deleting outright, and register a rollback so a *later*
+    component failure restores it — same all-or-nothing contract as ``_commit_swap``.
+    """
+    if not target.exists():
+        return
+    prefix = "." + target.name + ".old_"
+    if is_dir:
+        old_backup = Path(tempfile.mkdtemp(dir=str(target.parent), prefix=prefix))
+        old_backup.rmdir()
+    else:
+        fd, ob = tempfile.mkstemp(dir=str(target.parent), prefix=prefix)
+        os.close(fd)
+        old_backup = Path(ob)
+        old_backup.unlink()
+    os.replace(target, old_backup)
+
+    def _rollback() -> None:
+        if target.exists():
+            _rmtree(target) if is_dir else _unlink(target)
+        os.replace(old_backup, target)
+
+    rollbacks.append(_rollback)
+    cleanups.append(lambda: _rmtree(old_backup) if is_dir else _unlink(old_backup))
+
+
 def restore_backup(
     archive_bytes: bytes,
     *,
@@ -353,6 +384,13 @@ def restore_backup(
             if staged_faiss is not None:
                 _commit_swap(staged_faiss, faiss_dir, is_dir=True, rollbacks=rollbacks, cleanups=cleanups)
                 restored.append("faiss_index/")
+            elif staged_db is not None:
+                # DB restored but the archive carried no FAISS index (e.g. a backup taken
+                # before the first scrape). Any live index belongs to the previous corpus
+                # and would reference paper ids the restored DB no longer has, so drop it
+                # atomically — the index can never disagree with the restored DB.
+                _commit_removal(faiss_dir, is_dir=True, rollbacks=rollbacks, cleanups=cleanups)
+                restored.append("faiss_index/ (cleared stale)")
             if config_bytes is not None:
                 # config.yaml is committed last via the same atomic write as
                 # save_config(); nothing follows it, so it needs no undo backup.

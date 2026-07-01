@@ -26,6 +26,20 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def coerce_int_field(value: str | int | float | None) -> int | None:
+    """Coerce a validated numeric filter to a real ``int`` (``None`` stays ``None``).
+
+    ``validate_saved_search`` only *checks* that ``int(value)`` succeeds; the value must
+    then be stored as an int, not the raw JSON payload. Some strings ``int()`` accepts
+    (e.g. ``"1_0"``) are NOT coerced by SQLite's INTEGER affinity and would persist as
+    TEXT, later crashing ``timedelta(days=...)`` on ``/run`` (and mis-comparing
+    ``min_citations``). Call only after ``validate_saved_search`` has passed.
+    """
+    if value is None:
+        return None
+    return int(value)
+
+
 def validate_saved_search(data: dict) -> list[str]:
     """Validate saved search filter fields. Returns list of error messages."""
     errors = []

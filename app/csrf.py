@@ -22,5 +22,8 @@ def get_or_create_csrf_token() -> str:
 def validate_csrf_token(submitted_token: str | None = None) -> None:
     token = submitted_token or request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
     expected_token = session.get(CSRF_SESSION_KEY, "")
-    if not token or not expected_token or not compare_digest(token, expected_token):
+    # secrets.compare_digest raises TypeError on a non-ASCII str; a real token is
+    # url-safe ASCII, so treat any non-ASCII submission as invalid (400) rather than
+    # letting the TypeError become an unhandled 500 on routes without an error handler.
+    if not token or not expected_token or not token.isascii() or not compare_digest(token, expected_token):
         abort(400, description="Invalid CSRF token")
