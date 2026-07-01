@@ -41,7 +41,15 @@ class ThumbnailWarmer:
             if storage_key in self._in_flight:
                 return
             self._in_flight.add(storage_key)
-        self._executor.submit(self._run, storage_key, pdf_link, str(static_dir))
+        try:
+            self._executor.submit(self._run, storage_key, pdf_link, str(static_dir))
+        except Exception:
+            # submit() raises (e.g. RuntimeError after the executor is shut down) before
+            # _run — which clears _in_flight — is ever scheduled. Discard the key here so
+            # this paper isn't permanently blocked from a future warm.
+            with self._lock:
+                self._in_flight.discard(storage_key)
+            LOGGER.warning("Failed to enqueue thumbnail warm for %s", storage_key, exc_info=True)
 
     def _run(self, storage_key: str, pdf_link: str, static_dir: str) -> None:
         try:

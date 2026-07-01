@@ -58,6 +58,22 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertIn("Inbox", text)
         self.assertNotIn("Paper 29", text)
 
+    def test_pagination_preserves_active_filters(self):
+        # All 30 seeded papers have authors="Author A"; with timeframe=all that is two
+        # pages (per_page=24). The "Next" link must keep the author filter, else page 2
+        # is computed against the unfiltered query (regression: it dropped it).
+        import re
+
+        response = self.client.get("/?author=Author+A&timeframe=all&view=inbox")
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        next_hrefs = re.findall(r'href="([^"]*page=2[^"]*)"', text)
+        self.assertTrue(next_hrefs, "expected a page=2 pagination link")
+        self.assertTrue(
+            any("author=Author" in href for href in next_hrefs),
+            f"pagination link dropped the author filter: {next_hrefs}",
+        )
+
     def _add_paper(self, *, title: str, arxiv_id: str, published_days_ago: int) -> None:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         publication_dt = date.today() - timedelta(days=published_days_ago)

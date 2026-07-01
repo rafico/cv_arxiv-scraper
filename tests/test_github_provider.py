@@ -57,6 +57,17 @@ class ExtractGithubRepoTests(unittest.TestCase):
         self.assertIsNone(extract_github_repo([{"url": "https://github.com/lab"}]))
         self.assertIsNone(extract_github_repo(None))
 
+    def test_rejects_dot_segments_that_traverse_to_other_endpoints(self):
+        # `..` must not slip through: requests would normalize /repos/../user -> /user,
+        # hitting unintended (token-authenticated) api.github.com endpoints.
+        self.assertIsNone(extract_github_repo([{"url": "https://github.com/../user"}]))
+        self.assertIsNone(extract_github_repo([{"url": "https://github.com/../settings"}]))
+        self.assertIsNone(extract_github_repo([{"url": "https://github.com/lab/.."}]))
+        # A single-dot owner/repo is likewise not a real repo.
+        self.assertIsNone(extract_github_repo([{"url": "https://github.com/./model"}]))
+        # Legitimate repos whose names merely *contain* dots still work.
+        self.assertEqual(extract_github_repo([{"url": "https://github.com/lab/model.js"}]), "lab/model.js")
+
 
 class GitHubProviderTests(FlaskDBTestCase):
     def test_fetch_caches_after_first_fetch(self):

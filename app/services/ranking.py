@@ -313,6 +313,11 @@ def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
     updated = 0
     with app.app_context():
         config = app.config["SCRAPER_CONFIG"]
+        # Resolve the active RankingConfig ONCE. Passing it through avoids a fresh
+        # `RankingConfig.query...first()` + DEFAULT_PREFERENCES deepcopy per paper (N
+        # identical queries for a whole recompute), and guarantees every paper in the
+        # run is scored against the same weight set even if is_active flips mid-run.
+        active_ranking_config = get_active_ranking_config()
         offset = 0
         while True:
             papers = Paper.query.order_by(Paper.id).offset(offset).limit(batch_size).all()
@@ -329,6 +334,7 @@ def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
                     acceptance_status=paper.acceptance_status,
                     interest_similarity=paper.interest_similarity,
                     config=config,
+                    ranking_config=active_ranking_config,
                 )
                 updated += 1
             db.session.commit()

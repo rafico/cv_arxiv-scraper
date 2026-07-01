@@ -39,6 +39,9 @@ LOGGER = logging.getLogger(__name__)
 # child is terminated and the stage is skipped as non-fatal.
 _NATIVE_STAGE_TIMEOUT = float(os.environ.get("CV_ARXIV_NATIVE_STAGE_TIMEOUT", "900"))
 
+# Wall-clock budget for the whole thumbnail-generation fan-out (see _generate_thumbnails).
+_THUMBNAIL_TIMEOUT_SECONDS = 120.0
+
 # Serializes the FAISS index read-append-rename performed by run_isolated inside
 # _generate_embeddings / _extract_sections. The historical search
 # (POST /api/search/historical) runs the pipeline synchronously in the request
@@ -331,10 +334,39 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                                 msg,
                             )
 
+            _link_intra_batch_duplicates(papers_to_insert)
+
     return new_count, skipped
 
 
+def _link_intra_batch_duplicates(papers: list) -> None:
+    """Link near-duplicate titles that landed in the SAME batch.
+
+    ``existing_titles`` is built once from pre-existing rows, so two near-duplicate NEW
+    papers in one scrape both get ``duplicate_of_id=None`` (find_duplicates never sees
+    the sibling). After commit assigns ids, walk the inserted rows and point each later
+    near-duplicate at the first occurrence, so intra-batch dupes are grouped too.
+    """
+    from app.models import db
+    from app.services.related import find_duplicates
+
+    seen_titles: dict[int, str] = {}
+    changed = False
+    for paper in papers:
+        if paper.id is None:
+            continue  # skipped on a unique conflict during row-by-row fallback
+        if paper.duplicate_of_id is None and seen_titles:
+            dups = find_duplicates(paper.title, seen_titles)
+            if dups:
+                paper.duplicate_of_id = dups[0][0]
+                changed = True
+        seen_titles[paper.id] = paper.title
+    if changed:
+        db.session.commit()
+
+
 def _generate_thumbnails(app, results: list[dict], session: requests.Session) -> None:
+    import time
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as FuturesTimeout
 
@@ -353,13 +385,31 @@ def _generate_thumbnails(app, results: list[dict], session: requests.Session) ->
                 arxiv_id, pdf_link, static_folder, session=session, pdf_content=pdf_content, resolution=resolution
             )
 
+    # Bound the *wall-clock* time this holds the scrape worker. Note: exiting a
+    # ``with ThreadPoolExecutor`` block calls ``shutdown(wait=True)``, which waits for
+    # every already-submitted task regardless of a ``map(timeout=...)`` — so a batch of
+    # slow/unreachable PDF hosts could block for hours. Instead we submit explicitly,
+    # walk the futures under a deadline, and on timeout drop the rest with
+    # ``cancel_futures=True`` (queued tasks are cancelled; the ≤4 in-flight ones finish
+    # in the background without blocking us).
+    executor = ThreadPoolExecutor(max_workers=4)
     try:
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            # Timeout after 120s to avoid blocking the gunicorn worker
-            for _ in executor.map(worker, results, timeout=120):
-                pass
-    except FuturesTimeout:
-        LOGGER.warning("Thumbnail generation timed out after 120s, skipping remaining")
+        futures = [executor.submit(worker, res) for res in results]
+        start = time.monotonic()
+        for future in futures:
+            remaining = _THUMBNAIL_TIMEOUT_SECONDS - (time.monotonic() - start)
+            if remaining <= 0:
+                LOGGER.warning("Thumbnail generation exceeded %ss, skipping remaining", _THUMBNAIL_TIMEOUT_SECONDS)
+                break
+            try:
+                future.result(timeout=remaining)
+            except FuturesTimeout:
+                LOGGER.warning("Thumbnail generation exceeded %ss, skipping remaining", _THUMBNAIL_TIMEOUT_SECONDS)
+                break
+            except Exception:
+                LOGGER.warning("Thumbnail generation failed for one paper", exc_info=True)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _generate_embeddings(app, results: list[dict]) -> None:

@@ -71,6 +71,10 @@ def get_preferences(config: dict | None) -> dict:
             value = ranking.get(key)
             try:
                 if value is not None:
+                    # Keep the raw float; _validate_config (app/__init__.py) reads this
+                    # normalized output and rejects NaN/inf/out-of-range weights with a
+                    # ValueError at config-load and settings-save time. Silently clamping
+                    # here would defeat that validation.
                     merged["ranking"][key] = float(value)
             except (TypeError, ValueError):
                 merged["ranking"][key] = float(default_value)

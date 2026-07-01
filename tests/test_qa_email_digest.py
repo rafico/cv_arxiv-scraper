@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import stat
 import sys
 import tempfile
 import unittest
@@ -80,7 +81,9 @@ class GmailOAuthQaTests(unittest.TestCase):
 
             with (
                 patch("google_auth_oauthlib.flow.Flow.from_client_secrets_file", return_value=fake_flow),
-                patch("app.services.secret_files.os.chmod") as mock_chmod,
+                # Neutralize chmod so the assertion proves the file is *created* 0600
+                # (via mkstemp + atomic rename), not merely tightened afterward.
+                patch("app.services.secret_files.os.chmod"),
             ):
                 result = finish_oauth_flow(
                     authorization_response_url="https://example.com/callback?code=abc&state=xyz",
@@ -90,11 +93,12 @@ class GmailOAuthQaTests(unittest.TestCase):
                 )
 
             written_token = token_path.read_text(encoding="utf-8")
+            token_mode = stat.S_IMODE(token_path.stat().st_mode)
 
         self.assertTrue(result["success"])
         fake_flow.fetch_token.assert_called_once()
         self.assertEqual(written_token, '{"refresh_token":"abc"}')
-        mock_chmod.assert_called_once_with(token_path, 0o600)
+        self.assertEqual(token_mode, 0o600)
 
     def test_load_gmail_credentials_refreshes_and_persists_token(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -111,15 +115,18 @@ class GmailOAuthQaTests(unittest.TestCase):
             with (
                 patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=fake_creds),
                 patch("google.auth.transport.requests.Request", return_value=object()) as mock_request,
-                patch("app.services.secret_files.os.chmod") as mock_chmod,
+                # Neutralize chmod: the refreshed token must land 0600 via the atomic
+                # write itself, not a trailing chmod (and never through the old inode).
+                patch("app.services.secret_files.os.chmod"),
             ):
                 loaded = _load_gmail_credentials(token_path=token_path)
                 written_token = token_path.read_text(encoding="utf-8")
+                token_mode = stat.S_IMODE(token_path.stat().st_mode)
 
         self.assertIs(loaded, fake_creds)
         fake_creds.refresh.assert_called_once_with(mock_request.return_value)
         self.assertEqual(written_token, '{"access_token":"fresh"}')
-        mock_chmod.assert_called_once_with(token_path, 0o600)
+        self.assertEqual(token_mode, 0o600)
 
 
 class DigestServiceQaTests(FlaskDBTestCase):

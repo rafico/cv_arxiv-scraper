@@ -39,8 +39,7 @@ class ScrapeScheduler:
             self._app = app
             self._daily_at = daily_at
             self._enabled = True
-            if self._timer:
-                self._timer.cancel()
+            # _schedule_next cancels any existing timer before scheduling the new one.
             self._schedule_next()
 
     def stop(self) -> None:
@@ -83,12 +82,22 @@ class ScrapeScheduler:
             return
         delay = self._seconds_until(self._daily_at)
         LOGGER.info("Next scheduled scrape in %.0f seconds (at %s UTC)", delay, self._daily_at)
+        # Supersede any previously scheduled timer. Without this, a reschedule (config
+        # reload via start()) racing a firing timer's own _schedule_next can leave two
+        # live timers that both fire next cycle. Both call sites hold _lock.
+        if self._timer is not None:
+            self._timer.cancel()
         self._timer = threading.Timer(delay, self._run)
         self._timer.daemon = True
         self._timer.start()
 
     def _run(self) -> None:
-        if not self._enabled or not self._app:
+        # Snapshot enabled/app under the lock so a concurrent stop() (which sets
+        # _enabled=False and _app=None) can't tear the check from the use below.
+        with self._lock:
+            enabled = self._enabled
+            app = self._app
+        if not enabled or not app:
             return
         LOGGER.info("Scheduled scrape starting")
         try:
@@ -99,7 +108,7 @@ class ScrapeScheduler:
             # later writer silently drops the earlier run's vectors/sections.
             from app.services.jobs import SCRAPE_JOB_MANAGER
 
-            SCRAPE_JOB_MANAGER.start_or_get_active(self._app)
+            SCRAPE_JOB_MANAGER.start_or_get_active(app)
         except Exception:
             LOGGER.exception("Scheduled scrape failed")
         finally:

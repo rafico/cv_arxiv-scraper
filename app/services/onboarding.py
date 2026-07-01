@@ -336,7 +336,8 @@ def select_uncertain_papers(*, limit: int = 2, min_saves: int = 3) -> list[dict]
         return []
 
     service = get_embedding_service()
-    found_saved, saved_vectors = service.get_paper_vectors(saved_ids)
+    # Only the vectors are needed (for the centroid); the found-ids list is unused.
+    _found_saved, saved_vectors = service.get_paper_vectors(saved_ids)
     if saved_vectors.shape[0] < min_saves:
         return []
 

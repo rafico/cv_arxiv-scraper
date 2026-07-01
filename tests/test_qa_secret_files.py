@@ -42,6 +42,23 @@ class WriteSecretFileTests(FlaskDBTestCase):
             finally:
                 os.umask(old_umask)
 
+    def test_overwrite_of_looser_file_uses_fresh_0600_inode(self):
+        # Overwriting a PRE-EXISTING looser-mode secret must not write the new bytes
+        # through the old inode (os.open with O_TRUNC does not re-apply the 0600 mode to
+        # an existing file). The atomic-replace approach lands the secret on a fresh
+        # 0600 inode, so it is never present at a looser mode.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / ".secret"
+            path.write_text("old")
+            os.chmod(path, 0o644)
+            old_ino = path.stat().st_ino
+
+            write_secret_file(path, "new-secret")
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "new-secret")
+            self.assertEqual(_mode(path), 0o600)
+            self.assertNotEqual(path.stat().st_ino, old_ino)
+
 
 class WriterTocTouTests(FlaskDBTestCase):
     """Each credential writer creates 0600 even with the trailing chmod removed."""

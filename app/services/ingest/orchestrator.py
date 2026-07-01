@@ -289,13 +289,28 @@ class IngestOrchestrator:
                 user_agent=user_agent,
             )
             candidates.extend(category_candidates)
-            self._sync_state_writer(
-                category,
-                synced_through=synced_through,
-                updated_at=synced_at,
-                paper_count=len(category_candidates),
-                clear_cursor=True,
-            )
+            # The backend caps its result list at max_results, so returning exactly
+            # max_results means it hit the cap and older papers in the window remain
+            # unfetched. Advancing synced_through / clearing the cursor here would skip
+            # them permanently. Instead, keep the incremental page cursor (persisted by
+            # progress_callback) and leave last_synced_submitted_at untouched so the next
+            # run resumes the remaining older pages. A spurious "truncated" (window held
+            # exactly max_results) only defers the advance by one harmless, de-duped run.
+            truncated = len(category_candidates) >= max_results
+            if truncated:
+                self._sync_state_writer(
+                    category,
+                    updated_at=synced_at,
+                    paper_count=len(category_candidates),
+                )
+            else:
+                self._sync_state_writer(
+                    category,
+                    synced_through=synced_through,
+                    updated_at=synced_at,
+                    paper_count=len(category_candidates),
+                    clear_cursor=True,
+                )
 
         return candidates
 

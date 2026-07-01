@@ -313,6 +313,41 @@ class IngestOrchestratorTests(TestCase):
             ),
         )
 
+    def test_catch_up_truncation_keeps_cursor_and_does_not_advance(self):
+        # When the backend hits max_results (older papers remain unfetched), catch-up
+        # must NOT advance synced_through / clear the cursor — doing so would permanently
+        # skip the surplus. The incremental page cursor is left in place to resume.
+        max_results = 3
+
+        class FakeArxivBackend:
+            def fetch(self, **kwargs):
+                # Return exactly max_results candidates -> signals truncation.
+                out = []
+                for i in range(kwargs["max_results"]):
+                    c = _candidate(f"cs.CV-{i:03d}", f"cap:{i}")
+                    kwargs["progress_callback"](1, c)
+                    out.append(c)
+                return out
+
+        updates: list[tuple[str, dict]] = []
+        orchestrator = IngestOrchestrator(
+            arxiv_api_backend=FakeArxivBackend(),
+            sync_state_reader=lambda categories: {"cs.CV": datetime(2026, 1, 7, 12, 0, 0)},
+            sync_state_writer=lambda category, **kwargs: updates.append((category, kwargs)),
+            clock=lambda: datetime(2026, 1, 15, 8, 0, 0),
+        )
+
+        orchestrator.fetch(
+            mode=IngestMode.CATCH_UP,
+            categories=["cs.CV"],
+            end_dt=date(2026, 1, 15),
+            max_results=max_results,
+        )
+
+        # No final writer call may advance synced_through or clear the cursor.
+        final_writes = [kw for _, kw in updates if "synced_through" in kw or kw.get("clear_cursor")]
+        self.assertEqual(final_writes, [], f"truncated catch-up must not advance the cursor: {final_writes}")
+
     def test_catch_up_requires_sync_state_cursor_for_each_category(self):
         orchestrator = IngestOrchestrator(
             sync_state_reader=lambda categories: {"cs.CV": datetime(2026, 1, 7, 12, 0, 0)},

@@ -147,7 +147,9 @@ def _synthesize(client, query: str, context: str) -> str | None:
     """Call the low-level completion helper; return text or None on any failure."""
     user_prompt = f"Context from saved papers:\n\n{context}\n\nQuestion: {query}"
     try:
-        response = client._create_completion(
+        # Use the throttled public wrapper so chat respects the LLM concurrency cap
+        # instead of bypassing the semaphore via the private _create_completion.
+        response = client.complete(
             system_prompt=_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             max_tokens=600,

@@ -10,6 +10,81 @@ import yaml
 from tests.helpers import DefaultConfigFlaskDBTestCase, FlaskDBTestCase
 
 
+class ZoteroSyncDedupTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client = self.app.test_client()
+
+    def _csrf_token(self) -> str:
+        self.client.get("/settings")
+        with self.client.session_transaction() as session:
+            return session["settings_csrf_token"]
+
+    def _seed_saved_papers(self, n=2):
+        from app.models import Paper, PaperFeedback, db
+
+        ids = []
+        for i in range(n):
+            p = Paper(
+                arxiv_id=f"2607.{i:05d}",
+                title=f"Paper {i}",
+                authors="Author A",
+                link=f"https://arxiv.org/abs/2607.{i:05d}",
+                pdf_link=f"https://arxiv.org/pdf/2607.{i:05d}",
+                match_type="Title",
+                paper_score=1.0,
+                publication_date="2026-01-01",
+                scraped_date="2026-01-01",
+            )
+            db.session.add(p)
+            db.session.flush()
+            db.session.add(PaperFeedback(paper_id=p.id, action="save"))
+            ids.append(p.id)
+        db.session.commit()
+        return ids
+
+    def test_resync_skips_already_synced_papers(self):
+        from app.models import Paper, db
+
+        ids = self._seed_saved_papers(2)
+        sync_calls = []
+
+        class _FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def check_connection(self):
+                return {"status": "connected", "message": "ok"}
+
+            def list_collections(self):
+                return []
+
+            def sync_saved_papers(self, papers, collection_key=None):
+                sync_calls.append(list(papers))
+                return {
+                    "success": True,
+                    "message": f"Synced {len(papers)} papers to Zotero.",
+                    "synced_count": len(papers),
+                    "item_keys": {i: f"KEY{p.id}" for i, p in enumerate(papers)},
+                }
+
+        with patch("app.services.zotero.ZoteroClient", _FakeClient):
+            token = self._csrf_token()
+            r1 = self.client.post("/settings/zotero-sync", data={"csrf_token": token})
+            self.assertEqual(r1.status_code, 302)
+            # Both papers now carry a Zotero item key.
+            self.assertEqual(
+                {db.session.get(Paper, pid).zotero_item_key for pid in ids}, {f"KEY{ids[0]}", f"KEY{ids[1]}"}
+            )
+
+            r2 = self.client.post("/settings/zotero-sync", data={"csrf_token": token})
+            self.assertEqual(r2.status_code, 302)
+
+        # sync_saved_papers ran once (first POST); the re-sync short-circuited on dedup.
+        self.assertEqual(len(sync_calls), 1)
+        self.assertEqual(len(sync_calls[0]), 2)
+
+
 class SettingsRouteTests(FlaskDBTestCase):
     def setUp(self):
         super().setUp()
@@ -30,6 +105,13 @@ class SettingsRouteTests(FlaskDBTestCase):
 
     def test_settings_post_requires_valid_csrf_token(self):
         response = self.client.post("/settings", data=self._payload())
+        self.assertEqual(response.status_code, 400)
+
+    def test_non_ascii_csrf_token_returns_400_not_500(self):
+        # secrets.compare_digest raises TypeError on a non-ASCII token; on the settings
+        # blueprint (no TypeError handler) that used to surface as an unhandled 500.
+        self._csrf_token()  # establish a valid session token so we reach the compare
+        response = self.client.post("/settings", data=self._payload("abcé"))
         self.assertEqual(response.status_code, 400)
 
     def test_settings_post_saves_with_valid_csrf_token(self):

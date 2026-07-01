@@ -164,6 +164,21 @@ class ZoteroClientTests(unittest.TestCase):
         self.assertEqual(len(second_batch), 25)
 
     @patch("app.services.zotero.requests.post")
+    def test_sync_returns_created_item_keys(self, mock_post):
+        # The created item keys must be returned (mapped to the input index) so callers
+        # can persist them and skip these papers on a re-sync instead of duplicating.
+        self._write_creds()
+        resp = Mock(status_code=200)
+        resp.raise_for_status = Mock()
+        resp.json.return_value = {"successful": {"0": {"key": "AAA"}, "1": {"key": "BBB"}}, "failed": {}}
+        mock_post.return_value = resp
+
+        result = self._client().sync_saved_papers([_make_paper(), _make_paper()])
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["item_keys"], {0: "AAA", 1: "BBB"})
+
+    @patch("app.services.zotero.requests.post")
     def test_add_item_with_collection_key(self, mock_post):
         self._write_creds()
         mock_post.return_value = Mock(status_code=200)

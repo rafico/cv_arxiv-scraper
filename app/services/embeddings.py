@@ -71,16 +71,70 @@ class EmbeddingService:
         except Exception:  # pragma: no cover - older faiss builds
             pass
 
-        if self._index_path.exists() and self._id_map_path.exists():
-            self._index = faiss.read_index(str(self._index_path))
-            with open(self._id_map_path) as f:
-                self._id_map = json.load(f)
-            self._pk_to_row = {pk: row for row, pk in enumerate(self._id_map)}
-            LOGGER.info("Loaded FAISS index with %d vectors", self._index.ntotal)
-        else:
+        # Persisting is safe unless we detect a corrupt/partial on-disk pair below, in
+        # which case save() must NOT overwrite the surviving file with an empty/drifted
+        # index — that would turn a recoverable partial state into total data loss.
+        self._persistable = True
+
+        index_exists = self._index_path.exists()
+        map_exists = self._id_map_path.exists()
+
+        if not index_exists and not map_exists:
             self._index = faiss.IndexFlatIP(DIMENSION)
             self._id_map = []
             self._pk_to_row = {}
+            return
+
+        if index_exists != map_exists:
+            # Exactly one sidecar survived (a crash between save()'s two renames, or
+            # external file loss). The missing half can't be reconstructed here, so run
+            # in a degraded read-empty mode and DISABLE save — the survivor is left
+            # intact for a proper rebuild (cv-arxiv-backfill --rebuild-index).
+            LOGGER.error(
+                "FAISS index in a partial state (papers.index=%s, id_map.json=%s); starting "
+                "empty and disabling save to avoid clobbering the survivor. Rebuild to recover.",
+                index_exists,
+                map_exists,
+            )
+            self._index = faiss.IndexFlatIP(DIMENSION)
+            self._id_map = []
+            self._pk_to_row = {}
+            self._persistable = False
+            return
+
+        # Both present: load, then reconcile any length drift (a torn write leaves the
+        # index and id_map disagreeing) down to their consistent prefix so the pair can
+        # never silently mis-map rows or persist a drifted state on the next save().
+        self._index = faiss.read_index(str(self._index_path))
+        with open(self._id_map_path) as f:
+            self._id_map = json.load(f)
+
+        n = self._index.ntotal
+        m = len(self._id_map)
+        if n != m:
+            keep = min(n, m)
+            LOGGER.error(
+                "FAISS index/id_map drift (index=%d, map=%d); reconciling to %d consistent rows",
+                n,
+                m,
+                keep,
+            )
+            if n > keep:
+                self._index = self._prefix_index(self._index, keep)
+            self._id_map = self._id_map[:keep]
+
+        self._pk_to_row = {pk: row for row, pk in enumerate(self._id_map)}
+        LOGGER.info("Loaded FAISS index with %d vectors", self._index.ntotal)
+
+    @staticmethod
+    def _prefix_index(index, keep: int):
+        """Return a new flat index holding only the first ``keep`` vectors of ``index``."""
+        import faiss
+
+        new_index = faiss.IndexFlatIP(DIMENSION)
+        if keep > 0:
+            new_index.add(index.reconstruct_n(0, keep))
+        return new_index
 
     def _load_model(self):
         # Double-checked locking: without the lock, two concurrent cold-start
@@ -165,7 +219,8 @@ class EmbeddingService:
 
     def index_size(self) -> int:
         """Number of vectors in the FAISS index. Cheap — does not load the model."""
-        return int(self._index.ntotal)
+        with self._lock:
+            return int(self._index.ntotal)
 
     def search(self, query_text: str, top_k: int = 20) -> list[tuple[int, float]]:
         """Search by text query. Returns [(paper_id, score)]."""
@@ -230,21 +285,32 @@ class EmbeddingService:
         return found_ids, np.asarray(vectors, dtype=np.float32)
 
     def _ensure_section_index(self) -> None:
-        """Load or create the section-level FAISS index."""
+        """Load or create the section-level FAISS index (double-checked locking).
+
+        Mirrors _load_model: without the lock, two concurrent search_sections callers
+        could each read the index off disk and one overwrite the other's in-memory
+        state. Assign _section_id_map before _section_index so the unlocked fast-path
+        check (hasattr _section_index) never sees a half-initialized pair.
+        """
         if hasattr(self, "_section_index"):
             return
 
         import faiss
 
-        section_index_path = self._index_dir / "sections.index"
-        section_map_path = self._index_dir / "section_id_map.json"
-        if section_index_path.exists() and section_map_path.exists():
-            self._section_index = faiss.read_index(str(section_index_path))
-            with open(section_map_path) as f:
-                self._section_id_map = json.load(f)
-        else:
-            self._section_index = faiss.IndexFlatIP(DIMENSION)
-            self._section_id_map = []
+        with self._lock:
+            if hasattr(self, "_section_index"):
+                return
+            section_index_path = self._index_dir / "sections.index"
+            section_map_path = self._index_dir / "section_id_map.json"
+            if section_index_path.exists() and section_map_path.exists():
+                section_index = faiss.read_index(str(section_index_path))
+                with open(section_map_path) as f:
+                    section_id_map = json.load(f)
+            else:
+                section_index = faiss.IndexFlatIP(DIMENSION)
+                section_id_map = []
+            self._section_id_map = section_id_map
+            self._section_index = section_index
 
     def add_sections(
         self,
@@ -353,6 +419,12 @@ class EmbeddingService:
         import faiss
 
         with self._lock:
+            if not self._persistable:
+                # Loaded from a partial/corrupt on-disk state (see _load_index). Writing
+                # our empty/degraded in-memory index would clobber the surviving file.
+                LOGGER.warning("Skipping FAISS index save: loaded from a partial/corrupt state")
+                return
+
             tmp_index = str(self._index_path) + ".tmp"
             tmp_map = str(self._id_map_path) + ".tmp"
 
@@ -364,10 +436,14 @@ class EmbeddingService:
             os.replace(tmp_map, str(self._id_map_path))
 
     def has_paper(self, paper_id: int) -> bool:
-        return paper_id in self._pk_to_row
+        # Guard the read: add_papers() mutates _pk_to_row under _lock, so an unlocked
+        # read can observe an in-flux mapping.
+        with self._lock:
+            return paper_id in self._pk_to_row
 
     def index_count(self) -> int:
-        return self._index.ntotal
+        with self._lock:
+            return self._index.ntotal
 
     @property
     def index_dir(self) -> Path:

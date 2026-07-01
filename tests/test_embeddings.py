@@ -18,6 +18,64 @@ def _fake_encode(texts, **kwargs):
     return vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
 
 
+def _unit_vec():
+    v = np.full((768,), 0.1, dtype=np.float32)
+    return v / np.linalg.norm(v)
+
+
+def test_load_reconciles_index_map_drift(tmp_path):
+    # A torn write (crash between save()'s two os.replace calls) can leave the index and
+    # id_map disagreeing on length. On load they must be reconciled to the consistent
+    # prefix, not silently operated on as a drifted pair.
+    index_dir = tmp_path / "faiss_index"
+    svc = EmbeddingService(str(index_dir))
+    svc.add_papers([1, 2, 3], ["a", "b", "c"], vectors=[_unit_vec(), _unit_vec(), _unit_vec()])
+    svc.save()
+
+    # index has 3 vectors; simulate an id_map that lost its last entry.
+    (index_dir / "id_map.json").write_text("[1, 2]")
+
+    reloaded = EmbeddingService(str(index_dir))
+    assert reloaded.index_count() == 2
+    assert reloaded._id_map == [1, 2]
+    assert reloaded.has_paper(1) and not reloaded.has_paper(3)
+
+
+def test_partial_state_does_not_clobber_surviving_index(tmp_path):
+    # If only papers.index survives (id_map lost), a fresh service must run degraded and
+    # NOT overwrite the good index file on the next save — otherwise a recoverable
+    # partial state becomes total vector loss.
+    index_dir = tmp_path / "faiss_index"
+    svc = EmbeddingService(str(index_dir))
+    svc.add_papers([1, 2, 3], ["a", "b", "c"], vectors=[_unit_vec(), _unit_vec(), _unit_vec()])
+    svc.save()
+
+    index_path = index_dir / "papers.index"
+    original = index_path.read_bytes()
+    (index_dir / "id_map.json").unlink()  # lose the map only
+
+    degraded = EmbeddingService(str(index_dir))
+    assert degraded.index_count() == 0  # read-empty degraded mode
+    degraded.add_papers([9], ["z"], vectors=[_unit_vec()])
+    degraded.save()  # must be a no-op for the main index
+
+    assert index_path.read_bytes() == original  # the 3-vector index was preserved
+
+
+def test_ensure_section_index_loads_once(tmp_path):
+    # The section index uses double-checked locking: once loaded, a second call must
+    # take the fast path and not re-read the index off disk (or clobber in-memory state).
+    import faiss
+
+    svc = EmbeddingService(str(tmp_path / "faiss_index"))
+    svc._ensure_section_index()
+    first = svc._section_index
+    with patch.object(faiss, "read_index") as read_index:
+        svc._ensure_section_index()
+    read_index.assert_not_called()
+    assert svc._section_index is first
+
+
 def test_add_sections_to_index_persists_round_trip(tmp_path):
     """The isolated section-embedding helper must persist to disk so the parent can
     reload the singleton after the subprocess writes it (mirrors add_papers_to_index)."""
