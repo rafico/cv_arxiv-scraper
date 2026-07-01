@@ -486,7 +486,13 @@ def index():
     if sort not in valid_sorts or sort not in SORT_OPTIONS:
         sort = default_sort
 
-    if sort == "saved" and view == "saved" and not collection_id:
+    # A collection query joins PaperCollection, not PaperFeedback, so it cannot order
+    # by save-date; coerce "saved" to a real order so the sort control never advertises
+    # an ordering the query does not apply.
+    if sort == "saved" and collection_id:
+        sort = "newest"
+
+    if sort == "saved" and view == "saved":
         query = query.order_by(
             PaperFeedback.created_at.desc(),
             Paper.publication_dt.desc(),
