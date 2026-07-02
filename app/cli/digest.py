@@ -30,9 +30,12 @@ def main() -> None:
         )
 
     print("Preparing email digest...")
+    from google.auth.exceptions import GoogleAuthError
+    from googleapiclient.errors import HttpError
+
     try:
         info = send_digest(app, dry_run=args.dry_run)
-    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+    except (FileNotFoundError, RuntimeError, ValueError, HttpError, GoogleAuthError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 

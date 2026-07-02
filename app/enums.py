@@ -1,12 +1,6 @@
 from enum import Enum
 
 
-class ScrapeStatus(str, Enum):
-    RUNNING = "running"
-    SUCCESS = "success"
-    ERROR = "error"
-
-
 class FeedbackAction(str, Enum):
     SAVE = "save"
     SKIP = "skip"
@@ -14,10 +8,6 @@ class FeedbackAction(str, Enum):
     SKIMMED = "skimmed"
     PRIORITY = "priority"
     SHARED = "shared"
-
-
-class FeedType(str, Enum):
-    ARXIV_RSS = "arxiv_rss"
 
 
 class ReadingStatus(str, Enum):

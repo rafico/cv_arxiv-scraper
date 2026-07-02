@@ -201,7 +201,9 @@ def explain_score(
     from app.services.venues import venue_bonus
 
     preferences = resolve_ranking_preferences(config, ranking_config=ranking_config)
-    match_score = sum(preferences.get(match_type, 0.0) for match_type in match_types)
+    match_score = sum(
+        preferences.get(match_type, MATCH_TYPE_WEIGHTS.get(match_type, 0.0)) for match_type in match_types
+    )
     term_score = matched_terms_count * TERM_MATCH_WEIGHT
     resource_score = min(resource_count, 4) * RESOURCE_SIGNAL_WEIGHT
     ai_bonus = (llm_relevance_score / 10.0) * preferences["ai_weight"] if llm_relevance_score is not None else 0.0
@@ -214,10 +216,19 @@ def explain_score(
     interest_bonus = (interest_similarity or 0.0) * preferences["interest_weight"]
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
-    base_score = round(
-        (match_score + term_score + resource_score + ai_bonus + citation_bonus + venue_score + interest_bonus)
-        * recency,
-        3,
+    # Delegate the final headline score to the canonical formula so the displayed
+    # breakdown can never diverge from the stored paper_score.
+    base_score = compute_paper_score(
+        match_types=match_types,
+        matched_terms_count=matched_terms_count,
+        publication_dt=publication_dt,
+        resource_count=resource_count,
+        llm_relevance_score=llm_relevance_score,
+        citation_count=citation_count,
+        acceptance_status=acceptance_status,
+        interest_similarity=interest_similarity,
+        config=config,
+        ranking_config=ranking_config,
     )
     feedback_bonus = round(feedback_score * FEEDBACK_BOOST, 3)
     return {
@@ -350,11 +361,21 @@ def combined_rank_score(paper_score: float, feedback_score: int) -> float:
     return round(paper_score + (feedback_score * FEEDBACK_BOOST), 3)
 
 
+def rank_score_order_expr():
+    """SQL expression for the combined rank score (the query-side mirror of
+    :func:`combined_rank_score`), shared by every rank-ordered listing."""
+    from app.models import Paper, db
+
+    return db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
+
+
 def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]:
     """Generate human-readable explanation strings for why a paper was ranked."""
     explanations = []
 
-    # Match type explanations
+    # Match type explanations. Parse the raw column here (rather than the
+    # Paper.match_types property) so unit tests can exercise this with lightweight
+    # mock papers that only set ``match_type``.
     match_types = [part.strip() for part in (paper.match_type or "").split("+") if part.strip()]
     matched_terms = paper.matched_terms_list[:3]
     for mt in match_types:

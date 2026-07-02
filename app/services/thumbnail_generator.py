@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import os
-import tempfile
 import uuid
 from pathlib import Path
 
@@ -43,6 +43,9 @@ def _download_pdf(pdf_link: str, session: requests.Session | None = None) -> byt
         base_delay=1.5,
         headers={"Accept": "application/pdf"},
         session=session,
+        # Mirror the affiliation prefetch's per-PDF ceiling: a "PDF" over 50 MB is
+        # pathological and not worth buffering for a thumbnail.
+        max_bytes=50 * 1024 * 1024,
     )
     content = response.content
     if not _looks_like_pdf(content):
@@ -71,16 +74,12 @@ def _save_image_atomic(im, out_path: Path) -> None:
 
 
 def _render_thumbnail(pdf_content: bytes, out_path: Path, resolution: int = DEFAULT_THUMBNAIL_DPI) -> None:
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-        tmp.write(pdf_content)
-        tmp.flush()
-
-        with pdfplumber.open(tmp.name) as pdf:
-            if not pdf.pages:
-                raise ValueError("PDF had no pages")
-            first_page = pdf.pages[0]
-            im = first_page.to_image(resolution=resolution)
-            _save_image_atomic(im, out_path)
+    with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+        if not pdf.pages:
+            raise ValueError("PDF had no pages")
+        first_page = pdf.pages[0]
+        im = first_page.to_image(resolution=resolution)
+        _save_image_atomic(im, out_path)
 
 
 def _best_teaser_bbox(page) -> tuple[float, float, float, float] | None:
@@ -122,18 +121,14 @@ def extract_teaser_image(pdf_content: bytes, out_path: Path, resolution: int = D
     first page) — callers fall back to a full-page render.
     """
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-            tmp.write(pdf_content)
-            tmp.flush()
-
-            with pdfplumber.open(tmp.name) as pdf:
-                for page in pdf.pages[:2]:
-                    bbox = _best_teaser_bbox(page)
-                    if bbox is None:
-                        continue
-                    im = page.crop(bbox).to_image(resolution=resolution)
-                    _save_image_atomic(im, out_path)
-                    return True
+        with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+            for page in pdf.pages[:2]:
+                bbox = _best_teaser_bbox(page)
+                if bbox is None:
+                    continue
+                im = page.crop(bbox).to_image(resolution=resolution)
+                _save_image_atomic(im, out_path)
+                return True
     except Exception as exc:
         LOGGER.debug("Teaser extraction failed: %s", exc)
     return False
@@ -163,15 +158,19 @@ def generate_thumbnail(
     resolution: int = DEFAULT_THUMBNAIL_DPI,
 ) -> bool:
     """Download the PDF, then write the page-1 thumbnail and the teaser figure."""
-    thumbnails_dir = Path(static_dir) / "thumbnails"
-    thumbnails_dir.mkdir(parents=True, exist_ok=True)
+    thumbnails_dir = (Path(static_dir) / "thumbnails").resolve()
 
-    out_path = thumbnails_dir / f"{arxiv_id}.png"
-    teaser_path = thumbnails_dir / f"{arxiv_id}_teaser.png"
-    # Legacy slash-form ids (e.g. 'cs/9901001') nest under a subdir that
-    # thumbnails_dir.mkdir() above never creates; ensure it before rendering so
-    # the isolated save can't fail with a swallowed FileNotFoundError. The teaser
-    # shares the same parent.
+    out_path = (thumbnails_dir / f"{arxiv_id}.png").resolve()
+    teaser_path = (thumbnails_dir / f"{arxiv_id}_teaser.png").resolve()
+    # Defense in depth: arxiv_id derives from a remote feed link, so an id like
+    # "../../etc/pwn" would otherwise write a PNG outside static/thumbnails. Reject
+    # any id whose resolved paths escape the thumbnails dir before mkdir/write —
+    # mirrors the serving-side guard in routes/dashboard.py.
+    if not (out_path.is_relative_to(thumbnails_dir) and teaser_path.is_relative_to(thumbnails_dir)):
+        LOGGER.warning("Refusing thumbnail for unsafe arxiv_id %r (path escapes thumbnails dir)", arxiv_id)
+        return False
+    # Legacy slash-form ids (e.g. 'cs/9901001') nest under a subdir; parents=True
+    # creates the thumbnails dir and any nested subdir. The teaser shares the parent.
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if out_path.exists() and teaser_path.exists():
         return True

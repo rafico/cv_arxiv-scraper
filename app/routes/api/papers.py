@@ -1,5 +1,7 @@
 """Per-paper actions: status, notes, tags, feedback, explanations, follow/mute."""
 
+import threading
+
 from flask import abort, current_app, jsonify, request
 
 from app.csrf import validate_csrf_token
@@ -15,11 +17,18 @@ from app.services.preferences import (
     first_author_name,
 )
 
+# Serializes the non-atomic read-modify-write on a paper's user_tags JSON list.
+# SQLite (WAL) ignores SELECT ... FOR UPDATE, so two concurrent gthread requests
+# would each read the same snapshot and last-write-wins would drop a tag; a
+# process-local lock is sufficient for this single-worker app (mirrors the
+# _config write lock).
+_TAG_WRITE_LOCK = threading.Lock()
+
 
 @api_bp.route("/papers/<int:paper_id>/mendeley", methods=["POST"])
 def single_paper_mendeley(paper_id: int):
     validate_csrf_token()
-    paper = db.session.get(Paper, paper_id) or abort(404)
+    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
 
     from app.services.mendeley import MendeleyClient
 
@@ -52,7 +61,7 @@ VALID_READING_STATUSES = {status.value for status in ReadingStatus}
 @api_bp.route("/papers/<int:paper_id>/reading-status", methods=["POST"])
 def paper_reading_status(paper_id: int):
     validate_csrf_token()
-    paper = db.session.get(Paper, paper_id) or abort(404)
+    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
     payload = request.get_json(silent=True) or {}
     status = payload.get("status")
     if status is not None and not isinstance(status, str):
@@ -68,7 +77,7 @@ def paper_reading_status(paper_id: int):
 @api_bp.route("/papers/<int:paper_id>/notes", methods=["PUT"])
 def paper_notes(paper_id: int):
     validate_csrf_token()
-    paper = db.session.get(Paper, paper_id) or abort(404)
+    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
     payload = request.get_json(silent=True) or {}
     notes = payload.get("notes", "")
     if not isinstance(notes, str):
@@ -81,28 +90,36 @@ def paper_notes(paper_id: int):
 @api_bp.route("/papers/<int:paper_id>/tags", methods=["POST"])
 def paper_add_tag(paper_id: int):
     validate_csrf_token()
-    paper = db.session.get(Paper, paper_id) or abort(404)
+    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
     payload = request.get_json(silent=True) or {}
     tag = require_str(payload, "tag")
-    current = list(paper.user_tags or [])
-    if tag not in current:
-        current.append(tag)
-        paper.user_tags = current
-        db.session.commit()
+    with _TAG_WRITE_LOCK:
+        # Re-read inside the lock so the read-modify-write sees any tag a
+        # concurrent request just committed, instead of clobbering it.
+        db.session.refresh(paper)
+        current = list(paper.user_tags or [])
+        if tag not in current:
+            current.append(tag)
+            paper.user_tags = current
+            db.session.commit()
     return jsonify({"paper_id": paper.id, "user_tags": paper.user_tags})
 
 
 @api_bp.route("/papers/<int:paper_id>/tags", methods=["DELETE"])
 def paper_remove_tag(paper_id: int):
     validate_csrf_token()
-    paper = db.session.get(Paper, paper_id) or abort(404)
+    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
     payload = request.get_json(silent=True) or {}
     tag = require_str(payload, "tag")
-    current = list(paper.user_tags or [])
-    if tag in current:
-        current.remove(tag)
-        paper.user_tags = current
-        db.session.commit()
+    with _TAG_WRITE_LOCK:
+        # Re-read inside the lock so the read-modify-write sees any tag a
+        # concurrent request just committed, instead of clobbering it.
+        db.session.refresh(paper)
+        current = list(paper.user_tags or [])
+        if tag in current:
+            current.remove(tag)
+            paper.user_tags = current
+            db.session.commit()
     return jsonify({"paper_id": paper.id, "user_tags": paper.user_tags})
 
 
@@ -142,6 +159,11 @@ def bulk_feedback():
     if not isinstance(action, str):
         return jsonify({"error": "Missing 'action'"}), 400
 
+    from app.services.feedback import ALLOWED_ACTIONS
+
+    if action not in ALLOWED_ACTIONS:
+        return jsonify({"error": f"Unsupported action '{action}'"}), 400
+
     results = []
     for pid in paper_ids:
         # Only integer primary keys are valid; a dict/list id reaches SQLAlchemy as a
@@ -161,9 +183,9 @@ def paper_explain(paper_id: int):
     """Return ranking explanations for a paper."""
     from app.services.ranking import explain_score, generate_ranking_explanation
 
-    paper = db.session.get(Paper, paper_id) or abort(404)
+    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
     config = current_app.config["SCRAPER_CONFIG"]
-    match_types = [part.strip() for part in (paper.match_type or "").split("+") if part.strip()]
+    match_types = paper.match_types
     breakdown = explain_score(
         match_types=match_types,
         matched_terms_count=len(paper.matched_terms_list),
@@ -183,7 +205,7 @@ def paper_explain(paper_id: int):
 @api_bp.route("/papers/<int:paper_id>/follow", methods=["POST"])
 def follow_recommendation(paper_id: int):
     validate_csrf_token()
-    paper = db.session.get(Paper, paper_id) or abort(404)
+    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
 
     term = first_author_name(paper.authors)
     if not term:
@@ -198,7 +220,7 @@ def follow_recommendation(paper_id: int):
 @api_bp.route("/papers/<int:paper_id>/mute", methods=["POST"])
 def mute_recommendation(paper_id: int):
     validate_csrf_token()
-    paper = db.session.get(Paper, paper_id) or abort(404)
+    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
 
     term = next((tag for tag in paper.topic_tags_list if tag), "")
     if not term:

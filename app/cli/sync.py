@@ -13,6 +13,11 @@ from app.models import SyncState, db
 from app.search_.text import now_utc
 
 CHUNK_DAYS = 7
+# Mirrors the max_results cap execute_historical_scrape passes to the ingest
+# orchestrator (BACKFILL mode). When a chunk's feed count reaches this cap the
+# oldest papers were silently truncated, so we must warn instead of recording the
+# chunk as fully synced.
+INGEST_CHUNK_CAP = 2000
 Summary = dict[str, int]
 
 
@@ -90,6 +95,22 @@ def run_sync(
         for index, (chunk_start, chunk_end) in enumerate(chunks, start=1):
             emit(f"[{index}/{len(chunks)}] Syncing {category} {chunk_start.isoformat()} -> {chunk_end.isoformat()}...")
             summary = execute_historical_scrape(app, [category], chunk_start, chunk_end)
+            if int(summary.get("total_in_feed", 0)) >= INGEST_CHUNK_CAP:
+                # The ingest layer hard-truncates at the cap (descending order, so the
+                # OLDEST papers in this window were silently dropped). Recording the
+                # chunk as synced — or letting later chunks overwrite synced_through —
+                # would turn the truncation into a permanent invisible gap. Stop here
+                # without advancing state so a re-run with a smaller --chunk-days
+                # re-fetches the window.
+                for key in aggregate:
+                    aggregate[key] += int(summary.get(key, 0))
+                emit(
+                    f"[{index}/{len(chunks)}] ERROR: chunk hit the {INGEST_CHUNK_CAP}-paper ingest cap "
+                    f"({chunk_start.isoformat()} -> {chunk_end.isoformat()}); the oldest papers in this "
+                    "window were dropped. Sync state was NOT advanced — re-run this range with a smaller "
+                    "--chunk-days."
+                )
+                break
             upsert_sync_state(
                 category,
                 synced_through=chunk_end,

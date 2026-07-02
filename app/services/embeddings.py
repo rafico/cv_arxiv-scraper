@@ -6,7 +6,13 @@ import json
 import logging
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX platforms
+    fcntl = None
 
 # faiss-cpu and torch each bundle their own copy of libgomp (GNU OpenMP). Loading
 # two OpenMP runtimes into one process corrupts the heap (observed as SIGSEGV /
@@ -37,6 +43,71 @@ EMBEDDING_MODEL_CANDIDATES = tuple(
 
 _service_instance: EmbeddingService | None = None
 _service_lock = threading.Lock()
+
+# Cross-process file locks (one per resolved index dir), keyed so every caller in
+# this process shares the same reentrant object.
+_FILE_LOCKS: dict[str, _ReentrantFileLock] = {}
+_FILE_LOCKS_GUARD = threading.Lock()
+
+
+class _ReentrantFileLock:
+    """Reentrant exclusive lock spanning threads (RLock) and processes (fcntl.flock).
+
+    The in-process ``threading.Lock`` on ``EmbeddingService`` only serializes threads
+    within one process, so a CLI backfill/rebuild run against a live server's index dir
+    can race the scrape writer and clobber one side's vectors (whichever ``os.replace``
+    lands last wins). This lock serializes the whole on-disk load-modify-save sequence
+    across processes too. Reentrant so nested acquisitions in one thread
+    (add_papers_to_index -> save -> save_sections) don't self-deadlock.
+    """
+
+    def __init__(self, lock_path: Path):
+        self._lock_path = lock_path
+        self._rlock = threading.RLock()
+        self._depth = 0
+        self._fd: int | None = None
+
+    @contextmanager
+    def acquire(self):
+        self._rlock.acquire()
+        entered = False
+        try:
+            if self._depth == 0 and fcntl is not None:
+                fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                except Exception:
+                    os.close(fd)
+                    raise
+                self._fd = fd
+            self._depth += 1
+            entered = True
+            yield
+        finally:
+            if entered:
+                self._depth -= 1
+                if self._depth == 0 and self._fd is not None:
+                    try:
+                        fcntl.flock(self._fd, fcntl.LOCK_UN)
+                    finally:
+                        os.close(self._fd)
+                        self._fd = None
+            self._rlock.release()
+
+
+def _index_file_lock(index_dir: str | Path) -> _ReentrantFileLock:
+    key = str(Path(index_dir).resolve())
+    with _FILE_LOCKS_GUARD:
+        lock = _FILE_LOCKS.get(key)
+        if lock is None:
+            # Sibling of the index dir (not inside it) so the lock file survives the dir
+            # being (re)created/copied/swapped — and works before the dir exists. The
+            # parent (instance dir) is guaranteed present.
+            lock_path = Path(key).parent / (Path(key).name + ".lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            lock = _ReentrantFileLock(lock_path)
+            _FILE_LOCKS[key] = lock
+        return lock
 
 
 class EmbeddingService:
@@ -287,28 +358,63 @@ class EmbeddingService:
     def _ensure_section_index(self) -> None:
         """Load or create the section-level FAISS index (double-checked locking).
 
-        Mirrors _load_model: without the lock, two concurrent search_sections callers
-        could each read the index off disk and one overwrite the other's in-memory
-        state. Assign _section_id_map before _section_index so the unlocked fast-path
-        check (hasattr _section_index) never sees a half-initialized pair.
+        The (possibly slow) disk read happens OUTSIDE ``self._lock`` so a one-time
+        cold-start section load can't freeze concurrent paper searches/adds that share
+        ``self._lock``; the lock is held only for the brief in-memory assignment. Assign
+        _section_id_map before _section_index so the unlocked fast-path check (hasattr
+        _section_index) never sees a half-initialized pair. Mirrors _load_index's
+        partial-survivor + drift handling so a torn save_sections() can't silently
+        mis-map rows or clobber a surviving index.
         """
         if hasattr(self, "_section_index"):
             return
 
         import faiss
 
+        section_index_path = self._index_dir / "sections.index"
+        section_map_path = self._index_dir / "section_id_map.json"
+        index_exists = section_index_path.exists()
+        map_exists = section_map_path.exists()
+        sections_persistable = True
+
+        if not index_exists and not map_exists:
+            section_index = faiss.IndexFlatIP(DIMENSION)
+            section_id_map: list[dict] = []
+        elif index_exists != map_exists:
+            # One sidecar survived a crash between save_sections()'s two renames. The
+            # missing half can't be reconstructed; run read-empty and DISABLE save so
+            # the survivor is left intact for a rebuild instead of being overwritten.
+            LOGGER.error(
+                "Section FAISS index partial (sections.index=%s, section_id_map.json=%s); "
+                "starting empty and disabling section save to avoid clobbering the survivor.",
+                index_exists,
+                map_exists,
+            )
+            section_index = faiss.IndexFlatIP(DIMENSION)
+            section_id_map = []
+            sections_persistable = False
+        else:
+            section_index = faiss.read_index(str(section_index_path))
+            with open(section_map_path) as f:
+                section_id_map = json.load(f)
+            n = section_index.ntotal
+            m = len(section_id_map)
+            if n != m:
+                keep = min(n, m)
+                LOGGER.error(
+                    "Section index/id_map drift (index=%d, map=%d); reconciling to %d consistent rows",
+                    n,
+                    m,
+                    keep,
+                )
+                if n > keep:
+                    section_index = self._prefix_index(section_index, keep)
+                section_id_map = section_id_map[:keep]
+
         with self._lock:
             if hasattr(self, "_section_index"):
                 return
-            section_index_path = self._index_dir / "sections.index"
-            section_map_path = self._index_dir / "section_id_map.json"
-            if section_index_path.exists() and section_map_path.exists():
-                section_index = faiss.read_index(str(section_index_path))
-                with open(section_map_path) as f:
-                    section_id_map = json.load(f)
-            else:
-                section_index = faiss.IndexFlatIP(DIMENSION)
-                section_id_map = []
+            self._sections_persistable = sections_persistable
             self._section_id_map = section_id_map
             self._section_index = section_index
 
@@ -399,7 +505,13 @@ class EmbeddingService:
         if not hasattr(self, "_section_index"):
             return
 
-        with self._lock:
+        if not getattr(self, "_sections_persistable", True):
+            # Loaded from a partial section-index state (see _ensure_section_index);
+            # writing our empty/degraded index would clobber the surviving file.
+            LOGGER.warning("Skipping section index save: loaded from a partial/corrupt state")
+            return
+
+        with _index_file_lock(self._index_dir).acquire(), self._lock:
             section_index_path = self._index_dir / "sections.index"
             section_map_path = self._index_dir / "section_id_map.json"
 
@@ -418,7 +530,7 @@ class EmbeddingService:
         self.save_sections()
         import faiss
 
-        with self._lock:
+        with _index_file_lock(self._index_dir).acquire(), self._lock:
             if not self._persistable:
                 # Loaded from a partial/corrupt on-disk state (see _load_index). Writing
                 # our empty/degraded in-memory index would clobber the surviving file.
@@ -442,8 +554,8 @@ class EmbeddingService:
             return paper_id in self._pk_to_row
 
     def index_count(self) -> int:
-        with self._lock:
-            return self._index.ntotal
+        """Alias of :meth:`index_size` kept for existing callers (search/related/ranking)."""
+        return self.index_size()
 
     @property
     def index_dir(self) -> Path:
@@ -453,10 +565,13 @@ class EmbeddingService:
 def add_papers_to_index(index_dir: str, paper_ids: list[int], texts: list[str], vectors: list | None = None) -> int:
     """Load the on-disk index, add papers, and persist. Importable + dependency-free
     (no Flask/DB) so it can run in an isolated subprocess via run_isolated()."""
-    service = EmbeddingService(index_dir)
-    added = service.add_papers(paper_ids, texts, vectors=vectors)
-    if added:
-        service.save()
+    # Hold the cross-process index lock across load (constructor) + modify + save so a
+    # concurrent CLI/scrape writer can't interleave and drop vectors.
+    with _index_file_lock(index_dir).acquire():
+        service = EmbeddingService(index_dir)
+        added = service.add_papers(paper_ids, texts, vectors=vectors)
+        if added:
+            service.save()
     return added
 
 
@@ -464,10 +579,11 @@ def add_sections_to_index(index_dir: str, entries: list[tuple[int, str, str]]) -
     """Load the on-disk section index, add section embeddings, and persist. Importable +
     dependency-free (no Flask/DB) so it can run in an isolated subprocess via
     run_isolated() — mirrors add_papers_to_index for the torch/faiss section path."""
-    service = EmbeddingService(index_dir)
-    added = service.add_sections(entries)
-    if added:
-        service.save_sections()
+    with _index_file_lock(index_dir).acquire():
+        service = EmbeddingService(index_dir)
+        added = service.add_sections(entries)
+        if added:
+            service.save_sections()
     return added
 
 

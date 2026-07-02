@@ -17,6 +17,27 @@ LOGGER = logging.getLogger(__name__)
 
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 
+# OpenAlex made API keys mandatory (~Feb 2026); the free tier authenticates via an
+# ``api_key`` query parameter (per docs.openalex.org → developers.openalex.org).
+# Keyless requests get throttled/rejected with these statuses.
+_AUTH_FAILURE_STATUSES = frozenset({401, 403, 429})
+
+# Emit the "you need a key now" hint once per process, not once per batch — a
+# 500-paper scrape would otherwise repeat it ten times.
+_missing_key_warned = False
+
+
+def _warn_missing_key_once() -> None:
+    global _missing_key_warned
+    if _missing_key_warned:
+        return
+    _missing_key_warned = True
+    LOGGER.warning(
+        "OpenAlex now requires an API key — set one in Settings → Automation → Data Sources "
+        "(stored in .openalex_api_key) or via the OPENALEX_API_KEY env var. "
+        "Continuing without OpenAlex enrichment."
+    )
+
 
 def parse_openalex_work(work: dict) -> dict[str, Any]:
     """Extract relevant fields from an OpenAlex work object.
@@ -46,9 +67,10 @@ def parse_openalex_work(work: dict) -> dict[str, Any]:
 class OpenAlexProvider(EnrichmentProvider):
     source = "openalex"
 
-    def __init__(self, *, ttl_hours: int = DEFAULT_CACHE_TTL_HOURS, request_fn=None) -> None:
+    def __init__(self, *, ttl_hours: int = DEFAULT_CACHE_TTL_HOURS, request_fn=None, api_key: str | None = None) -> None:
         self.ttl_hours = ttl_hours
         self._request_fn = request_fn
+        self._api_key = api_key
 
     def fetch_batch(  # type: ignore[override]  # provider-specific kwargs; base Protocol uses **kwargs
         self,
@@ -57,11 +79,13 @@ class OpenAlexProvider(EnrichmentProvider):
         email: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         from app.services.http_client import request_with_backoff
+        from app.services.secret_files import resolve_data_source_key
 
         if not arxiv_ids:
             return {}
 
         request_fn = self._request_fn or request_with_backoff
+        api_key = self._api_key or resolve_data_source_key("openalex")
         cached, missing_ids, paper_by_arxiv_id = get_cached_payloads(arxiv_ids, source=self.source)
         if not missing_ids:
             return cached
@@ -81,6 +105,8 @@ class OpenAlexProvider(EnrichmentProvider):
             }
             if email:
                 params["mailto"] = email
+            if api_key:
+                params["api_key"] = api_key
 
             try:
                 response = request_fn(
@@ -90,6 +116,11 @@ class OpenAlexProvider(EnrichmentProvider):
                     session=session,
                     timeout=15,
                 )
+                # The real request_with_backoff raises on failure and always
+                # returns a truthy Response, so this guard is dead on that path.
+                # It is retained deliberately to tolerate an injected request_fn
+                # (test doubles / the fetch_openalex_batch shim) that returns a
+                # falsy/None response instead of raising.
                 if not response:
                     continue
 
@@ -111,6 +142,9 @@ class OpenAlexProvider(EnrichmentProvider):
                         # One malformed work must not abandon the rest of the batch.
                         LOGGER.warning("Skipping malformed OpenAlex work: %s", exc)
             except Exception as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status in _AUTH_FAILURE_STATUSES and not api_key:
+                    _warn_missing_key_once()
                 LOGGER.warning("Failed to fetch OpenAlex data for batch: %s", exc)
 
         store_cached_payloads(

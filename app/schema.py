@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
@@ -104,6 +104,8 @@ PAPER_COLUMN_DEFS = {
     "github_repo": "TEXT",
     "github_stars": "INTEGER",
     "github_license": "TEXT",
+    "hf_upvotes": "INTEGER",
+    "hf_comments_count": "INTEGER",
     "arxiv_comment": "TEXT",
     "venue": "TEXT",
     "venue_year": "INTEGER",
@@ -289,7 +291,9 @@ def ensure_schema() -> None:
             # discarded a real created_at. Parse it like the other date fields.
             scraped_at = _try_parse_datetime(row["created_at"])
         if scraped_at is None:
-            scraped_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            from app.services.text import now_utc  # local import (in-function convention)
+
+            scraped_at = now_utc()
 
         updates.append(
             {

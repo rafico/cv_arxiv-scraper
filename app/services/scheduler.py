@@ -69,13 +69,18 @@ class ScrapeScheduler:
             return 8, 0
         return hour, minute
 
-    def _seconds_until(self, time_str: str) -> float:
-        now = datetime.now(timezone.utc)
+    def _next_target(self, time_str: str, now: datetime | None = None) -> datetime:
+        """Return the next UTC datetime matching ``time_str`` (today, else tomorrow)."""
+        now = now or datetime.now(timezone.utc)
         hour, minute = self._parse_daily_at(time_str)
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)
-        return (target - now).total_seconds()
+        return target
+
+    def _seconds_until(self, time_str: str) -> float:
+        now = datetime.now(timezone.utc)
+        return (self._next_target(time_str, now) - now).total_seconds()
 
     def _schedule_next(self) -> None:
         if not self._enabled:
@@ -119,12 +124,7 @@ class ScrapeScheduler:
     def next_run_at(self) -> str | None:
         if not self._enabled:
             return None
-        now = datetime.now(timezone.utc)
-        hour, minute = self._parse_daily_at(self._daily_at)
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
-        return target.strftime("%Y-%m-%d %H:%M UTC")
+        return self._next_target(self._daily_at).strftime("%Y-%m-%d %H:%M UTC")
 
     @property
     def is_enabled(self) -> bool:

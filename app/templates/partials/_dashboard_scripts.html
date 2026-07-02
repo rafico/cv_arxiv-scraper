@@ -154,15 +154,26 @@
     }
 
     /* ── Reading status ── */
+    /* Seed each select's prior (persisted) value so a failed update can revert
+       to it rather than blanking the dropdown. */
+    document.querySelectorAll('.reading-status-select').forEach((sel) => {
+        if (sel.dataset.prev === undefined) sel.dataset.prev = sel.value;
+    });
+
     async function setReadingStatus(paperId, status, select) {
+        const prev = select.dataset.prev ?? "";
         try {
             const response = await fetch(`/api/papers/${paperId}/reading-status`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
                 body: JSON.stringify({ status: status || null }),
             });
-            if (!response.ok) select.value = "";
-        } catch (error) { console.error("Reading status failed", error); }
+            if (!response.ok) { select.value = prev; return; }
+            select.dataset.prev = status;
+        } catch (error) {
+            console.error("Reading status failed", error);
+            select.value = prev;
+        }
     }
 
     /* ── User notes ── */

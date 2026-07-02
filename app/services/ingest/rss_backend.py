@@ -27,13 +27,15 @@ class RssFeedBackend:
 
     @property
     def name(self) -> str:
-        return "rss_feed"
+        return "rss"
 
     def fetch(self, *, session: requests.Session | None = None, **kwargs) -> list[PaperCandidate]:
         entries: list[PaperCandidate] = []
 
         for feed_url in self.feed_urls:
-            response = request_with_backoff("GET", feed_url, timeout=30, session=session)
+            # A legitimate arXiv RSS feed is a few MB at most; cap well below the
+            # global default so a hostile/misconfigured feed can't buffer 200 MB.
+            response = request_with_backoff("GET", feed_url, timeout=30, session=session, max_bytes=25 * 1024 * 1024)
             feed = feedparser.parse(response.content)
 
             for entry in feed.entries:

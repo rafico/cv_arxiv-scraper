@@ -32,7 +32,7 @@ _HEADING_RE = re.compile(
     r"(?:[IVXLC]+\.?\s+)"  # "III. " or "IV "
     r")?"
     r"(" + "|".join(re.escape(s) for s in SECTION_TYPES) + r")"
-    r"(?:\s*[:.]?\s*$|\s+)",
+    r"\s*[:.]?\s*$",  # heading line must be JUST the keyword (+ optional numbering/punctuation)
     re.IGNORECASE,
 )
 
@@ -98,11 +98,11 @@ def extract_sections(pdf_content: bytes) -> list[ExtractedSection]:
         if not stripped:
             continue
 
-        # Try known section heading regex (short lines only). The regex's trailing
-        # ``\s+`` branch also matches a wrapped body line that merely *starts* with a
-        # section word ("Results show our approach…"), which would fabricate a bogus
-        # boundary and truncate the real section. Gate on length like the all-caps
-        # branch below — a true heading line is short.
+        # Try known section heading regex (short lines only). The regex anchors on
+        # ``$`` so the line must be essentially JUST the section keyword (plus optional
+        # numbering/punctuation); a wrapped body line that merely *starts* with a
+        # section word ("Results show our approach…") no longer matches and cannot
+        # fabricate a bogus boundary. Gate on length like the all-caps branch below.
         match = _HEADING_RE.match(stripped)
         if match and len(stripped) < 60:
             section_name = _normalize_section_type(match.group(1))

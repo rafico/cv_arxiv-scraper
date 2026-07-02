@@ -1,0 +1,14 @@
+{# Match-type + duplicate + venue/acceptance + HF-upvotes badges, shared by rows/cards.
+   Context: `paper`, `BADGE`. #}
+{% for mtype in paper.match_type.split(' + ') %}
+{% if mtype in BADGE %}<span class="badge badge-accent">{{ mtype }}</span>{% endif %}
+{% endfor %}
+{% if paper.duplicate_of_id %}<span class="badge badge-warn">Dup</span>{% endif %}
+{% if paper.venue and paper.acceptance_status and paper.acceptance_status != 'mentioned' %}
+<span class="badge badge-outline" title="Detected from arXiv comment: {{ paper.arxiv_comment or '' }}">
+    {{ paper.venue }}{{ ' ' ~ paper.venue_year if paper.venue_year }}{{ ' · ' ~ paper.acceptance_status|title if paper.acceptance_status in ('oral', 'spotlight', 'highlight', 'workshop') }}
+</span>
+{% endif %}
+{% if paper.hf_upvotes %}
+<span class="badge badge-neutral" title="Hugging Face Papers upvotes{{ ' · ' ~ paper.hf_comments_count ~ ' comments' if paper.hf_comments_count }}">🤗 {{ paper.hf_upvotes }}</span>
+{% endif %}

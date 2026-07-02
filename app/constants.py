@@ -108,8 +108,3 @@ ARXIV_CATEGORY_NAMES: dict[str, str] = {
     "physics.comp-ph": "Computational Physics",
     "physics.data-an": "Data Analysis & Statistics",
 }
-
-
-def friendly_category_name(code: str) -> str:
-    """Return human-friendly name for an arXiv category, falling back to the raw code."""
-    return ARXIV_CATEGORY_NAMES.get(code, code)

@@ -81,10 +81,12 @@ def get_preferences(config: dict | None) -> dict:
 
     display = raw.get("display", {})
     if isinstance(display, dict):
+        from app import _is_truthy_flag
+
         for key, default_value in merged["display"].items():
             value = display.get(key)
             if isinstance(default_value, bool):
-                merged["display"][key] = default_value if value is None else bool(value)
+                merged["display"][key] = default_value if value is None else _is_truthy_flag(value)
                 continue
             try:
                 if value is not None:

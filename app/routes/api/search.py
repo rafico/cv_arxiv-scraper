@@ -4,29 +4,7 @@ from flask import abort, current_app, jsonify, request
 
 from app.models import Collection, Paper, PaperCollection, db
 from app.routes.api import api_bp
-
-
-def _parse_int_query_arg(
-    name: str,
-    *,
-    default: int | None,
-    minimum: int | None = None,
-    maximum: int | None = None,
-) -> int | None:
-    raw = request.args.get(name, "").strip()
-    if not raw:
-        return default
-
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"Invalid '{name}' parameter") from exc
-
-    if minimum is not None and value < minimum:
-        raise ValueError(f"'{name}' must be at least {minimum}")
-    if maximum is not None and value > maximum:
-        raise ValueError(f"'{name}' must be at most {maximum}")
-    return value
+from app.routes.api._validation import parse_int_query_arg as _parse_int_query_arg
 
 
 def _parse_bool_query_arg(name: str, *, default: bool) -> bool:
@@ -110,11 +88,11 @@ def corpus_clusters():
         return jsonify({"error": str(exc)}), 400
 
     result = analyze_topic_clusters(
-        window_days=window_days or 7,
-        offset_days=offset_days or 0,
-        limit=limit or 200,
+        window_days=window_days,
+        offset_days=offset_days,
+        limit=limit,
         cluster_count=cluster_count,
-        paper_limit=paper_limit or 5,
+        paper_limit=paper_limit,
     )
     return jsonify(result)
 
@@ -133,11 +111,11 @@ def corpus_emerging():
         return jsonify({"error": str(exc)}), 400
 
     result = detect_emerging_topics(
-        recent_days=recent_days or 7,
-        baseline_days=baseline_days or 28,
-        limit=limit or 200,
+        recent_days=recent_days,
+        baseline_days=baseline_days,
+        limit=limit,
         cluster_count=cluster_count,
-        paper_limit=paper_limit or 3,
+        paper_limit=paper_limit,
     )
     return jsonify(result)
 
@@ -169,7 +147,7 @@ def corpus_neighbors():
     tracked_authors = current_app.config.get("SCRAPER_CONFIG", {}).get("whitelists", {}).get("authors", [])
     result = find_neighbor_papers(
         seed_paper_ids,
-        limit=limit or 20,
+        limit=limit,
         tracked_authors=tracked_authors,
         exclude_tracked_authors=exclude_tracked_authors,
     )

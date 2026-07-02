@@ -132,6 +132,11 @@ class Paper(db.Model):
     github_stars = db.Column(db.Integer, nullable=True)
     github_license = db.Column(db.Text, nullable=True)
 
+    # Hugging Face Papers (huggingface.co/papers) community signals; NULL until
+    # enriched, and stays NULL for papers never submitted there.
+    hf_upvotes = db.Column(db.Integer, nullable=True)
+    hf_comments_count = db.Column(db.Integer, nullable=True)
+
     arxiv_comment = db.Column(db.Text, nullable=True)
     venue = db.Column(db.Text, nullable=True)
     venue_year = db.Column(db.Integer, nullable=True)
@@ -155,6 +160,11 @@ class Paper(db.Model):
     @property
     def matched_terms_list(self) -> list[str]:
         return self.matched_terms or []
+
+    @property
+    def match_types(self) -> list[str]:
+        """Individual match-type tags parsed from the '+'-joined ``match_type`` column."""
+        return [part.strip() for part in (self.match_type or "").split("+") if part.strip()]
 
     @property
     def topic_tags_list(self) -> list[str]:

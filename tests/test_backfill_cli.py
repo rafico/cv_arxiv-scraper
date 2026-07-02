@@ -317,6 +317,7 @@ class BackfillCliTests(FlaskDBTestCase):
     @patch("backfill_cli.backfill_abstracts", return_value=7)
     @patch("backfill_cli.backfill_thumbnails", return_value=4)
     @patch("backfill_cli.backfill_github", return_value=5)
+    @patch("backfill_cli.backfill_huggingface", return_value=8)
     @patch("backfill_cli.backfill_comments", return_value=6)
     @patch("backfill_cli.backfill_openalex", return_value=3)
     @patch("backfill_cli.backfill_citations", return_value=2)
@@ -327,6 +328,7 @@ class BackfillCliTests(FlaskDBTestCase):
         mock_citations,
         mock_openalex,
         mock_comments,
+        mock_huggingface,
         mock_github,
         mock_thumbnails,
         mock_abstracts,
@@ -341,6 +343,7 @@ class BackfillCliTests(FlaskDBTestCase):
                 "citations": 2,
                 "openalex": 3,
                 "comments": 6,
+                "huggingface": 8,
                 "github": 5,
                 "thumbnails": 4,
             },
@@ -349,6 +352,7 @@ class BackfillCliTests(FlaskDBTestCase):
         mock_citations.assert_called_once()
         mock_openalex.assert_called_once()
         mock_comments.assert_called_once()
+        mock_huggingface.assert_called_once()
         mock_github.assert_called_once()
         mock_thumbnails.assert_called_once()
         mock_abstracts.assert_called_once()

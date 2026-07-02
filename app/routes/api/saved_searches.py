@@ -62,8 +62,8 @@ def create_saved_search():
         date_window_days=coerce_int_field(payload.get("date_window_days")),
         min_citations=coerce_int_field(payload.get("min_citations")),
         methods_mentions=payload.get("methods_mentions", []),
-        is_active=payload.get("is_active", True),
-        notify_on_match=payload.get("notify_on_match", False),
+        is_active=bool(payload.get("is_active", True)),
+        notify_on_match=bool(payload.get("notify_on_match", False)),
     )
     db.session.add(s)
     db.session.commit()

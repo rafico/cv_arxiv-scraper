@@ -65,7 +65,7 @@ def main() -> None:
 
     print(f"\nToken saved to: {TOKEN_PATH}")
     print("  Permissions: 600 (owner-only read/write)")
-    print("\nSetup complete! You can now run: python email_digest.py")
+    print("\nSetup complete! You can now send a digest with: cv-arxiv-digest")
 
 
 if __name__ == "__main__":

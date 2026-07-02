@@ -152,6 +152,213 @@
             });
         })();
         </script>
+
+        {# ── Feed sources (extra arXiv categories / custom RSS feeds) ── #}
+        <div class="mt-6 rounded-2xl border border-edge bg-surface p-5">
+            <h3 class="text-sm font-semibold text-fg">Feed Sources</h3>
+            <p class="mt-1 text-sm text-fg-muted">
+                Monitor additional arXiv categories or custom RSS feeds beyond the default cs.CV feed.
+                Disabled sources are kept but skipped on the next scrape.
+            </p>
+
+            <div id="feed-sources-list" class="mt-4 space-y-2">
+                <p class="text-sm text-fg-muted">Loading feed sources…</p>
+            </div>
+
+            <div class="mt-4 rounded-xl border border-edge bg-surface-2 p-4">
+                <div class="flex flex-wrap items-center gap-4">
+                    <label class="flex items-center gap-2 text-sm text-fg-muted">
+                        <input type="radio" name="feed_source_mode" value="arxiv" checked class="accent-gray-900">
+                        arXiv category
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-fg-muted">
+                        <input type="radio" name="feed_source_mode" value="custom" class="accent-gray-900">
+                        Custom RSS URL
+                    </label>
+                </div>
+
+                <div id="feed-add-arxiv" class="mt-3">
+                    <label for="feed-category" class="block text-sm font-medium text-fg-muted mb-1">Category</label>
+                    <select id="feed-category"
+                            class="w-full rounded-xl border border-edge bg-surface px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-accent">
+                        {% for code, label in ARXIV_CATEGORY_NAMES.items() %}
+                        <option value="{{ code }}">{{ code }} — {{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div id="feed-add-custom" class="mt-3 hidden space-y-2">
+                    <div>
+                        <label for="feed-custom-name" class="block text-sm font-medium text-fg-muted mb-1">Name</label>
+                        <input type="text" id="feed-custom-name" placeholder="e.g. Hugging Face Daily Papers"
+                               class="w-full rounded-xl border border-edge bg-surface px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-accent">
+                    </div>
+                    <div>
+                        <label for="feed-custom-url" class="block text-sm font-medium text-fg-muted mb-1">Feed URL</label>
+                        <input type="url" id="feed-custom-url" placeholder="https://example.com/feed.xml"
+                               class="w-full rounded-xl border border-edge bg-surface px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-accent">
+                    </div>
+                </div>
+
+                <div class="mt-3 flex items-center gap-3">
+                    <button type="button" id="feed-add-btn" class="btn-primary text-sm">Add Feed Source</button>
+                    <span id="feed-sources-status" class="text-sm text-fg-muted"></span>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function () {
+            const list = document.getElementById('feed-sources-list');
+            const addBtn = document.getElementById('feed-add-btn');
+            if (!list || !addBtn) return;
+            const status = document.getElementById('feed-sources-status');
+            const arxivBox = document.getElementById('feed-add-arxiv');
+            const customBox = document.getElementById('feed-add-custom');
+
+            document.querySelectorAll('input[name="feed_source_mode"]').forEach(function (radio) {
+                radio.addEventListener('change', function () {
+                    const custom = radio.value === 'custom' && radio.checked;
+                    arxivBox.classList.toggle('hidden', custom);
+                    customBox.classList.toggle('hidden', !custom);
+                });
+            });
+
+            function setStatus(message) { if (status) status.textContent = message || ''; }
+
+            /* User-supplied name/url go through textContent — never innerHTML. */
+            function renderRow(source) {
+                const row = document.createElement('div');
+                row.className = 'rounded-xl border border-edge px-3 py-2 flex items-center justify-between gap-3';
+
+                const info = document.createElement('div');
+                info.className = 'min-w-0';
+                const name = document.createElement('div');
+                name.className = 'text-sm font-medium text-fg truncate';
+                name.textContent = source.name;
+                const url = document.createElement('div');
+                url.className = 'text-xs text-fg-muted truncate';
+                url.textContent = source.url;
+                info.appendChild(name);
+                info.appendChild(url);
+
+                const controls = document.createElement('div');
+                controls.className = 'flex items-center gap-2';
+
+                const state = document.createElement('span');
+                state.className = 'inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted';
+                const dot = document.createElement('span');
+                dot.className = 'h-2 w-2 rounded-full ' + (source.enabled ? 'bg-emerald-500' : 'bg-amber-400');
+                state.appendChild(dot);
+                state.appendChild(document.createTextNode(source.enabled ? 'Enabled' : 'Disabled'));
+
+                const toggleBtn = document.createElement('button');
+                toggleBtn.type = 'button';
+                toggleBtn.className = 'inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-2 text-fg-muted hover:bg-edge';
+                toggleBtn.textContent = source.enabled ? 'Disable' : 'Enable';
+                toggleBtn.addEventListener('click', async function () {
+                    toggleBtn.disabled = true;
+                    try {
+                        const res = await fetch('/api/feed-sources/' + source.id + '/toggle', {
+                            method: 'POST',
+                            headers: { 'X-CSRF-Token': getCsrfToken() },
+                        });
+                        if (!res.ok) { setStatus('Failed to toggle feed source.'); return; }
+                        await loadSources();
+                    } catch (e) {
+                        setStatus('Network error.');
+                    } finally {
+                        toggleBtn.disabled = false;
+                    }
+                });
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-2 text-fg-muted hover:bg-edge';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.addEventListener('click', async function () {
+                    if (!window.confirm('Delete feed source "' + source.name + '"?')) return;
+                    deleteBtn.disabled = true;
+                    try {
+                        const res = await fetch('/api/feed-sources/' + source.id, {
+                            method: 'DELETE',
+                            headers: { 'X-CSRF-Token': getCsrfToken() },
+                        });
+                        if (!res.ok) { setStatus('Failed to delete feed source.'); return; }
+                        await loadSources();
+                    } catch (e) {
+                        setStatus('Network error.');
+                    } finally {
+                        deleteBtn.disabled = false;
+                    }
+                });
+
+                controls.appendChild(state);
+                controls.appendChild(toggleBtn);
+                controls.appendChild(deleteBtn);
+                row.appendChild(info);
+                row.appendChild(controls);
+                return row;
+            }
+
+            async function loadSources() {
+                try {
+                    const res = await fetch('/api/feed-sources');
+                    if (!res.ok) { list.textContent = 'Failed to load feed sources.'; return; }
+                    const sources = await res.json();
+                    list.textContent = '';
+                    if (!sources.length) {
+                        const empty = document.createElement('p');
+                        empty.className = 'text-sm text-fg-muted';
+                        empty.textContent = 'No extra feed sources yet — the default cs.CV feed always runs.';
+                        list.appendChild(empty);
+                        return;
+                    }
+                    sources.forEach(function (source) { list.appendChild(renderRow(source)); });
+                } catch (e) {
+                    list.textContent = 'Failed to load feed sources.';
+                }
+            }
+
+            addBtn.addEventListener('click', async function () {
+                const mode = document.querySelector('input[name="feed_source_mode"]:checked').value;
+                let payload;
+                if (mode === 'arxiv') {
+                    const select = document.getElementById('feed-category');
+                    payload = {
+                        name: select.options[select.selectedIndex].text,
+                        url: 'https://rss.arxiv.org/rss/' + select.value,
+                        feed_type: 'arxiv_rss',
+                    };
+                } else {
+                    const name = document.getElementById('feed-custom-name').value.trim();
+                    const url = document.getElementById('feed-custom-url').value.trim();
+                    if (!name || !url) { setStatus('Both a name and a feed URL are required.'); return; }
+                    payload = { name: name, url: url, feed_type: 'rss' };
+                }
+                addBtn.disabled = true;
+                setStatus('Adding…');
+                try {
+                    const res = await fetch('/api/feed-sources', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) { setStatus(data.error || 'Failed to add feed source.'); return; }
+                    setStatus('Added "' + data.name + '".');
+                    document.getElementById('feed-custom-name').value = '';
+                    document.getElementById('feed-custom-url').value = '';
+                    await loadSources();
+                } catch (e) {
+                    setStatus('Network error.');
+                } finally {
+                    addBtn.disabled = false;
+                }
+            });
+
+            loadSources();
+        })();
+        </script>
     </section>
 
     {# ── Backup & Portability ── #}
@@ -592,6 +799,59 @@
                     </div>
                     {% endif %}
                 </div>
+
+                <form method="POST" action="/settings/data-sources" id="data-sources-form" class="rounded-2xl border border-edge bg-surface p-5">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <h3 class="text-base font-semibold text-fg">Data Sources</h3>
+                    <p class="text-sm text-fg-muted mt-1">API keys for metadata enrichment. Each is stored as a <code>0600</code> dotfile next to <code>.llm_api_key</code>, never in <code>config.yaml</code>. Environment variables take precedence.</p>
+                    <div class="mt-4 space-y-4">
+                        <div>
+                            <div class="flex items-center justify-between gap-2 mb-1">
+                                <label for="openalex_api_key" class="block text-sm font-medium text-fg-muted">OpenAlex API Key</label>
+                                {% if data_source_keys.openalex %}
+                                <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>Configured</span>
+                                {% endif %}
+                            </div>
+                            <p class="text-xs text-fg-subtle mb-1">Required by OpenAlex since Feb 2026 — a free key is available at openalex.org/settings/api. Stored in <code>.openalex_api_key</code>; the <code>OPENALEX_API_KEY</code> env var also works.</p>
+                            <input type="password" name="openalex_api_key" id="openalex_api_key"
+                                   value="{{ llm_key_mask if data_source_keys.openalex else '' }}"
+                                   placeholder="OpenAlex API key"
+                                   class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between gap-2 mb-1">
+                                <label for="s2_api_key" class="block text-sm font-medium text-fg-muted">Semantic Scholar API Key</label>
+                                {% if data_source_keys.semantic_scholar %}
+                                <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>Configured</span>
+                                {% endif %}
+                            </div>
+                            <p class="text-xs text-fg-subtle mb-1">Optional but recommended for citation data (request one at semanticscholar.org/product/api). Stored in <code>.s2_api_key</code>; the <code>SEMANTIC_SCHOLAR_API_KEY</code> env var also works.</p>
+                            <input type="password" name="s2_api_key" id="s2_api_key"
+                                   value="{{ llm_key_mask if data_source_keys.semantic_scholar else '' }}"
+                                   placeholder="Semantic Scholar API key"
+                                   class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between gap-2 mb-1">
+                                <label for="github_token" class="block text-sm font-medium text-fg-muted">GitHub Token</label>
+                                {% if data_source_keys.github %}
+                                <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>Configured</span>
+                                {% endif %}
+                            </div>
+                            <p class="text-xs text-fg-subtle mb-1">Optional personal access token — raises the repo-metadata rate limit from 60 to 5000 requests/hour. Stored in <code>.github_token</code>; the <code>GITHUB_TOKEN</code> env var also works.</p>
+                            <input type="password" name="github_token" id="github_token"
+                                   value="{{ llm_key_mask if data_source_keys.github else '' }}"
+                                   placeholder="GitHub personal access token"
+                                   class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
+                        </div>
+                    </div>
+                    <div class="mt-4 flex justify-end">
+                        <button type="submit" id="data-sources-save-btn"
+                                class="px-5 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            Save Data Source Keys
+                        </button>
+                    </div>
+                </form>
         </div>
         </div>{# /auto-integrations #}
 
@@ -993,9 +1253,17 @@
         function checkDirty() {
             var currentData = new FormData(form);
             var dirty = false;
+            var currentKeys = new Set();
             currentData.forEach(function(value, key) {
+                currentKeys.add(key);
                 if (key === "csrf_token") return;
                 if (originalValues[key] !== value) dirty = true;
+            });
+            // Detect removed keys (e.g. a previously-checked checkbox now unchecked,
+            // which FormData omits entirely).
+            Object.keys(originalValues).forEach(function(key) {
+                if (key === "csrf_token") return;
+                if (!currentKeys.has(key)) dirty = true;
             });
             if (dirty) {
                 button.classList.remove("bg-accent", "hover:bg-accent-hover");
@@ -1018,6 +1286,7 @@
     trackUnsavedChanges("preferences-form", "preferences-save-btn");
     trackUnsavedChanges("email-form", "email-save-btn");
     trackUnsavedChanges("llm-form", "llm-save-btn");
+    trackUnsavedChanges("data-sources-form", "data-sources-save-btn");
 
     function setSavingState(formId, buttonId, loadingLabel) {
         var form = document.getElementById(formId);
@@ -1033,6 +1302,7 @@
     setSavingState("preferences-form", "preferences-save-btn", "Saving...");
     setSavingState("email-form", "email-save-btn", "Saving...");
     setSavingState("llm-form", "llm-save-btn", "Saving...");
+    setSavingState("data-sources-form", "data-sources-save-btn", "Saving...");
 
     var testBtn = document.getElementById("test-digest-btn");
     if (testBtn && !testBtn.disabled) {

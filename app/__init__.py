@@ -23,6 +23,7 @@ DEFAULT_CONFIG_FILENAME = "config.yaml"
 DEFAULT_CONFIG_TEMPLATE_FILENAME = "config.example.yaml"
 DEFAULT_LLM_KEY_FILENAME = ".llm_api_key"
 _CONFIG_PATH_ENV_VAR = "CV_ARXIV_CONFIG"
+_INSTANCE_PATH_ENV_VAR = "CV_ARXIV_INSTANCE_PATH"
 _SECRET_KEY_FILENAME = ".flask_secret"  # noqa: S105 — filename constant, not a secret value
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -74,10 +75,7 @@ def _resolve_config_path(
         return repo_candidate
 
     if instance_path is not None:
-        instance_candidate = (Path(instance_path).expanduser().resolve() / DEFAULT_CONFIG_FILENAME).resolve()
-        if instance_candidate.is_file():
-            return instance_candidate
-        return instance_candidate
+        return (Path(instance_path).expanduser().resolve() / DEFAULT_CONFIG_FILENAME).resolve()
 
     return cwd_candidate
 
@@ -183,7 +181,9 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
                 if isinstance(requests_per_second, bool):
                     raise ValueError("'ingest.rate_limit.requests_per_second' must be positive")
                 try:
-                    if float(requests_per_second) <= 0:
+                    # Reject inf/nan too: a non-finite rate silently disables the
+                    # token-bucket limiter downstream.
+                    if not math.isfinite(float(requests_per_second)) or float(requests_per_second) <= 0:
                         raise ValueError
                 except (TypeError, ValueError):
                     raise ValueError("'ingest.rate_limit.requests_per_second' must be positive") from None
@@ -280,7 +280,12 @@ def _ensure_secret_key(instance_path: Path) -> str:
     key_path = instance_path / _SECRET_KEY_FILENAME
     if key_path.is_file():
         try:
-            return key_path.read_text(encoding="utf-8").strip()
+            existing = key_path.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+            # An empty/whitespace file (truncated/interrupted write, manual touch)
+            # would otherwise yield an empty SECRET_KEY and break every session
+            # request forever; fall through to regenerate and overwrite it.
         except OSError:
             pass
     key = os.urandom(32).hex()
@@ -353,7 +358,13 @@ def _reclaim_orphaned_scrape_runs(app, *, stale_after_hours: int = 2) -> None:
 
 def create_app(config_overrides: dict | None = None) -> Flask:
     overrides = dict(config_overrides or {})
+    # Instance path precedence: explicit override > CV_ARXIV_INSTANCE_PATH env > Flask
+    # default. The env fallback lets the test suite (and any sandbox) redirect the DB /
+    # FAISS index / secrets away from the real instance dir even for entrypoints like
+    # wsgi.py that call create_app() with no arguments.
     instance_path_override = overrides.pop("INSTANCE_PATH", None)
+    if instance_path_override is None:
+        instance_path_override = os.environ.get(_INSTANCE_PATH_ENV_VAR, "").strip() or None
     resolved_instance_path = (
         str(Path(instance_path_override).expanduser().resolve()) if instance_path_override is not None else None
     )

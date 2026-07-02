@@ -41,7 +41,10 @@ def _child(target: Callable[..., Any], args: tuple, kwargs: dict, queue) -> None
     try:
         queue.put(("ok", target(*args, **kwargs)))
     except BaseException as exc:  # noqa: BLE001 - relay any failure to the parent
-        queue.put(("err", exc))
+        try:
+            queue.put(("err", exc))
+        except Exception:  # noqa: BLE001 - exc may be unpicklable; relay a picklable surrogate
+            queue.put(("err", RuntimeError(f"{type(exc).__name__}: {exc}")))
 
 
 def run_isolated(target: Callable[..., Any], *args: Any, timeout: float | None = None, **kwargs: Any) -> Any:
@@ -79,12 +82,27 @@ def run_isolated(target: Callable[..., Any], *args: Any, timeout: float | None =
                 break  # child exited without producing a result (likely a crash)
             if timeout is not None and time.monotonic() - start >= timeout:
                 proc.terminate()
-                proc.join()
+                proc.join(timeout=5)
+                if proc.is_alive():
+                    # A child wedged in an uninterruptible native call can ignore
+                    # SIGTERM; escalate to SIGKILL so join() cannot block forever.
+                    proc.kill()
+                    proc.join(timeout=5)
                 raise TimeoutError(f"isolated call to {name} timed out after {timeout}s") from None
 
     # The child has put its result (or died); joining now is safe and lets its
     # feeder thread flush the pipe.
     proc.join()
+
+    if not got_result:
+        # A result can still be buffered in the pipe if the child produced it and
+        # exited between two polls (proc.is_alive() went False before the feeder
+        # thread flushed). Try one final non-blocking read before assuming a crash.
+        try:
+            result = queue.get_nowait()
+            got_result = True
+        except Empty:
+            pass
 
     if not got_result:
         if proc.exitcode is not None and proc.exitcode < 0:

@@ -1,0 +1,2 @@
+{# Comma-separated author links, shared by rows/cards. Context: `paper`. #}
+{% for author in paper.authors.split(', ') %}{% if not loop.first %}, {% endif %}<a href="{{ url_for('dashboard.index', author=author.strip(), timeframe='all') }}" class="hover:text-accent hover:underline" onclick="event.stopPropagation()">{{ author.strip() }}</a>{% endfor %}

@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from flask import Flask
 
 from app.models import DigestRun, Paper, db
-from app.services.ranking import FEEDBACK_BOOST, combined_rank_score
+from app.services.ranking import combined_rank_score, rank_score_order_expr
 from app.services.secret_files import write_secret_file
 from app.services.text import now_utc, utc_today
 
@@ -475,10 +475,7 @@ def _query_todays_papers(app: Flask, lookback_hours: int = 26) -> list[Paper]:
         return (
             Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
             .order_by(
-                (
-                    db.func.coalesce(Paper.paper_score, 0.0)
-                    + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
-                ).desc(),
+                rank_score_order_expr().desc(),
                 Paper.publication_dt.desc(),
                 Paper.scraped_at.desc(),
             )
@@ -619,9 +616,16 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
             userId="me",
             body={"raw": raw_message},
         ).execute()
-    except Exception as exc:
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        # Credential/config failures already carry a contract the callers handle.
         _finish_digest_run(app, digest_run_id, status="error", error_message=str(exc))
         raise
+    except Exception as exc:
+        # Gmail API / auth send failures (HttpError, GoogleAuthError, network drops)
+        # are plain Exception subclasses that callers don't catch. Translate them to
+        # the RuntimeError contract both the settings route and the CLI already handle.
+        _finish_digest_run(app, digest_run_id, status="error", error_message=str(exc))
+        raise RuntimeError(f"Gmail API send failed: {exc}") from exc
 
     LOGGER.info("Digest sent to %s (%d papers)", recipient, len(papers))
     _finish_digest_run(app, digest_run_id, status="success")

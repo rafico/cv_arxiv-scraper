@@ -32,7 +32,7 @@ from app.services.text import clean_whitespace
 
 LOGGER = logging.getLogger(__name__)
 
-_ARXIV_API_URL = "http://export.arxiv.org/api/query"
+_ARXIV_API_URL = "https://export.arxiv.org/api/query"
 _ARXIV_API_TIMEOUT = 45
 _ARXIV_API_ATTEMPTS = 4
 _ARXIV_API_BASE_DELAY = 2.0
@@ -186,6 +186,11 @@ def _embed_paper(app, paper) -> None:
         service = get_embedding_service(app)
         text = _build_embed_text(paper.title, paper.abstract_text)
         service.add_papers([paper.id], [text])
+        # Persist immediately: without save() the vector lives only in the
+        # in-process singleton and is silently dropped by the next
+        # reset_embedding_service() (concurrent scrape / backup restore) or a
+        # restart, leaving the cold-start interest profile un-seeded.
+        service.save()
     except Exception:
         LOGGER.warning("Bootstrap embedding failed for paper %s (non-fatal)", paper.id, exc_info=True)
 
@@ -302,16 +307,13 @@ def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
 
 def _papers_with_feedback() -> set[int]:
     """Paper ids carrying any save/priority/skip/ignore feedback row."""
-    from app.models import PaperFeedback, db
-    from app.services.interest_model import NEGATIVE_ACTIONS, POSITIVE_ACTIONS
-
-    rows = (
-        db.session.query(PaperFeedback.paper_id)
-        .filter(PaperFeedback.action.in_(POSITIVE_ACTIONS + NEGATIVE_ACTIONS))
-        .distinct()
-        .all()
+    from app.services.interest_model import (
+        NEGATIVE_ACTIONS,
+        POSITIVE_ACTIONS,
+        _paper_ids_for_actions,
     )
-    return {row[0] for row in rows}
+
+    return set(_paper_ids_for_actions(POSITIVE_ACTIONS + NEGATIVE_ACTIONS))
 
 
 def select_uncertain_papers(*, limit: int = 2, min_saves: int = 3) -> list[dict]:

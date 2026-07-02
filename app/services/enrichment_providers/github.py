@@ -81,6 +81,7 @@ class GitHubProvider(EnrichmentProvider):
         session: requests.Session | None = None,
     ) -> dict[str, dict[str, Any]]:
         from app.services.http_client import request_with_backoff
+        from app.services.secret_files import resolve_data_source_key
 
         if not arxiv_ids:
             return {}
@@ -89,9 +90,12 @@ class GitHubProvider(EnrichmentProvider):
         request_fn = self._request_fn or request_with_backoff
         cached, missing_ids, paper_by_arxiv_id = get_cached_payloads(arxiv_ids, source=self.source)
 
+        # Callers still pass GITHUB_TOKEN/config tokens explicitly; when they don't,
+        # fall back to the .github_token dotfile saved from Settings → Data Sources.
+        token = self.token or resolve_data_source_key("github")
         headers = {"Accept": "application/vnd.github+json"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
         fetched: dict[str, dict[str, Any]] = {}
         fetches = 0

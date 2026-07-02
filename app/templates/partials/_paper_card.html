@@ -13,15 +13,7 @@
     <div class="p-4 flex flex-col flex-1">
         {# ── Badges + date ── #}
         <div class="flex items-center gap-1.5 mb-2 flex-wrap">
-            {% for mtype in paper.match_type.split(' + ') %}
-            {% if mtype in BADGE %}<span class="badge badge-accent">{{ mtype }}</span>{% endif %}
-            {% endfor %}
-            {% if paper.duplicate_of_id %}<span class="badge badge-warn">Dup</span>{% endif %}
-            {% if paper.venue and paper.acceptance_status and paper.acceptance_status != 'mentioned' %}
-            <span class="badge badge-outline" title="Detected from arXiv comment: {{ paper.arxiv_comment or '' }}">
-                {{ paper.venue }}{{ ' ' ~ paper.venue_year if paper.venue_year }}{{ ' · ' ~ paper.acceptance_status|title if paper.acceptance_status in ('oral', 'spotlight', 'highlight', 'workshop') }}
-            </span>
-            {% endif %}
+            {% include "partials/_paper_badges.html" %}
             {% include "partials/_paper_stats.html" %}
             <span class="text-[11px] text-fg-subtle ml-auto tabular-nums">{{ paper.publication_dt or paper.scraped_date }}</span>
         </div>
@@ -31,7 +23,7 @@
             <a href="{{ paper.link }}" target="_blank">{{ paper.title }}</a>
         </h2>
         <p class="text-xs text-fg-muted mb-2 line-clamp-1">
-            {% for author in paper.authors.split(', ') %}{% if not loop.first %}, {% endif %}<a href="{{ url_for('dashboard.index', author=author.strip(), timeframe='all') }}" class="hover:text-accent hover:underline" onclick="event.stopPropagation()">{{ author.strip() }}</a>{% endfor %}
+            {% include "partials/_paper_authors.html" %}
         </p>
 
         {# ── Matched terms ── #}

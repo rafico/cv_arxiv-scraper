@@ -1,3 +1,9 @@
+{# safe_url: only allow http(s) hrefs; anything else (javascript:, data:, etc.)
+   collapses to '#' so a hostile feed link cannot inject a script-scheme URL. #}
+{%- macro safe_url(u) -%}
+{%- set s = (u | string) | trim -%}
+{%- if s[:7] | lower == 'http://' or s[:8] | lower == 'https://' -%}{{ s }}{%- else -%}#{%- endif -%}
+{%- endmacro -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -110,7 +116,7 @@
                     <span class="subtle pushed-right">{{ paper.publication_dt or paper.scraped_date }}</span>
                 </div>
 
-                <h2><a href="{{ paper.link }}">{{ paper.title }}</a></h2>
+                <h2><a href="{{ safe_url(paper.link) }}">{{ paper.title }}</a></h2>
                 <p class="authors">{{ paper.authors }}</p>
                 <p class="summary">{{ paper.summary_text }}</p>
 
@@ -127,8 +133,8 @@
                 {% endif %}
 
                 <div class="links">
-                    <a href="{{ paper.link }}">arXiv</a>
-                    <a href="{{ paper.pdf_link }}" class="strong">PDF</a>
+                    <a href="{{ safe_url(paper.link) }}">arXiv</a>
+                    <a href="{{ safe_url(paper.pdf_link) }}" class="strong">PDF</a>
                 </div>
             </article>
             {% endfor %}

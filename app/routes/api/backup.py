@@ -8,6 +8,7 @@ from app.csrf import validate_csrf_token
 from app.models import db
 from app.routes.api import api_bp
 from app.services.backup import create_backup, restore_backup
+from app.services.jobs import SCRAPE_JOB_MANAGER
 
 # The global MAX_CONTENT_LENGTH (app/__init__.py, 2 MiB) is sized for small
 # credential/config uploads and would 413 any real backup — the SQLite DB alone is
@@ -52,14 +53,28 @@ def backup_import():
     if uploaded is None or not uploaded.filename:
         return jsonify({"error": "No backup file uploaded"}), 400
 
+    # Restore swaps the live DB and FAISS index out from under any in-flight scrape,
+    # which would corrupt the WAL / lose the scrape's vectors. Refuse while one runs.
+    if SCRAPE_JOB_MANAGER.get_status_snapshot().get("running"):
+        return jsonify({"error": "A scrape is in progress; wait for it to finish before restoring."}), 409
+
     db_path, faiss_dir, config_path = _resolve_paths()
+    archive_bytes = uploaded.read()
+
+    # Drop pooled connections so none holds the old DB inode / WAL when the file is
+    # swapped and its -wal/-shm sidecars are removed. Serialize the config.yaml write
+    # against settings routes via the same lock they use.
+    from app.routes._config import config_write_lock
+
+    db.engine.dispose()
     try:
-        summary = restore_backup(
-            uploaded.read(),
-            db_path=db_path,
-            faiss_dir=faiss_dir,
-            config_path=config_path,
-        )
+        with config_write_lock():
+            summary = restore_backup(
+                archive_bytes,
+                db_path=db_path,
+                faiss_dir=faiss_dir,
+                config_path=config_path,
+            )
     except ValueError as exc:
         # Malformed / unsupported / oversized archive — a client error.
         return jsonify({"error": str(exc)}), 400

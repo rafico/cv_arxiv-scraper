@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import logging
-import os
 from copy import deepcopy
 from email.header import Header
 from pathlib import Path
-from secrets import token_urlsafe
 
 import yaml
 from flask import (
@@ -21,12 +19,13 @@ from flask import (
 )
 
 from app.constants import DEFAULT_LLM_MODEL, GEMMA_MODELS
-from app.csrf import get_or_create_csrf_token, validate_csrf_token
+from app.csrf import get_or_create_csrf_token, rotate_csrf_token, validate_csrf_token
 from app.models import Paper, db
 from app.routes._config import config_write_lock, persist_config
 from app.services.llm_client import has_api_key, write_api_key
 from app.services.preferences import get_preferences, update_preferences_from_form
 from app.services.ranking import recompute_all_paper_scores
+from app.services.secret_files import data_source_key_path, has_data_source_key, write_secret_file
 
 LOGGER = logging.getLogger(__name__)
 
@@ -161,6 +160,11 @@ def view_settings():
         gemma_models=GEMMA_MODELS,
         llm_key_configured=has_api_key(llm_key_path),
         llm_key_mask=_LLM_MASK_VALUE,
+        data_source_keys={
+            "openalex": has_data_source_key("openalex"),
+            "semantic_scholar": has_data_source_key("semantic_scholar"),
+            "github": has_data_source_key("github"),
+        },
         csrf_token=get_or_create_csrf_token(),
         callback_uri=callback_uri,
         mendeley_callback_uri=mendeley_callback_uri,
@@ -192,7 +196,7 @@ def save_settings():
             flash(str(exc), "error")
             return redirect(url_for("settings.view_settings", section="interests"))
 
-    session["settings_csrf_token"] = token_urlsafe(32)
+    rotate_csrf_token()
     flash("Settings saved successfully.", "success")
     return redirect(url_for("settings.view_settings", section="interests"))
 
@@ -217,7 +221,7 @@ def save_preferences():
         recompute_interest_similarities(app_obj)
     else:
         recompute_all_paper_scores(app_obj)
-    session["settings_csrf_token"] = token_urlsafe(32)
+    rotate_csrf_token()
     flash("Ranking and mute preferences saved.", "success")
     return redirect(url_for("settings.view_settings", section="controls"))
 
@@ -256,14 +260,12 @@ def upload_credentials():
         return redirect(url_for("settings.view_settings", section="automation"))
 
     from app.services.email_digest import DEFAULT_CREDENTIALS_PATH, validate_credentials_redirect_uris
+    from app.services.secret_files import write_secret_file
 
-    # Write with 0600 from creation so the OAuth client secret is never briefly
-    # world-readable (avoids a write-then-chmod TOCTOU window); the trailing
-    # chmod also tightens an already-existing file.
-    fd = os.open(DEFAULT_CREDENTIALS_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(raw)
-    os.chmod(DEFAULT_CREDENTIALS_PATH, 0o600)
+    # Write via mkstemp+rename at 0600 so the OAuth client secret is never briefly
+    # readable through a pre-existing looser inode (avoids the write-then-chmod
+    # TOCTOU window). raw was already parsed as JSON above, so it decodes as UTF-8.
+    write_secret_file(DEFAULT_CREDENTIALS_PATH, raw.decode("utf-8"))
 
     callback_uri = url_for("settings.gmail_callback", _external=True)
     uri_check = validate_credentials_redirect_uris(callback_uri)
@@ -292,7 +294,7 @@ def save_email_settings():
     subject_prefix = request.form.get("email_subject_prefix", "ArXiv Digest").strip()
 
     email_cfg = {"recipient": recipient, "subject_prefix": subject_prefix}
-    session["settings_csrf_token"] = token_urlsafe(32)
+    rotate_csrf_token()
     try:
         _save_config_key("email", email_cfg)
     except ValueError as exc:
@@ -348,9 +350,39 @@ def save_llm_settings():
             flash(str(exc), "error")
             return redirect(url_for("settings.view_settings", section="ai"))
 
-    session["settings_csrf_token"] = token_urlsafe(32)
+    rotate_csrf_token()
     flash("LLM settings saved.", "success")
     return redirect(url_for("settings.view_settings", section="ai"))
+
+
+@settings_bp.route("/settings/data-sources", methods=["POST"])
+def save_data_source_keys():
+    """Save OpenAlex / Semantic Scholar / GitHub credentials as 0600 dotfiles.
+
+    Mirrors the .llm_api_key UX: a configured key renders as a mask, and only a
+    non-mask, non-empty submission rewrites the dotfile — so saving the form
+    without touching a field never clobbers (or echoes) an existing secret.
+    """
+    validate_csrf_token()
+
+    submitted = {
+        "openalex": request.form.get("openalex_api_key", "").strip(),
+        "semantic_scholar": request.form.get("s2_api_key", "").strip(),
+        "github": request.form.get("github_token", "").strip(),
+    }
+    saved_labels = []
+    labels = {"openalex": "OpenAlex", "semantic_scholar": "Semantic Scholar", "github": "GitHub"}
+    for source, value in submitted.items():
+        if value and value != _LLM_MASK_VALUE:
+            write_secret_file(data_source_key_path(source), value)
+            saved_labels.append(labels[source])
+
+    rotate_csrf_token()
+    if saved_labels:
+        flash(f"Saved API keys: {', '.join(saved_labels)}.", "success")
+    else:
+        flash("No new keys entered — existing keys are unchanged.", "success")
+    return redirect(url_for("settings.view_settings", section="automation"))
 
 
 @settings_bp.route("/settings/gmail-auth", methods=["POST"])
@@ -404,6 +436,9 @@ def gmail_callback():
 def send_test_digest():
     validate_csrf_token()
 
+    from google.auth.exceptions import GoogleAuthError
+    from googleapiclient.errors import HttpError
+
     from app.services.email_digest import send_digest
 
     try:
@@ -412,7 +447,10 @@ def send_test_digest():
             f"Test digest sent to {info['recipient']} ({info['papers_count']} papers).",
             "success",
         )
-    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+    except (FileNotFoundError, RuntimeError, ValueError, HttpError, GoogleAuthError) as exc:
+        # send_digest re-raises the raw Gmail HttpError / auth error; catch them here
+        # (the DigestRun is already marked errored) so a send-time API/network failure
+        # flashes a message instead of a bare 500 (settings_bp has no error handler).
         flash(f"Failed to send digest: {exc}", "error")
         LOGGER.exception("Test digest failed")
 
