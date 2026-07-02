@@ -28,12 +28,21 @@ llm:
   max_concurrent: 1
 openalex:
   enabled: true
+  # Contact email sent as ?mailto= (polite pool). OpenAlex also requires a free
+  # API key since Feb 2026 — save it in Settings -> Automation -> Data Sources
+  # (stored as the gitignored .openalex_api_key dotfile) or set the
+  # OPENALEX_API_KEY env var. Never put the key in this file.
   email: ""
 github:
   enabled: true
-  # Optional personal access token (or set GITHUB_TOKEN) to raise the API rate
-  # limit from 60 to 5000 requests/hour. Without it, fetches are capped per run.
+  # Optional personal access token (or set GITHUB_TOKEN, or save one in
+  # Settings -> Automation -> Data Sources / the .github_token dotfile) to raise
+  # the API rate limit from 60 to 5000 requests/hour. Without it, fetches are
+  # capped per run.
   token: ""
+# Semantic Scholar citation lookups are keyless by default; a key (issued at
+# ~1 req/s) is stored as the .s2_api_key dotfile via Settings -> Automation ->
+# Data Sources or the SEMANTIC_SCHOLAR_API_KEY env var — never in this file.
 preferences:
   ranking:
     author_weight: 44.0

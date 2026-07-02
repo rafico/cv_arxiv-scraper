@@ -20,10 +20,19 @@ def _host_is_loopback(host: str) -> bool:
     return addr.is_loopback
 
 
-def _find_free_port(start, attempts=10):
+def _find_free_port(start, attempts=10, host="127.0.0.1"):
+    # Probe the same address family we will actually bind to; a port free on
+    # IPv4 can be occupied on ::1 (and vice versa), so testing 127.0.0.1
+    # unconditionally would pick a port gunicorn then fails to bind.
+    try:
+        family = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)[0][0]
+        probe_host = host
+    except socket.gaierror:
+        family = socket.AF_INET
+        probe_host = "127.0.0.1"
     for port in range(start, start + attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", port)) != 0:
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            if s.connect_ex((probe_host, port)) != 0:
                 return port
     raise RuntimeError(f"No free port found in range {start}-{start + attempts - 1}")
 
@@ -108,7 +117,7 @@ def main(argv=None, *, app_factory=create_app, timer_factory=Timer, browser_open
 
     if _host_is_loopback(args.host):
         # Local dev convenience: hop to a free port if the requested one is busy.
-        port = _find_free_port(args.port)
+        port = _find_free_port(args.port, host=args.host)
         if port != args.port:
             print(f"Port {args.port} in use, falling back to {port}", file=out)
     else:

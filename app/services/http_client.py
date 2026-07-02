@@ -28,6 +28,59 @@ _RETRYABLE_4XX = frozenset({408, 425, 429})
 # minutes/hours would hang the worker, so clamp to something sane.
 _MAX_RETRY_AFTER_SECONDS = 120.0
 
+# Safety ceiling (bytes) on how much of a response body we'll buffer into the
+# single worker's heap. Without a cap, a compromised/misbehaving origin (an arXiv
+# mirror, or any host behind a user-configured feed URL) can trickle a
+# multi-gigabyte or effectively unbounded body below the read timeout and OOM the
+# process. PDFs are the largest legitimate payload, so the default is generous;
+# callers can pass a tighter ``max_bytes`` (e.g. for feeds/XML).
+_DEFAULT_MAX_BYTES = 200 * 1024 * 1024
+
+
+class ResponseTooLargeError(Exception):
+    """Raised when a response body exceeds the configured ``max_bytes`` ceiling."""
+
+
+def _read_capped_body(response: requests.Response, max_bytes: int) -> None:
+    """Buffer ``response`` body into memory, aborting once ``max_bytes`` is exceeded.
+
+    Reads incrementally via :meth:`requests.Response.iter_content` and stashes the
+    result into ``response._content`` so ``.content``/``.text``/``.json()`` keep
+    working transparently for callers. Rejects early on a declared
+    ``Content-Length`` over the cap to avoid downloading a body we'll discard.
+    """
+    headers = getattr(response, "headers", None)
+    declared = headers.get("Content-Length") if headers else None
+    if declared is not None:
+        try:
+            if int(declared) > max_bytes:
+                response.close()
+                raise ResponseTooLargeError(f"Declared Content-Length {int(declared)} exceeds cap {max_bytes}")
+        except (TypeError, ValueError):
+            pass  # Malformed header — fall through to the streamed byte count guard.
+
+    try:
+        chunk_iter = iter(response.iter_content(chunk_size=64 * 1024))
+    except TypeError:
+        # The response object doesn't yield a real byte stream (e.g. a test
+        # double). Nothing to cap — leave .content/.text untouched.
+        return
+
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in chunk_iter:
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            response.close()
+            raise ResponseTooLargeError(f"Response body exceeds cap {max_bytes}")
+        chunks.append(chunk)
+    # Populate the private cache requests uses so .content/.text/.json() are served
+    # from our capped buffer instead of re-reading the (already consumed) stream.
+    response._content = b"".join(chunks)
+    response._content_consumed = True
+
 
 def _parse_retry_after(exc: Exception) -> float | None:
     """Extract a ``Retry-After`` delay (seconds) from an HTTP error response.
@@ -117,11 +170,10 @@ def _configure_session(
     scraper_config: Mapping[str, Any] | None = None,
     rate_limit_profile: str = "interactive",
     user_agent: str | None = None,
-):
+) -> None:
     effective_user_agent = user_agent or resolve_user_agent(scraper_config)
     effective_settings = resolve_rate_limit_settings(scraper_config, profile=rate_limit_profile)
-    limiter = _apply_session_config(session, settings=effective_settings, user_agent=effective_user_agent)
-    return limiter, effective_user_agent
+    _apply_session_config(session, settings=effective_settings, user_agent=effective_user_agent)
 
 
 def request_with_backoff(
@@ -135,9 +187,17 @@ def request_with_backoff(
     scraper_config: Mapping[str, Any] | None = None,
     rate_limit_profile: str | None = None,
     user_agent: str | None = None,
+    max_bytes: int | None = _DEFAULT_MAX_BYTES,
     **kwargs: Any,
 ) -> requests.Response:
-    """Run an HTTP request with bounded retries and exponential backoff."""
+    """Run an HTTP request with bounded retries and exponential backoff.
+
+    Response bodies are streamed and buffered up to ``max_bytes`` (default
+    :data:`_DEFAULT_MAX_BYTES`); a body exceeding the cap raises
+    :class:`ResponseTooLargeError`. Pass ``max_bytes=None`` to disable the cap.
+    The buffered body is cached on the response, so callers keep using
+    ``.content``/``.text``/``.json()`` unchanged.
+    """
     # Always make at least one attempt. A misconfigured ``attempts <= 0`` (e.g.
     # ``pdf_attempts: 0``) would otherwise skip the loop entirely and ``raise
     # last_exc`` with last_exc still None → confusing ``TypeError``, no request made.
@@ -176,12 +236,25 @@ def request_with_backoff(
         kwargs["headers"] = _headers_with_user_agent(kwargs.get("headers"), user_agent=effective_user_agent)
         do_request = requests.request
 
+    # Stream so we can enforce a total-bytes ceiling as the body arrives, rather
+    # than letting requests buffer an unbounded body into the worker's heap. When
+    # the caller opts out (max_bytes=None) or already requested streaming, respect
+    # their choice and skip the capped read.
+    stream_for_cap = max_bytes is not None and "stream" not in kwargs
+    if stream_for_cap:
+        kwargs["stream"] = True
+
     for attempt in range(1, attempts + 1):
         try:
             limiter.acquire()
             response = do_request(method, url, timeout=timeout, **kwargs)
             response.raise_for_status()
+            if stream_for_cap:
+                _read_capped_body(response, max_bytes)
             return response
+        except ResponseTooLargeError:
+            # Retrying just re-downloads the same oversized body — fail fast.
+            raise
         except Exception as exc:  # pragma: no cover - exercised by integration paths
             last_exc = exc
             if attempt == attempts or not _is_retryable(exc):

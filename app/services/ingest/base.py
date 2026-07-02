@@ -20,7 +20,15 @@ _ARXIV_ID_RE = re.compile(r"arxiv\.org/abs/(.+?)(?:v\d+)?$")
 
 def extract_arxiv_id(link: str) -> str | None:
     match = _ARXIV_ID_RE.search(link)
-    return match.group(1) if match else None
+    if not match:
+        return None
+    candidate = match.group(1)
+    # arxiv_id feeds filesystem paths (the thumbnail cache), so reject anything a
+    # hostile feed link could use to escape the storage dir. Legacy ids legitimately
+    # carry a single '/' (e.g. 'math.GT/0309136'), which stays allowed.
+    if candidate.startswith("/") or "\\" in candidate or ".." in candidate.split("/"):
+        return None
+    return candidate
 
 
 def parse_publication_dt(published: str | None) -> tuple[date | None, str]:
@@ -119,9 +127,6 @@ class PaperCandidate:
             "resource_links": [dict(resource) for resource in self.resource_links],
         }
 
-    def to_entry(self) -> dict[str, Any]:
-        return self.to_entry_dict()
-
     @classmethod
     def from_entry_dict(cls, entry: Mapping[str, Any]) -> PaperCandidate:
         publication_dt = entry.get("publication_dt")
@@ -145,7 +150,3 @@ class PaperCandidate:
             api_affiliations=entry.get("api_affiliations", ""),
             resource_links=[dict(resource) for resource in (entry.get("resource_links") or [])],
         )
-
-    @classmethod
-    def from_entry(cls, entry: Mapping[str, Any]) -> PaperCandidate:
-        return cls.from_entry_dict(entry)

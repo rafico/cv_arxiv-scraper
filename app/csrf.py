@@ -19,6 +19,17 @@ def get_or_create_csrf_token() -> str:
     return csrf_token
 
 
+def rotate_csrf_token() -> str:
+    """Replace the session's CSRF token with a fresh one and return it.
+
+    Called by settings routes after a successful mutation so a leaked token
+    cannot be replayed.
+    """
+    csrf_token = token_urlsafe(32)
+    session[CSRF_SESSION_KEY] = csrf_token
+    return csrf_token
+
+
 def validate_csrf_token(submitted_token: str | None = None) -> None:
     token = submitted_token or request.headers.get("X-CSRF-Token", "") or request.form.get("csrf_token", "")
     expected_token = session.get(CSRF_SESSION_KEY, "")

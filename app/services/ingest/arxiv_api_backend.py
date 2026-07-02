@@ -129,6 +129,9 @@ class ArxivApiBackend:
                 rate_limit_profile="bulk",
                 session=session,
                 user_agent=user_agent,
+                # An Atom page of <= page_size entries is a few MB; cap well below the
+                # global default so a hostile response can't buffer 200 MB of XML.
+                max_bytes=25 * 1024 * 1024,
             )
             root = ET.fromstring(response.text)
             entries = root.findall("atom:entry", _ATOM_NS)

@@ -39,10 +39,6 @@ def _resolve_scraper_config(config: dict | None = None) -> dict | None:
     return None
 
 
-def _match_types_for_paper(paper: Paper) -> list[str]:
-    return [part.strip() for part in (paper.match_type or "").split("+") if part.strip()]
-
-
 def _rank_papers(
     papers: list[Paper],
     *,
@@ -55,7 +51,7 @@ def _rank_papers(
             (
                 paper,
                 compute_paper_score(
-                    match_types=_match_types_for_paper(paper),
+                    match_types=paper.match_types,
                     matched_terms_count=len(paper.matched_terms_list),
                     publication_dt=paper.publication_dt,
                     resource_count=len(paper.resource_links_list),

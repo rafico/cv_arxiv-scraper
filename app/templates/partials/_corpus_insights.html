@@ -1,0 +1,153 @@
+{# ── Corpus insights: topic clusters + emerging topics (read-only GETs, lazy-loaded on expand) ── #}
+<div class="max-w-2xl mx-auto mt-10" id="corpus-insights">
+    <h2 class="text-lg font-bold text-fg mb-1">Corpus insights</h2>
+    <p class="text-sm text-fg-muted mb-4">Topic clusters and emerging themes computed from your scraped corpus. Expand a panel to run the analysis — it can take a moment on large corpora.</p>
+
+    <div class="space-y-3">
+        <details id="clusters-panel" class="rounded-xl border border-edge bg-surface px-4 py-3">
+            <summary class="cursor-pointer list-none flex items-center justify-between gap-3 text-sm font-medium text-fg">
+                <span>Topic clusters</span>
+                <span class="text-xs text-fg-subtle">Last 7 days</span>
+            </summary>
+            <div id="clusters-body" class="mt-3"></div>
+        </details>
+
+        <details id="emerging-panel" class="rounded-xl border border-edge bg-surface px-4 py-3">
+            <summary class="cursor-pointer list-none flex items-center justify-between gap-3 text-sm font-medium text-fg">
+                <span>Emerging topics</span>
+                <span class="text-xs text-fg-subtle">Last 7 days vs prior 28</span>
+            </summary>
+            <div id="emerging-body" class="mt-3"></div>
+        </details>
+    </div>
+</div>
+<script>
+(function () {
+    function searchUrl(term) {
+        return "/?timeframe=all&q=" + encodeURIComponent(term);
+    }
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    }
+
+    function showMessage(body, text) {
+        body.textContent = "";
+        body.appendChild(el("p", "text-sm text-fg-muted", text));
+    }
+
+    // Cluster labels arrive as "term, term, term" — render each term as a chip
+    // linking into the dashboard's existing search (no new search path here).
+    function termChips(label) {
+        const wrap = el("div", "flex flex-wrap gap-1.5 min-w-0");
+        (label || "").split(",").map(function (t) { return t.trim(); }).filter(Boolean).forEach(function (term) {
+            const chip = el("a", "badge badge-accent hover:underline", term);
+            chip.href = searchUrl(term);
+            chip.title = 'Search your papers for "' + term + '"';
+            wrap.appendChild(chip);
+        });
+        return wrap;
+    }
+
+    function noIndexMessage(body) {
+        showMessage(body, "Recent papers aren't in the semantic index yet. Run a scrape to build embeddings, then check back.");
+    }
+
+    function emptyCorpusMessage(body) {
+        showMessage(body, "Not enough recent papers to analyze. Run a scrape or use Discover above to add papers and unlock insights.");
+    }
+
+    function renderClusters(body, data) {
+        body.textContent = "";
+        const clusters = data.clusters || [];
+        if (!data.paper_count) { emptyCorpusMessage(body); return; }
+        if (!data.indexed_paper_count || !clusters.length) { noIndexMessage(body); return; }
+
+        const list = el("div", "space-y-3");
+        clusters.forEach(function (cluster) {
+            const card = el("div", "rounded-lg bg-surface-2 p-3");
+            const header = el("div", "flex items-center justify-between gap-3");
+            header.appendChild(termChips(cluster.label));
+            const size = cluster.size || 0;
+            header.appendChild(el("span", "stat-quiet shrink-0", size + (size === 1 ? " paper" : " papers")));
+            card.appendChild(header);
+
+            const samples = (cluster.papers || []).slice(0, 3);
+            if (samples.length) {
+                const titles = el("div", "mt-2 space-y-1");
+                samples.forEach(function (paper) {
+                    titles.appendChild(el("div", "text-xs text-fg-muted truncate", "• " + (paper.title || "Untitled")));
+                });
+                card.appendChild(titles);
+            }
+            list.appendChild(card);
+        });
+        body.appendChild(list);
+        body.appendChild(el("p", "mt-2 text-[11px] text-fg-subtle",
+            "Clustered " + data.indexed_paper_count + " of " + data.paper_count +
+            " papers from the last " + data.window_days + " days."));
+    }
+
+    function growthText(topic) {
+        if (!topic.baseline_share) return "New";
+        const pct = Math.round(((topic.recent_share - topic.baseline_share) / topic.baseline_share) * 100);
+        return (pct >= 0 ? "+" : "") + pct + "%";
+    }
+
+    function renderEmerging(body, data) {
+        body.textContent = "";
+        if (!data.recent_paper_count) { emptyCorpusMessage(body); return; }
+        if (!data.indexed_recent_paper_count) { noIndexMessage(body); return; }
+        const topics = data.topics || [];
+        if (!topics.length) {
+            showMessage(body, "No topics are trending above their baseline right now — check back after the next scrape.");
+            return;
+        }
+
+        const list = el("div", "space-y-2");
+        topics.forEach(function (topic) {
+            const row = el("div", "rounded-lg bg-surface-2 px-3 py-2 flex items-center justify-between gap-3");
+            row.appendChild(termChips(topic.label));
+            const right = el("div", "flex items-center gap-2 shrink-0");
+            right.appendChild(el("span", "stat-quiet", (topic.recent_count || 0) + " recent vs " + (topic.baseline_count || 0) + " baseline"));
+            right.appendChild(el("span", "badge badge-warn", growthText(topic)));
+            row.appendChild(right);
+            list.appendChild(row);
+        });
+        body.appendChild(list);
+        body.appendChild(el("p", "mt-2 text-[11px] text-fg-subtle",
+            "Share of papers in the last " + data.recent_days + " days vs the prior " + data.baseline_days + " days."));
+    }
+
+    function wireLazyPanel(panelId, bodyId, url, render) {
+        const panel = document.getElementById(panelId);
+        const body = document.getElementById(bodyId);
+        if (!panel || !body) return;
+        let loaded = false;
+        panel.addEventListener("toggle", async function () {
+            if (!panel.open || loaded) return;
+            loaded = true;
+            showMessage(body, "Analyzing your corpus…");
+            try {
+                const response = await fetch(url);
+                const data = await response.json().catch(function () { return {}; });
+                if (!response.ok) {
+                    showMessage(body, data.error || "Couldn't run the analysis. Close and reopen this panel to retry.");
+                    loaded = false;
+                    return;
+                }
+                render(body, data);
+            } catch (error) {
+                showMessage(body, "Could not reach the server. Close and reopen this panel to retry.");
+                loaded = false;
+            }
+        });
+    }
+
+    wireLazyPanel("clusters-panel", "clusters-body", "/api/corpus/clusters", renderClusters);
+    wireLazyPanel("emerging-panel", "emerging-body", "/api/corpus/emerging", renderEmerging);
+})();
+</script>

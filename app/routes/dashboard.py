@@ -13,12 +13,10 @@ from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
 from app.csrf import get_or_create_csrf_token
 from app.enums import FeedbackAction, SortOption
 from app.models import (
-    Collection,
     DigestRun,
     Paper,
     PaperCollection,
     PaperFeedback,
-    SavedSearch,
     ScrapeRun,
     db,
     inbox_freshness_clause,
@@ -26,11 +24,11 @@ from app.models import (
 from app.services.feedback import get_feedback_snapshot
 from app.services.preferences import first_author_name, get_preferences
 from app.services.ranking import (
-    FEEDBACK_BOOST,
     combined_rank_score,
     explain_score,
     generate_ranking_explanation,
     get_active_ranking_config,
+    rank_score_order_expr,
     top_score_contributors,
 )
 from app.services.related import build_vector, top_related_papers
@@ -337,7 +335,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
         paper.active_actions = feedback["active_actions"]
         paper.rank_score_value = combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0))
         paper.score_breakdown = explain_score(
-            match_types=[part.strip() for part in (paper.match_type or "").split("+") if part.strip()],
+            match_types=paper.match_types,
             matched_terms_count=len(paper.matched_terms_list),
             publication_dt=paper.publication_dt,
             resource_count=len(paper.resource_links_list),
@@ -514,9 +512,7 @@ def index():
         )
     else:
         query = query.order_by(
-            (
-                db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
-            ).desc(),
+            rank_score_order_expr().desc(),
             Paper.publication_dt.desc(),
             Paper.scraped_at.desc(),
         )
@@ -573,8 +569,6 @@ def index():
         },
         filter_options=filter_options,
         dashboard_overview=_build_dashboard_overview(config),
-        collections=Collection.query.order_by(Collection.name).all(),
-        saved_searches=SavedSearch.query.order_by(SavedSearch.created_at.desc()).all(),
         mendeley_connected=mendeley_connected,
         csrf_token=get_or_create_csrf_token(),
         preferences=get_preferences(config),
@@ -589,6 +583,20 @@ def _missing_thumbnail_response():
     return ("", 404, {"Cache-Control": "no-store"})
 
 
+def _static_root() -> Path:
+    return Path(current_app.static_folder or Path(__file__).resolve().parent.parent / "static")
+
+
+def _resolved_thumbnail_path(storage_key: str, static_root: Path, *, suffix: str = "") -> Path | None:
+    """Resolve the on-disk PNG for a thumbnail/teaser and enforce the traversal
+    guard, returning None if the resolved path escapes static/thumbnails."""
+    thumbnail_root = (static_root / "thumbnails").resolve()
+    resolved = (thumbnail_root / f"{storage_key}{suffix}.png").resolve()
+    if not resolved.is_relative_to(thumbnail_root):
+        return None
+    return resolved
+
+
 @dashboard_bp.route("/papers/<int:paper_id>/thumbnail.png")
 def paper_thumbnail(paper_id: int):
     paper = Paper.query.get_or_404(paper_id)
@@ -596,10 +604,9 @@ def paper_thumbnail(paper_id: int):
     if not storage_key or not paper.pdf_link:
         return ("", 404)
 
-    static_root = Path(current_app.static_folder or Path(__file__).resolve().parent.parent / "static")
-    thumbnail_root = (static_root / "thumbnails").resolve()
-    thumbnail_path = (thumbnail_root / f"{storage_key}.png").resolve()
-    if not thumbnail_path.is_relative_to(thumbnail_root):
+    static_root = _static_root()
+    thumbnail_path = _resolved_thumbnail_path(storage_key, static_root)
+    if thumbnail_path is None:
         return ("", 404)
 
     if not thumbnail_path.exists():
@@ -618,14 +625,21 @@ def paper_teaser(paper_id: int):
     if not storage_key or not paper.pdf_link:
         return ("", 404)
 
-    static_root = Path(current_app.static_folder or Path(__file__).resolve().parent.parent / "static")
-    thumbnail_root = (static_root / "thumbnails").resolve()
-    teaser_path = (thumbnail_root / f"{storage_key}_teaser.png").resolve()
-    if not teaser_path.is_relative_to(thumbnail_root):
+    static_root = _static_root()
+    teaser_path = _resolved_thumbnail_path(storage_key, static_root, suffix="_teaser")
+    if teaser_path is None:
         return ("", 404)
 
     if teaser_path.exists():
         return send_file(teaser_path, mimetype="image/png", conditional=True, max_age=86400)
-    # Serve the page-1 thumbnail if it's already cached (instant); otherwise
-    # paper_thumbnail enqueues a background warm and returns a placeholder.
-    return paper_thumbnail(paper_id)
+
+    # Fall back to the page-1 thumbnail if it's already cached (instant); otherwise
+    # enqueue a background warm and return a placeholder — reusing the already-fetched
+    # paper/storage_key instead of re-invoking paper_thumbnail (avoids a second get_or_404).
+    thumbnail_path = _resolved_thumbnail_path(storage_key, static_root)
+    if thumbnail_path is None:
+        return ("", 404)
+    if not thumbnail_path.exists():
+        THUMBNAIL_WARMER.warm(storage_key, paper.pdf_link, static_root)
+        return _missing_thumbnail_response()
+    return send_file(thumbnail_path, mimetype="image/png", conditional=True, max_age=86400)

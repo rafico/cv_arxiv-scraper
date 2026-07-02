@@ -172,6 +172,20 @@ class ZoteroClient:
         return item
 
     @staticmethod
+    def _batch_result_map(resp: requests.Response, key: str) -> dict:
+        """Extract a per-item map (``failed`` / ``successful``) from a 200 response.
+
+        Defensive against non-JSON / non-dict bodies (older/mocked responses).
+        """
+        try:
+            body = resp.json()
+        except (ValueError, TypeError):
+            return {}
+        if isinstance(body, dict) and isinstance(body.get(key), dict):
+            return body[key]
+        return {}
+
+    @staticmethod
     def _failed_items(resp: requests.Response) -> dict:
         """Extract Zotero's per-item ``failed`` map from a 200 response.
 
@@ -179,30 +193,17 @@ class ZoteroClient:
         rejected (validation, quota, …), reporting the outcome in the body as
         ``{"successful": …, "unchanged": …, "failed": {...}}``. Treating any 200
         as full success silently loses those items, so callers must inspect this.
-        Defensive against non-JSON / non-dict bodies (older/mocked responses).
         """
-        try:
-            body = resp.json()
-        except (ValueError, TypeError):
-            return {}
-        if isinstance(body, dict) and isinstance(body.get("failed"), dict):
-            return body["failed"]
-        return {}
+        return ZoteroClient._batch_result_map(resp, "failed")
 
     @staticmethod
     def _successful_items(resp: requests.Response) -> dict:
         """Extract Zotero's per-item ``successful`` map (batch-index -> created item).
 
         Each created item carries a ``key`` we persist on the Paper so a re-sync skips
-        it instead of creating a duplicate. Defensive against non-JSON/non-dict bodies.
+        it instead of creating a duplicate.
         """
-        try:
-            body = resp.json()
-        except (ValueError, TypeError):
-            return {}
-        if isinstance(body, dict) and isinstance(body.get("successful"), dict):
-            return body["successful"]
-        return {}
+        return ZoteroClient._batch_result_map(resp, "successful")
 
     def add_item(self, paper: Paper, collection_key: str | None = None) -> dict:
         """Add a paper to the user's Zotero library.

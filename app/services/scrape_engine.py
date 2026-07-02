@@ -491,21 +491,30 @@ def _extract_sections(app, results: list[dict]) -> None:
         LOGGER.warning("Section extraction failed (non-fatal)", exc_info=True)
         return
 
+    # Section persistence is documented as non-fatal: papers are already committed
+    # by _save_results, so a DB error here (e.g. "database is locked" under
+    # concurrent runs, disk full) must degrade to skipping sections rather than
+    # unwinding into execute_scrape's except and marking the whole scrape failed.
     total_sections = 0
-    with app.app_context():
-        for (link, _pdf), sections in zip(targets, sections_per_target):
-            if not sections:
-                continue
-            paper = Paper.query.filter_by(link=link).first()
-            if not paper:
-                continue
-            PaperSection.query.filter_by(paper_id=paper.id).delete()
-            for section_type, text, order_index in sections:
-                db.session.add(
-                    PaperSection(paper_id=paper.id, section_type=section_type, text=text, order_index=order_index)
-                )
-            total_sections += len(sections)
-        db.session.commit()
+    try:
+        with app.app_context():
+            for (link, _pdf), sections in zip(targets, sections_per_target):
+                if not sections:
+                    continue
+                paper = Paper.query.filter_by(link=link).first()
+                if not paper:
+                    continue
+                PaperSection.query.filter_by(paper_id=paper.id).delete()
+                for section_type, text, order_index in sections:
+                    db.session.add(
+                        PaperSection(paper_id=paper.id, section_type=section_type, text=text, order_index=order_index)
+                    )
+                total_sections += len(sections)
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        LOGGER.warning("Section persistence failed (non-fatal)", exc_info=True)
+        return
 
     if total_sections <= 0:
         return
@@ -757,8 +766,6 @@ def _enrich_results_with_github(app, results: list[dict], session: requests.Sess
     if not github_config.get("enabled", True):
         return
 
-    import os
-
     from app.services.enrichment_providers import GitHubProvider, extract_github_repo
 
     repos_by_arxiv_id: dict[str, str] = {}
@@ -795,6 +802,65 @@ def _enrich_results_with_github(app, results: list[dict], session: requests.Sess
         LOGGER.warning("GitHub enrichment failed (non-fatal)", exc_info=True)
 
 
+def _enrich_results_with_huggingface(app, results: list[dict], session: requests.Session, config: dict) -> None:
+    """Fill Hugging Face Papers community buzz (upvotes/comments) and missing code/project links.
+
+    Keyless, always-on best-effort (a config ``huggingface.enabled: false`` opts out).
+    Runs after ``_save_results`` (rows must exist for the enrichment cache) and before
+    ``_enrich_results_with_github``, so an HF-discovered repo link is picked up by the
+    stars/license pass in the same run. Fill-only: ``merge_resource_links`` dedups with
+    existing links winning, and ``github_repo`` is only set when currently empty.
+    """
+    hf_config = config.get("huggingface", {}) or {}
+    if not hf_config.get("enabled", True):
+        return
+    if not results:
+        return
+
+    from app.services.enrichment_providers import (
+        HuggingFaceProvider,
+        extract_github_repo,
+        huggingface_resource_links,
+    )
+
+    arxiv_ids = [res["arxiv_id"] for res in results if res.get("arxiv_id")]
+    if not arxiv_ids:
+        return
+
+    provider = HuggingFaceProvider()
+    try:
+        with app.app_context():
+            payloads = {aid: data for aid, data in provider.fetch_batch(arxiv_ids, session=session).items() if data}
+            if not payloads:
+                return
+
+            from app.models import Paper, db
+
+            papers = Paper.query.filter(Paper.arxiv_id.in_(list(payloads))).all()
+            for paper in papers:
+                data = payloads.get(paper.arxiv_id) or {}
+                paper.hf_upvotes = data.get("hf_upvotes")
+                paper.hf_comments_count = data.get("hf_comments_count")
+                hf_links = huggingface_resource_links(data)
+                if hf_links:
+                    paper.resource_links = merge_resource_links(paper.resource_links_list, hf_links)
+                    if not paper.github_repo:
+                        paper.github_repo = extract_github_repo(hf_links)
+            db.session.commit()
+
+        # Merge HF links into the in-flight result dicts too: the GitHub
+        # stars/license pass discovers repos from result resource_links.
+        for res in results:
+            data = payloads.get(res.get("arxiv_id") or "")
+            if not data:
+                continue
+            hf_links = huggingface_resource_links(data)
+            if hf_links:
+                res["resource_links"] = merge_resource_links(res.get("resource_links"), hf_links)
+    except Exception:
+        LOGGER.warning("Hugging Face Papers enrichment failed (non-fatal)", exc_info=True)
+
+
 def _enrich_results_with_pdf_links(results: list[dict], config: dict | None) -> None:
     """Merge code/project links found in PDF front matter into resource_links (in-place)."""
     if not results:
@@ -824,6 +890,14 @@ def _enrich_results_with_pdf_links(results: list[dict], config: dict | None) -> 
 # Bound how many PDFs are downloaded + held in memory at once during the affiliation
 # pre-pass; each chunk is parsed in one isolated subprocess.
 _AFFILIATION_PREFETCH_CHUNK = 64
+# Bound resident PDF bytes during the prefetch: a per-download cap (a real arXiv
+# PDF over 50 MB is pathological) plus an aggregate per-chunk budget sized so
+# legitimate figure-heavy CV papers (~5-20 MB) rarely trip it — live QA showed a
+# tighter budget dropping real PDFs and silently degrading affiliation matching.
+# Once the aggregate budget is hit, remaining bodies in the chunk are dropped
+# (affiliation enrichment is best-effort).
+_AFFILIATION_MAX_PDF_BYTES = 50 * 1024 * 1024
+_AFFILIATION_MAX_TOTAL_PDF_BYTES = 768 * 1024 * 1024
 
 
 def _entry_has_match_signal(entry: dict, whitelists: dict, affiliation_text: str) -> bool:
@@ -897,6 +971,7 @@ def _prefetch_affiliation_text(
                 session=session,
                 scraper_config=config,
                 rate_limit_profile=rate_limit_profile,
+                max_bytes=_AFFILIATION_MAX_PDF_BYTES,
             )
             return response.content
         except Exception as exc:
@@ -925,10 +1000,18 @@ def _prefetch_affiliation_text(
         # tick the progress counter; results are written back by index to preserve the
         # chunk order the downstream zip() relies on.
         pdf_contents: list[bytes | None] = [None] * len(chunk)
+        chunk_bytes = 0
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {executor.submit(_download, entry): i for i, entry in enumerate(chunk)}
             for future in as_completed(future_to_index):
-                pdf_contents[future_to_index[future]] = future.result()
+                content = future.result()
+                if content is not None:
+                    if chunk_bytes + len(content) > _AFFILIATION_MAX_TOTAL_PDF_BYTES:
+                        LOGGER.warning("Affiliation prefetch byte budget reached; dropping remaining PDFs in chunk")
+                        content = None
+                    else:
+                        chunk_bytes += len(content)
+                pdf_contents[future_to_index[future]] = content
                 downloaded += 1
                 _emit_download_progress(downloaded)
 
@@ -1020,6 +1103,7 @@ def _finalize_results(
 
     _sort_results(results)
     new_count, skipped = _save_results(app, results)
+    _enrich_results_with_huggingface(app, results, session, config)
     _enrich_results_with_github(app, results, session, config)
 
     _emit(event_callback, "status", {"phase": "thumbnails", "message": "Generating PDF thumbnails..."})

@@ -20,10 +20,32 @@ DEFAULT_LIMIT = 100
 MAX_DATE_WINDOW_DAYS = 36_500
 MAX_MIN_CITATIONS = 2_147_483_647
 
+# Bounds on the string-list filters. Without these, ``execute_saved_search`` builds
+# one (or more) ilike clause per item, so a payload with tens of thousands of items
+# blows past SQLite's expression-depth limit (uncaught OperationalError -> 500) or
+# runs pathologically long, blocking a worker thread. 100 items / 256 chars each is
+# far beyond any realistic saved search.
+MAX_LIST_ITEMS = 100
+MAX_LIST_ITEM_LENGTH = 256
+
 
 def _escape_like(value: str) -> str:
     """Escape SQL LIKE wildcard characters."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _title_or_abstract_any(terms):
+    """OR-clause matching any of ``terms`` against the title or abstract."""
+    clauses = []
+    for term in terms:
+        pattern = f"%{_escape_like(term)}%"
+        clauses.append(
+            db.or_(
+                Paper.title.ilike(pattern, escape="\\"),
+                Paper.abstract_text.ilike(pattern, escape="\\"),
+            )
+        )
+    return db.or_(*clauses)
 
 
 def coerce_int_field(value: str | int | float | None) -> int | None:
@@ -69,6 +91,10 @@ def validate_saved_search(data: dict) -> list[str]:
                 errors.append(f"{field} must be a list")
             elif not all(isinstance(item, str) for item in data[field]):
                 errors.append(f"{field} must contain only strings")
+            elif len(data[field]) > MAX_LIST_ITEMS:
+                errors.append(f"{field} must contain at most {MAX_LIST_ITEMS} items")
+            elif any(len(item) > MAX_LIST_ITEM_LENGTH for item in data[field]):
+                errors.append(f"{field} items must be at most {MAX_LIST_ITEM_LENGTH} characters")
 
     # The free-form ``filters`` dict is splatted into ``url_for`` in the sidebar.
     # A werkzeug-reserved key (``_method``/``_external``/…) raises BuildError and
@@ -106,16 +132,7 @@ def execute_saved_search(
 
     # Include keywords (title or abstract must contain at least one).
     if search.include_keywords:
-        keyword_filters = []
-        for kw in search.include_keywords:
-            pattern = f"%{_escape_like(kw)}%"
-            keyword_filters.append(
-                db.or_(
-                    Paper.title.ilike(pattern, escape="\\"),
-                    Paper.abstract_text.ilike(pattern, escape="\\"),
-                )
-            )
-        query = query.filter(db.or_(*keyword_filters))
+        query = query.filter(_title_or_abstract_any(search.include_keywords))
 
     # Exclude keywords (none should match).
     if search.exclude_keywords:
@@ -140,25 +157,15 @@ def execute_saved_search(
         cutoff = now_utc() - timedelta(days=search.date_window_days)
         query = query.filter(inbox_freshness_clause(cutoff))
 
-    # Minimum citations filter.
-    if search.min_citations is not None:
-        query = query.filter(
-            Paper.citation_count.isnot(None),
-            Paper.citation_count >= search.min_citations,
-        )
+    # Minimum citations filter. Coalesce NULL to 0 so unenriched papers (freshly
+    # scraped, citation_count still NULL) are only excluded when a positive floor is
+    # set; min_citations == 0 means "any citation count" and drops no papers.
+    if search.min_citations is not None and search.min_citations > 0:
+        query = query.filter(db.func.coalesce(Paper.citation_count, 0) >= search.min_citations)
 
     # Methods mentions (search in abstract/title).
     if search.methods_mentions:
-        method_filters = []
-        for method in search.methods_mentions:
-            pattern = f"%{_escape_like(method)}%"
-            method_filters.append(
-                db.or_(
-                    Paper.title.ilike(pattern, escape="\\"),
-                    Paper.abstract_text.ilike(pattern, escape="\\"),
-                )
-            )
-        query = query.filter(db.or_(*method_filters))
+        query = query.filter(_title_or_abstract_any(search.methods_mentions))
 
     # Also apply legacy free-form filters dict for backward compatibility.
     filters = search.filters or {}

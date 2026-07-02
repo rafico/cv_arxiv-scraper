@@ -10,7 +10,36 @@ opaque 500. These helpers fail fast with a clean ``BadRequest`` (400), which the
 
 from __future__ import annotations
 
+from flask import request
 from werkzeug.exceptions import BadRequest
+
+
+def parse_int_query_arg(
+    name: str,
+    *,
+    default: int | None,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int | None:
+    """Parse an optional int query arg with bounds; raise ``ValueError`` on bad input.
+
+    Shared by the search/corpus/onboarding endpoints so the parse-validate-bound
+    pattern lives in one place (callers map ``ValueError`` to a 400 or a default).
+    """
+    raw = request.args.get(name, "").strip()
+    if not raw:
+        return default
+
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"Invalid '{name}' parameter") from exc
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"'{name}' must be at least {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"'{name}' must be at most {maximum}")
+    return value
 
 
 def require_str(payload: dict, key: str, *, allow_empty: bool = False) -> str:

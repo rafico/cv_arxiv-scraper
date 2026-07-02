@@ -32,7 +32,7 @@ def export_bibtex():
     from datetime import timedelta
 
     from app.routes.dashboard import TIMEFRAME_DAYS
-    from app.services.ranking import FEEDBACK_BOOST
+    from app.services.ranking import rank_score_order_expr
     from app.services.text import now_utc
 
     view = request.args.get("view", "inbox")
@@ -59,9 +59,7 @@ def export_bibtex():
         cutoff = now_utc() - timedelta(days=days)
         query = query.filter(inbox_freshness_clause(cutoff))
 
-    papers = query.order_by(
-        (db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST).desc(),
-    ).all()
+    papers = query.order_by(rank_score_order_expr().desc()).all()
 
     bib = papers_to_bibtex(papers)
     response = Response(bib, mimetype="application/x-bibtex")
@@ -81,9 +79,11 @@ MAX_BULK_IDS = 1000
 
 @api_bp.route("/papers/bulk-bibtex", methods=["GET"])
 def bulk_bibtex():
+    from app.routes.api.search import _parse_paper_ids_query
+
     ids_param = request.args.get("ids", "")
     try:
-        paper_ids = [int(x.strip()) for x in ids_param.split(",") if x.strip()]
+        paper_ids = _parse_paper_ids_query(ids_param)
     except ValueError:
         return jsonify({"error": "Invalid paper IDs"}), 400
     # De-dup and cap before the IN query: an unbounded list overflows SQLite's

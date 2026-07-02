@@ -125,14 +125,6 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
     batch_size = _ARXIV_API_BATCH_SIZE
     entries: list[dict] = []
 
-    try:
-        LOGGER.info("Running arXiv API shadow mode query for %s", category)
-        shadow_entries = query_arxiv_api([category], start_date, end_date, max_results=2000)
-        shadow_ids = {e["arxiv_id"] for e in shadow_entries if e.get("arxiv_id")}
-    except Exception as exc:
-        LOGGER.error("Shadow mode failed: %s", exc)
-        shadow_ids = set()
-
     start = 0
     pages_fetched = 0
 
@@ -183,25 +175,6 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
             seen.add(aid)
             unique_entries.append(entry)
     entries = unique_entries
-
-    fetched_ids = {e["arxiv_id"] for e in entries if e.get("arxiv_id")}
-    missing_in_shadow = fetched_ids - shadow_ids
-    missing_in_legacy = shadow_ids - fetched_ids
-
-    if missing_in_shadow:
-        LOGGER.warning(
-            "Shadow mode mismatch: backend query missed %d papers. Sample: %s",
-            len(missing_in_shadow),
-            list(missing_in_shadow)[:5],
-        )
-    if missing_in_legacy:
-        LOGGER.warning(
-            "Shadow mode mismatch: legacy xml parser missed %d papers. Sample: %s",
-            len(missing_in_legacy),
-            list(missing_in_legacy)[:5],
-        )
-    if not missing_in_shadow and not missing_in_legacy and fetched_ids:
-        LOGGER.info("Shadow mode success: backend results match legacy results perfectly.")
 
     LOGGER.info("Fetched %d rolling-window entries for %s", len(entries), category)
     return entries
@@ -426,6 +399,17 @@ def enrich_entries_with_api_metadata(entries: list[dict], session: requests.Sess
         if not arxiv_id:
             continue
         data = metadata.get(arxiv_id)
+
+        # Resource-link extraction only needs the feed abstract (always present),
+        # so run it for every entry regardless of whether the API metadata match
+        # succeeded — a missed/rate-limited batch must not zero out code/project
+        # links that live in the abstract.
+        entry["resource_links"] = extract_resource_links(
+            entry.get("abstract", ""),
+            (data or {}).get("comment", ""),
+            (data or {}).get("doi", ""),
+        )
+
         if not data:
             continue
 
@@ -433,12 +417,6 @@ def enrich_entries_with_api_metadata(entries: list[dict], session: requests.Sess
         entry["categories"] = data.get("categories", [])
         entry["comment"] = data.get("comment", "")
         entry["doi"] = data.get("doi", "")
-
-        entry["resource_links"] = extract_resource_links(
-            entry.get("abstract", ""),
-            data.get("comment", ""),
-            data.get("doi", ""),
-        )
         enriched += 1
 
     LOGGER.info("arXiv API metadata enriched %d/%d papers", enriched, len(arxiv_ids))

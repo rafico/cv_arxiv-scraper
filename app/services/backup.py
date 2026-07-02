@@ -28,6 +28,11 @@ SCHEMA_VERSION = 1
 _MAX_EXTRACT_BYTES = 1024 * 1024 * 1024
 _MAX_COMPRESSION_RATIO = 100
 _MIN_EXTRACT_BUDGET = 16 * 1024 * 1024
+# A real backup holds a handful of members (DB, config, metadata, FAISS files). Cap
+# the member count so a tiny archive declaring millions of empty files/dirs can't
+# exhaust memory (materializing TarInfos) and inodes — the byte budget alone never
+# trips on zero-length members.
+_MAX_ARCHIVE_MEMBERS = 256
 
 # Archive member names (kept stable so older/newer backups stay readable).
 _DB_MEMBER = "arxiv_papers.db"
@@ -90,8 +95,13 @@ def create_backup(
         # index disagrees with its DB snapshot.
         faiss_snapshot: Path | None = None
         if faiss_dir.is_dir():
+            from app.services.embeddings import _index_file_lock
+
             faiss_snapshot = Path(tmp_dir) / "faiss_index"
-            shutil.copytree(faiss_dir, faiss_snapshot)
+            # Serialize against a live scrape's index writer so the snapshot captures a
+            # complete, single-generation index rather than a half-written one.
+            with _index_file_lock(faiss_dir).acquire():
+                shutil.copytree(faiss_dir, faiss_snapshot)
 
         with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
             if has_db:
@@ -145,7 +155,11 @@ def _safe_extract(tar: tarfile.TarFile, dest_dir: Path, *, max_total_bytes: int)
     """
     dest_root = dest_dir.resolve()
     total_bytes = 0
-    for member in tar.getmembers():
+    # Iterate lazily (``for member in tar``) rather than getmembers() so a bomb with
+    # millions of members is rejected while streaming, before all TarInfos materialize.
+    for member_count, member in enumerate(tar, start=1):
+        if member_count > _MAX_ARCHIVE_MEMBERS:
+            raise ValueError(f"Backup archive has too many members (>{_MAX_ARCHIVE_MEMBERS}); refusing to extract")
         name = member.name
         member_path = Path(name)
         if member_path.is_absolute() or ".." in member_path.parts:
@@ -242,6 +256,40 @@ def _stage_dir(src: Path, target: Path) -> Path:
     return staging
 
 
+def _move_aside(target: Path, *, is_dir: bool) -> Path:
+    """Rename ``target`` to a same-filesystem ``.old_`` sentinel and return it.
+
+    Same-fs ``os.replace``, so cheap and near-atomic. The caller registers the
+    rollback/cleanup via :func:`_register_restore` once the surrounding commit step
+    has succeeded.
+    """
+    prefix = "." + target.name + ".old_"
+    if is_dir:
+        old_backup = Path(tempfile.mkdtemp(dir=str(target.parent), prefix=prefix))
+        old_backup.rmdir()
+    else:
+        fd, ob = tempfile.mkstemp(dir=str(target.parent), prefix=prefix)
+        os.close(fd)
+        old_backup = Path(ob)
+        old_backup.unlink()
+    os.replace(target, old_backup)
+    return old_backup
+
+
+def _register_restore(target: Path, old_backup: Path, *, is_dir: bool, rollbacks: list, cleanups: list) -> None:
+    """Register the all-or-nothing rollback (restore ``old_backup``) + cleanup (drop it)."""
+
+    def _rollback() -> None:
+        # A non-empty dir cannot be a rename destination, so drop the new target
+        # before restoring the old one.
+        if target.exists():
+            _rmtree(target) if is_dir else _unlink(target)
+        os.replace(old_backup, target)
+
+    rollbacks.append(_rollback)
+    cleanups.append(lambda: _rmtree(old_backup) if is_dir else _unlink(old_backup))
+
+
 def _commit_swap(staged: Path, target: Path, *, is_dir: bool, rollbacks: list, cleanups: list) -> None:
     """Swap a pre-staged sibling into ``target`` via same-filesystem renames.
 
@@ -255,16 +303,7 @@ def _commit_swap(staged: Path, target: Path, *, is_dir: bool, rollbacks: list, c
     old_backup: Path | None = None
     try:
         if target.exists():
-            prefix = "." + target.name + ".old_"
-            if is_dir:
-                old_backup = Path(tempfile.mkdtemp(dir=str(target.parent), prefix=prefix))
-                old_backup.rmdir()
-            else:
-                fd, ob = tempfile.mkstemp(dir=str(target.parent), prefix=prefix)
-                os.close(fd)
-                old_backup = Path(ob)
-                old_backup.unlink()
-            os.replace(target, old_backup)
+            old_backup = _move_aside(target, is_dir=is_dir)
         os.replace(staged, target)
     except OSError:
         # Restore this component's original state, then surface the error.
@@ -273,17 +312,7 @@ def _commit_swap(staged: Path, target: Path, *, is_dir: bool, rollbacks: list, c
         raise
 
     if old_backup is not None:
-        backup = old_backup  # bind for the closures below
-
-        def _rollback() -> None:
-            # A non-empty dir cannot be a rename destination, so drop the new
-            # target before restoring the old one.
-            if target.exists():
-                _rmtree(target) if is_dir else _unlink(target)
-            os.replace(backup, target)
-
-        rollbacks.append(_rollback)
-        cleanups.append(lambda: _rmtree(backup) if is_dir else _unlink(backup))
+        _register_restore(target, old_backup, is_dir=is_dir, rollbacks=rollbacks, cleanups=cleanups)
     else:
         rollbacks.append(lambda: _rmtree(target) if is_dir else _unlink(target))
 
@@ -299,24 +328,8 @@ def _commit_removal(target: Path, *, is_dir: bool, rollbacks: list, cleanups: li
     """
     if not target.exists():
         return
-    prefix = "." + target.name + ".old_"
-    if is_dir:
-        old_backup = Path(tempfile.mkdtemp(dir=str(target.parent), prefix=prefix))
-        old_backup.rmdir()
-    else:
-        fd, ob = tempfile.mkstemp(dir=str(target.parent), prefix=prefix)
-        os.close(fd)
-        old_backup = Path(ob)
-        old_backup.unlink()
-    os.replace(target, old_backup)
-
-    def _rollback() -> None:
-        if target.exists():
-            _rmtree(target) if is_dir else _unlink(target)
-        os.replace(old_backup, target)
-
-    rollbacks.append(_rollback)
-    cleanups.append(lambda: _rmtree(old_backup) if is_dir else _unlink(old_backup))
+    old_backup = _move_aside(target, is_dir=is_dir)
+    _register_restore(target, old_backup, is_dir=is_dir, rollbacks=rollbacks, cleanups=cleanups)
 
 
 def restore_backup(
@@ -373,47 +386,52 @@ def restore_backup(
         config_bytes = restored_config.read_bytes() if restored_config.is_file() else None
 
         # Phase 2 — commit the staged components, rolling back everything already
-        # swapped if any step fails.
+        # swapped if any step fails. Hold the cross-process FAISS index lock across the
+        # commit so a concurrent scrape's index writer can't os.replace into the dir
+        # we're swapping/removing (which would lose its vectors or desync index/DB).
+        from app.services.embeddings import _index_file_lock
+
         rollbacks: list = []
         cleanups: list = []
-        try:
-            if staged_db is not None:
-                _commit_swap(staged_db, db_path, is_dir=False, rollbacks=rollbacks, cleanups=cleanups)
-                _remove_wal_sidecars(db_path)
-                restored.append(_DB_MEMBER)
-            if staged_faiss is not None:
-                _commit_swap(staged_faiss, faiss_dir, is_dir=True, rollbacks=rollbacks, cleanups=cleanups)
-                restored.append("faiss_index/")
-            elif staged_db is not None:
-                # DB restored but the archive carried no FAISS index (e.g. a backup taken
-                # before the first scrape). Any live index belongs to the previous corpus
-                # and would reference paper ids the restored DB no longer has, so drop it
-                # atomically — the index can never disagree with the restored DB.
-                _commit_removal(faiss_dir, is_dir=True, rollbacks=rollbacks, cleanups=cleanups)
-                restored.append("faiss_index/ (cleared stale)")
-            if config_bytes is not None:
-                # config.yaml is committed last via the same atomic write as
-                # save_config(); nothing follows it, so it needs no undo backup.
-                _atomic_write(config_path, config_bytes)
-                restored.append(_CONFIG_MEMBER)
-        except BaseException:
-            for undo in reversed(rollbacks):
-                try:
-                    undo()
-                except OSError:
-                    pass
-            # Drop any staged artifacts that were never committed.
-            if staged_db is not None:
-                _unlink(staged_db)
-            if staged_faiss is not None:
-                _rmtree(staged_faiss)
-            raise
-        else:
-            for done in cleanups:
-                try:
-                    done()
-                except OSError:
-                    pass
+        with _index_file_lock(faiss_dir).acquire():
+            try:
+                if staged_db is not None:
+                    _commit_swap(staged_db, db_path, is_dir=False, rollbacks=rollbacks, cleanups=cleanups)
+                    _remove_wal_sidecars(db_path)
+                    restored.append(_DB_MEMBER)
+                if staged_faiss is not None:
+                    _commit_swap(staged_faiss, faiss_dir, is_dir=True, rollbacks=rollbacks, cleanups=cleanups)
+                    restored.append("faiss_index/")
+                elif staged_db is not None:
+                    # DB restored but the archive carried no FAISS index (e.g. a backup taken
+                    # before the first scrape). Any live index belongs to the previous corpus
+                    # and would reference paper ids the restored DB no longer has, so drop it
+                    # atomically — the index can never disagree with the restored DB.
+                    _commit_removal(faiss_dir, is_dir=True, rollbacks=rollbacks, cleanups=cleanups)
+                    restored.append("faiss_index/ (cleared stale)")
+                if config_bytes is not None:
+                    # config.yaml is committed last via the same atomic write as
+                    # save_config(); nothing follows it, so it needs no undo backup.
+                    _atomic_write(config_path, config_bytes)
+                    restored.append(_CONFIG_MEMBER)
+            except BaseException:
+                for undo in reversed(rollbacks):
+                    try:
+                        undo()
+                    except OSError:
+                        pass
+                # Drop any staged artifacts that were never committed.
+                if staged_db is not None:
+                    _unlink(staged_db)
+                if staged_faiss is not None:
+                    _rmtree(staged_faiss)
+                raise
+            else:
+                for done in cleanups:
+                    try:
+                        done()
+                    except OSError:
+                        pass
 
     return {
         "restored": restored,

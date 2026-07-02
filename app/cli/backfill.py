@@ -39,7 +39,7 @@ def _recompute_paper_score(paper: Paper, config: dict | None) -> float:
     from app.services.ranking import compute_paper_score
 
     paper.paper_score = compute_paper_score(
-        match_types=[part.strip() for part in (paper.match_type or "").split("+") if part.strip()],
+        match_types=paper.match_types,
         matched_terms_count=len(paper.matched_terms_list),
         publication_dt=paper.publication_dt,
         resource_count=len(paper.resource_links_list),
@@ -404,6 +404,86 @@ def backfill_github(
     return total_updated
 
 
+def backfill_huggingface(
+    app,
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    emit: Emit = print,
+) -> int:
+    """Fetch Hugging Face Papers buzz (upvotes/comments) and fill missing code/project links."""
+    from app.enrich import HuggingFaceProvider, extract_github_repo, huggingface_resource_links
+    from app.services.enrichment import merge_resource_links
+
+    total_updated = 0
+    last_seen_id = 0
+    session = create_session(pool_size=1, scraper_config=app.config.get("SCRAPER_CONFIG"), rate_limit_profile="bulk")
+
+    try:
+        with app.app_context():
+            scraper_config = app.config.get("SCRAPER_CONFIG")
+            while True:
+                papers = (
+                    Paper.query.filter(
+                        Paper.id > last_seen_id,
+                        Paper.arxiv_id.is_not(None),
+                        Paper.hf_upvotes.is_(None),
+                    )
+                    .order_by(Paper.id)
+                    .limit(batch_size)
+                    .all()
+                )
+                if not papers:
+                    break
+
+                arxiv_ids = [paper.arxiv_id for paper in papers if paper.arxiv_id]
+                provider = HuggingFaceProvider(max_fetches=batch_size)
+                payloads = provider.fetch_batch(arxiv_ids, session=session)
+                updated_now = 0
+
+                for paper in papers:
+                    data = payloads.get(paper.arxiv_id or "")
+                    # An empty payload is a cached 404 miss (paper never submitted to HF).
+                    if not data:
+                        continue
+
+                    paper.hf_upvotes = data.get("hf_upvotes")
+                    paper.hf_comments_count = data.get("hf_comments_count")
+                    hf_links = huggingface_resource_links(data)
+                    if hf_links:
+                        # Fill-only: merge dedups on URL with existing links winning,
+                        # and github_repo is only set when currently empty.
+                        merged = merge_resource_links(paper.resource_links_list, hf_links)
+                        if len(merged) != len(paper.resource_links_list):
+                            paper.resource_links = merged
+                            _recompute_paper_score(paper, scraper_config)
+                        if not paper.github_repo:
+                            paper.github_repo = extract_github_repo(hf_links)
+                    updated_now += 1
+
+                db.session.commit()
+                total_updated += updated_now
+
+                if provider.rate_limited:
+                    # Stop before advancing the cursor past papers this batch couldn't
+                    # fetch — they still have hf_upvotes IS NULL, so a later re-run
+                    # resumes exactly where we left off.
+                    emit("Hugging Face API rate limited; stopping. Re-run later to continue.")
+                    break
+
+                last_seen_id = papers[-1].id
+                emit(
+                    f"Hugging Face batch through paper {last_seen_id}: "
+                    f"updated {updated_now}/{len(papers)} papers (total {total_updated})"
+                )
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
+    finally:
+        session.close()
+
+    return total_updated
+
+
 def backfill_thumbnails(
     app,
     *,
@@ -573,6 +653,9 @@ def run_all_backfills(
         "citations": backfill_citations(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "openalex": backfill_openalex(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "comments": backfill_comments(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
+        # huggingface before github so HF-discovered repos get stars/license in the
+        # same run (mirrors the scrape pipeline's enrichment ordering).
+        "huggingface": backfill_huggingface(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "github": backfill_github(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
         "thumbnails": backfill_thumbnails(app, batch_size=batch_size, delay_seconds=delay_seconds, emit=emit),
     }
@@ -583,6 +666,7 @@ def run_all_backfills(
         f"citations={results['citations']}, "
         f"openalex={results['openalex']}, "
         f"comments={results['comments']}, "
+        f"huggingface={results['huggingface']}, "
         f"github={results['github']}, "
         f"thumbnails={results['thumbnails']}"
     )
@@ -601,9 +685,9 @@ def build_parser() -> argparse.ArgumentParser:
     abstracts.add_argument("--batch-size", type=_positive_int, default=200)
     subparsers.add_parser("interest", help="Recompute learned-interest similarities from feedback")
     insights = subparsers.add_parser("insights", help="Run structured LLM extraction for papers without insights")
-    insights.add_argument("--limit", type=int, default=200, help="Max papers to analyze (one LLM call each)")
+    insights.add_argument("--limit", type=_positive_int, default=200, help="Max papers to analyze (one LLM call each)")
 
-    for command in ("citations", "openalex", "comments", "github", "thumbnails", "all"):
+    for command in ("citations", "openalex", "comments", "github", "huggingface", "thumbnails", "all"):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
         subparser.add_argument("--batch-size", type=_positive_int, default=DEFAULT_BATCH_SIZE)
         subparser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
@@ -637,6 +721,8 @@ def main(argv: list[str] | None = None) -> int:
             backfill_comments(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "github":
             backfill_github(app, batch_size=args.batch_size, delay_seconds=args.delay)
+        elif args.command == "huggingface":
+            backfill_huggingface(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "thumbnails":
             backfill_thumbnails(
                 app, batch_size=args.batch_size, delay_seconds=args.delay, teasers_only=args.teasers_only

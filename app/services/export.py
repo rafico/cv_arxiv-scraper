@@ -7,9 +7,9 @@ from pathlib import Path
 
 from flask import render_template
 
-from app.models import Paper, db, inbox_freshness_clause
+from app.models import Paper, inbox_freshness_clause
 from app.routes.dashboard import TIMEFRAME_DAYS
-from app.services.ranking import FEEDBACK_BOOST
+from app.services.ranking import rank_score_order_expr
 from app.services.text import now_utc
 
 
@@ -27,9 +27,7 @@ def generate_html_report(app, timeframe: str = "daily", output_path: str | Path 
             query = query.filter(inbox_freshness_clause(cutoff_dt))
 
         papers = query.order_by(
-            (
-                db.func.coalesce(Paper.paper_score, 0.0) + db.func.coalesce(Paper.feedback_score, 0) * FEEDBACK_BOOST
-            ).desc(),
+            rank_score_order_expr().desc(),
             Paper.publication_dt.desc(),
             Paper.scraped_at.desc(),
         ).all()

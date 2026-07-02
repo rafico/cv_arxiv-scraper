@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Protocol
 
@@ -26,7 +26,6 @@ class RankedPaper:
     score: float
     features: FeatureVector
     pdf_content: bytes | None = None
-    explanations: list[str] = field(default_factory=list)
 
     @property
     def match_type(self) -> str:

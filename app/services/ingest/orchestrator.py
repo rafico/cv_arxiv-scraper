@@ -129,7 +129,7 @@ class IngestOrchestrator:
             explicit_selection=explicit_selection,
             backend_names=backend_names,
         )
-        arxiv_api_active = "arxiv_api" in backend_names and api_days > 0
+        arxiv_api_active = api_days > 0
 
         rss_candidates: list[PaperCandidate] = []
         if "rss" in backend_names:
@@ -140,9 +140,6 @@ class IngestOrchestrator:
             )
 
         if api_days <= 0:
-            return rss_candidates
-
-        if "arxiv_api" not in backend_names:
             return rss_candidates
 
         rolling_candidates = self._fetch_recent_candidates(

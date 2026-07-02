@@ -16,6 +16,10 @@ from app.services.text import now_utc
 
 LOGGER = logging.getLogger(__name__)
 
+# Events that mark a job as finished: they clear the active job id in _publish and
+# terminate the SSE stream in stream_events. Keep both sites in sync via this set.
+TERMINAL_EVENTS = frozenset({"done", "scrape_error", "skipped"})
+
 
 @dataclass
 class ScrapeJob:
@@ -60,7 +64,6 @@ class ScrapeJobManager:
                 self._jobs.pop(job_id, None)
 
     def _publish(self, job_id: str, event: str, data: dict) -> None:
-        terminal_events = {"done", "scrape_error", "skipped"}
         with self._lock:
             job = self._jobs.get(job_id)
         if not job:
@@ -86,7 +89,7 @@ class ScrapeJobManager:
         # non-terminal {"running": False} for one poll cycle. The reverse window
         # (finished but active not yet cleared) is handled by the snapshot's active
         # branch, which already treats a finished active job as terminal.
-        if event in terminal_events:
+        if event in TERMINAL_EVENTS:
             with self._lock:
                 if self._active_job_id == job_id:
                     self._active_job_id = None
@@ -186,7 +189,7 @@ class ScrapeJobManager:
                 raise RuntimeError("Expected event but got None")
             event, data = next_event
             yield next_event
-            if event in {"done", "scrape_error", "skipped"} and cursor >= len(job.events):
+            if event in TERMINAL_EVENTS and cursor >= len(job.events):
                 break
 
     def stream_for_request(self, app, force: bool = False):

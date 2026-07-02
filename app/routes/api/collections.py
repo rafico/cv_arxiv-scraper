@@ -100,16 +100,35 @@ def add_paper_to_collection(collection_id: int):
         paper_ids = [payload["paper_id"]]
     else:
         paper_ids = require_list(payload, "paper_ids")
+    added = _stage_new_memberships(paper_ids, c.id)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # A concurrent request already inserted one of these rows (the narrow
+        # pre-check/commit race under multiple threads); roll back and re-run
+        # the toggle so the now-present rows are treated as no-ops and the
+        # end-state (papers in collection) is reached idempotently, mirroring
+        # create_collection/update_collection instead of an opaque 500.
+        db.session.rollback()
+        added = _stage_new_memberships(paper_ids, c.id)
+        db.session.commit()
+    return jsonify({"added": added, "collection_id": c.id})
+
+
+def _stage_new_memberships(paper_ids: list, collection_id: int) -> int:
+    """Stage PaperCollection rows for papers not already in the collection.
+
+    Returns the count staged (not yet committed); skips non-int/bool ids,
+    missing papers, and existing memberships."""
     added = 0
     for pid in paper_ids:
         if not isinstance(pid, int) or isinstance(pid, bool) or not db.session.get(Paper, pid):
             continue
-        if PaperCollection.query.filter_by(paper_id=pid, collection_id=c.id).first():
+        if PaperCollection.query.filter_by(paper_id=pid, collection_id=collection_id).first():
             continue
-        db.session.add(PaperCollection(paper_id=pid, collection_id=c.id))
+        db.session.add(PaperCollection(paper_id=pid, collection_id=collection_id))
         added += 1
-    db.session.commit()
-    return jsonify({"added": added, "collection_id": c.id})
+    return added
 
 
 @api_bp.route("/collections/<int:collection_id>/papers/<int:paper_id>", methods=["DELETE"])

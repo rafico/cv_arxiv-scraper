@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from sqlalchemy.exc import IntegrityError
+
 from app.enums import FeedbackAction
 from app.models import Paper, PaperFeedback, db
-from app.services.ranking import combined_rank_score, compute_feedback_delta
+from app.services.ranking import compute_feedback_delta
 
 ALLOWED_ACTIONS = {action.value for action in FeedbackAction}
 
@@ -14,13 +16,15 @@ ALLOWED_ACTIONS = {action.value for action in FeedbackAction}
 _NEGATIVE_ACTIONS = {FeedbackAction.SKIP.value, FeedbackAction.IGNORE.value}
 # Strong positive actions that clear negative ones
 _POSITIVE_ACTIONS = {FeedbackAction.SAVE.value, FeedbackAction.PRIORITY.value}
-# Additive actions (don't conflict with others)
-_ADDITIVE_ACTIONS = {FeedbackAction.SHARED.value, FeedbackAction.SKIMMED.value}
 
 # Marker stored on a SAVE row that was auto-added because the user prioritized a
 # paper. Lets un-prioritizing remove that implied save while leaving a save the
 # user added explicitly (which carries no such marker).
 _IMPLIED_BY_PRIORITY = "implied_by_priority"
+
+# Bounded retries for the read-modify-write commit when a concurrent request
+# collides on the (paper_id, action) unique constraint.
+_MAX_COMMIT_RETRIES = 3
 
 
 def _load_feedback_rows(paper_id: int) -> list[PaperFeedback]:
@@ -34,10 +38,38 @@ def apply_feedback_action(
     reason: str | None = None,
     note: str | None = None,
 ) -> dict:
-    """Toggle a feedback action and return updated ranking metadata."""
+    """Toggle a feedback action and return updated ranking metadata.
+
+    The toggle is a read-modify-write on rows guarded by a unique (paper_id,
+    action) constraint plus paper.feedback_score. Concurrent requests (gthread,
+    e.g. a double-clicked "save") can race: two inserts of the same row collide
+    on commit. We retry on IntegrityError — after rollback the operation re-reads
+    all state fresh, so the retry sees the now-existing row and toggles
+    idempotently, and the score delta is recomputed against the current value
+    (composing instead of clobbering the other request's update).
+    """
     if action not in ALLOWED_ACTIONS:
         raise ValueError(f"Unsupported action '{action}'")
 
+    for attempt in range(_MAX_COMMIT_RETRIES):
+        try:
+            return _apply_feedback_action_once(paper_id, action, reason=reason, note=note)
+        except IntegrityError:
+            db.session.rollback()
+            if attempt == _MAX_COMMIT_RETRIES - 1:
+                raise
+    # Unreachable: the loop either returns or raises on the final attempt.
+    raise RuntimeError("apply_feedback_action retry loop exited unexpectedly")
+
+
+def _apply_feedback_action_once(
+    paper_id: int,
+    action: str,
+    *,
+    reason: str | None = None,
+    note: str | None = None,
+) -> dict:
+    """Perform one attempt of the feedback toggle; may raise IntegrityError on commit."""
     paper = db.session.get(Paper, paper_id)
     if not paper:
         raise LookupError(f"Paper {paper_id} not found")
@@ -126,7 +158,7 @@ def apply_feedback_action(
         "counts": counts,
         "active_actions": active_actions,
         "feedback_score": int(paper.feedback_score or 0),
-        "rank_score": combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0)),
+        "rank_score": paper.rank_score,
     }
 
 
