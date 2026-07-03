@@ -13,7 +13,10 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-import tomllib
+try:
+    import tomllib  # Python 3.11+ stdlib
+except ModuleNotFoundError:  # pragma: no cover - 3.10 CI leg
+    import tomli as tomllib  # provided transitively by pip-tools -> build on <3.11
 import yaml
 
 from app._version import __version__

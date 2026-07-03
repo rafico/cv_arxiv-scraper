@@ -536,11 +536,15 @@ def _temporal_weights(timestamps: list, now=None) -> np.ndarray:
     return np.asarray(weights, dtype=np.float64)
 
 
-def _assemble_training_set(service, pos_items, neg_items, *, rng_seed: int = 0):
+def _assemble_training_set(service, pos_items, neg_items, *, rng_seed: int = 0, extra_exclude=None):
     """Build (X_raw, y, weights, pca_sample, counts) from feedback + corpus.
 
     Returns None when there are not enough embedded positives or no negative
     signal at all (neither explicit negatives nor unlabeled corpus papers).
+
+    ``extra_exclude`` are paper ids to keep out of the weak-negative pool on top
+    of the labeled train set — the offline eval uses it to withhold its holdout
+    papers, which otherwise get sampled from the corpus and trained against.
     """
     import numpy as np
 
@@ -555,6 +559,8 @@ def _assemble_training_set(service, pos_items, neg_items, *, rng_seed: int = 0):
     found_neg, neg_vectors = service.get_paper_vectors(neg_ids)
 
     exclude = set(found_pos) | set(found_neg)
+    if extra_exclude:
+        exclude |= set(extra_exclude)
     weak_ids, weak_vectors = service.sample_paper_vectors(MAX_WEAK_NEGATIVES, exclude_ids=exclude, seed=rng_seed)
     if neg_vectors.shape[0] == 0 and weak_vectors.shape[0] == 0:
         return None
@@ -924,17 +930,22 @@ def evaluate_learned_ranker(app=None, profile=None) -> dict | None:
         train_neg = [(pid, ts) for pid, ts, label in train_part if label == 0]
         if len(train_pos) < 3 or len({label for _, _, label in test_part}) < 2:
             return None
+        test_ids = [pid for pid, _, _ in test_part]
 
         from app.services.embeddings import get_embedding_service
 
         service = get_embedding_service(app)
-        training_set = _assemble_training_set(service, train_pos, train_neg, rng_seed=1)
+        # Withhold the holdout papers from the weak-negative pool. They live in
+        # the same corpus the sampler draws from, so without this a held-out
+        # POSITIVE gets pulled in as a weak negative and trained against — which
+        # collapses its eval score toward the negatives and turns the AUC into a
+        # library-version-dependent coin flip.
+        training_set = _assemble_training_set(service, train_pos, train_neg, rng_seed=1, extra_exclude=test_ids)
         if training_set is None:
             return None
         x_raw, y, weights, pca_sample, counts = training_set
         model = _fit_model(x_raw, y, weights, pca_sample, counts, (0, 0, 0))
 
-        test_ids = [pid for pid, _, _ in test_part]
         label_by_id = {pid: label for pid, _, label in test_part}
         found_ids, test_vectors = service.get_paper_vectors(test_ids)
         if len(found_ids) < 2:

@@ -117,7 +117,9 @@ def toggle_digest(profile_id: int):
 def delete_profile(profile_id: int):
     validate_csrf_token()
     try:
-        was_active = bool(profiles_service.get_profile(profile_id) and profiles_service.get_profile(profile_id).is_active)
+        was_active = bool(
+            profiles_service.get_profile(profile_id) and profiles_service.get_profile(profile_id).is_active
+        )
         profiles_service.delete_profile(profile_id)
     except LookupError:
         return jsonify({"error": "Profile not found"}), 404

@@ -130,9 +130,7 @@ class MigrationSafetyTests(ProfileTestBase):
             db.session.add(paper)
             db.session.flush()
             db.session.execute(
-                text(
-                    "INSERT INTO paper_feedback (paper_id, action, created_at) VALUES (:pid, :action, :ts)"
-                ),
+                text("INSERT INTO paper_feedback (paper_id, action, created_at) VALUES (:pid, :action, :ts)"),
                 {"pid": paper.id, "action": "save" if label else "skip", "ts": base + timedelta(hours=idx)},
             )
             vectors[paper.id] = _noisy_unit(0 if label else 1, seed=idx)
@@ -423,7 +421,8 @@ class ProfileApiTests(ProfileTestBase):
 
         # Create.
         resp = self.client.post(
-            "/api/profiles", json={"name": "3D Recon", "description": "gaussian splatting"},
+            "/api/profiles",
+            json={"name": "3D Recon", "description": "gaussian splatting"},
             headers={"X-CSRF-Token": token},
         )
         self.assertEqual(resp.status_code, 201)

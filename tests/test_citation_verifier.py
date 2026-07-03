@@ -269,7 +269,9 @@ class RagIntegrationTests(FlaskDBTestCase):
         db.session.commit()
 
         fake_response = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="Grounded in arXiv:2401.07777 and fake 2100.11111."))]
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content="Grounded in arXiv:2401.07777 and fake 2100.11111."))
+            ]
         )
         fake_client = SimpleNamespace(complete=lambda **kwargs: fake_response)
 
