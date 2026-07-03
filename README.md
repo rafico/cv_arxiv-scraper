@@ -229,6 +229,53 @@ See the in-app help at `/help` for full documentation.
 
 ---
 
+## 🤖 Use as an MCP server for Claude Desktop
+
+Expose your personalized, enriched, ranked, full-text-indexed corpus to Claude
+Desktop (or any [MCP](https://modelcontextprotocol.io) client) as a **backend** —
+so the assistant searches, reads, and ranks *your* papers instead of the open web.
+
+Install the optional extra and you get a `cv-arxiv-mcp` command that serves over
+stdio against the same data directory as `cv-arxiv serve`:
+
+```bash
+pip install '.[mcp]'          # or:  pip install 'cv-arxiv-scraper[mcp]'
+```
+
+Add it to `claude_desktop_config.json` (Claude Desktop → Settings → Developer →
+Edit Config):
+
+```json
+{
+  "mcpServers": {
+    "cv-arxiv": {
+      "command": "cv-arxiv-mcp",
+      "env": { "CV_ARXIV_DATA_DIR": "~/.local/share/cv-arxiv" }
+    }
+  }
+}
+```
+
+Point `CV_ARXIV_DATA_DIR` at the directory that holds your `arxiv_papers.db`,
+FAISS index, and `config.yaml` (the same dir `cv-arxiv serve --data-dir` uses).
+Restart Claude Desktop and the tools appear:
+
+| Tool | What it does |
+|---|---|
+| `search_papers` | Hybrid / semantic / keyword search over your corpus |
+| `get_paper` | Full metadata + citation/readiness/enrichment summary (by id or arXiv id) |
+| `get_summary` | Stored TL;DR summary and structured LLM insights |
+| `top_ranked_today` | Today's top-ranked fresh papers (optional interest-profile lens) |
+| `list_collections` | Your collections and their paper counts |
+| `ask_paper` | Grounded Q&A over one paper's own text, with section citations |
+| `add_to_collection` | The one write tool — file a paper into a collection (idempotent) |
+
+The `mcp` package is an **optional extra**: the core install and web server work
+without it, and `cv-arxiv-mcp` prints an install hint and exits non-zero if it is
+missing.
+
+---
+
 ## 🔒 Private by design
 
 This app has **no authentication** and is built for single-user localhost use. It refuses to

@@ -48,6 +48,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Optional Model Context Protocol server (`cv-arxiv-mcp`) so Claude Desktop and
+# other assistants can use the local corpus as a backend. Kept out of the core
+# install — `pip install '.[mcp]'`. FastMCP (`mcp.server.fastmcp`) landed in the
+# SDK in 1.2, so pin to that floor.
+mcp = ["mcp>=1.2"]
 dev = [
   "pytest>=9.0.0",
   "pytest-cov>=6.0.0",
@@ -76,6 +81,8 @@ cv-arxiv-scrape = "app.cli.scrape:main"
 cv-arxiv-sync = "app.cli.sync:main"
 cv-arxiv-backfill = "app.cli.backfill:main"
 cv-arxiv-digest = "app.cli.digest:main"
+# MCP server for Claude Desktop / other assistants (needs the optional `mcp` extra).
+cv-arxiv-mcp = "app.cli.mcp:main"
 
 [tool.setuptools]
 include-package-data = true

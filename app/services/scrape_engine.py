@@ -48,6 +48,10 @@ _THUMBNAIL_TIMEOUT_SECONDS = 120.0
 _FIGURES_PER_RUN_CAP = 25
 _FIGURES_TIMEOUT_SECONDS = 180.0
 
+# Wall-clock budget for the HTML-first section fetch phase (network in the parent,
+# stdlib parse — no subprocess). PDF-fallback parsing keeps its own native-stage cap.
+_SECTION_HTML_TIMEOUT_SECONDS = 180.0
+
 # Serializes the FAISS index read-append-rename performed by run_isolated inside
 # _generate_embeddings / _extract_sections. The historical search
 # (POST /api/search/historical) runs the pipeline synchronously in the request
@@ -512,64 +516,133 @@ def _generate_embeddings(app, results: list[dict]) -> None:
 
 
 def _extract_sections(app, results: list[dict]) -> None:
-    """Optionally extract PDF sections and generate section-level embeddings.
+    """HTML-first full-text section extraction + section-level embeddings.
 
-    Both the pdfplumber parse and the torch/faiss section-embedding are native-crash
-    sites, so each runs in an isolated subprocess; a crash degrades to skipping sections
-    (non-fatal) instead of taking down the scrape.
+    Prefers the arXiv HTML rendition (cleaner structure/links/MathML) and falls back
+    to the pdfplumber path for papers without HTML (older non-TeX submissions). The
+    HTML fetch/parse runs in the parent (network + stdlib parser); the PDF fallback
+    and the torch/faiss section-embedding stay in isolated subprocesses (native-crash
+    sites), so any crash degrades to skipping sections (non-fatal) instead of taking
+    down the scrape.
     """
     scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {})
     if not scraper_config.get("extract_sections", False):
         return
 
     from app.models import Paper, PaperSection, db
+    from app.services.html_extraction import HtmlSections, extract_html_sections
     from app.services.pdf_extraction import extract_sections_batch
     from app.services.subprocess_runner import run_isolated
-
-    targets = [(res["link"], res["pdf_content"]) for res in results if res.get("pdf_content")]
-    if not targets:
-        return
 
     # Dedup by link: a cross-listed paper can appear twice in `results` (same link,
     # not deduped across feeds). Both resolve to one Paper row, so without this the
     # second iteration's bulk delete (autoflush) wipes the PaperSection rows the
     # first just added, and total_sections double-counts. Keep the first per link.
+    # arxiv_id comes ONLY from the result dict (never derived from the link), so
+    # callers that pass no arxiv_id (e.g. regression fixtures) skip the HTML network
+    # path entirely and go straight to the PDF fallback.
     seen_links: set[str] = set()
-    deduped: list[tuple[str, bytes]] = []
-    for link, pdf in targets:
-        if link not in seen_links:
-            seen_links.add(link)
-            deduped.append((link, pdf))
-    targets = deduped
-
-    # Parse all PDFs in one isolated child, then write rows in the parent (child is DB-free).
-    try:
-        sections_per_target = run_isolated(
-            extract_sections_batch, [pdf for _, pdf in targets], timeout=_NATIVE_STAGE_TIMEOUT
-        )
-    except Exception:
-        LOGGER.warning("Section extraction failed (non-fatal)", exc_info=True)
+    targets: list[tuple[str, str | None, bytes | None]] = []
+    for res in results:
+        link = res.get("link")
+        if not link or link in seen_links:
+            continue
+        arxiv_id = res.get("arxiv_id")
+        pdf = res.get("pdf_content")
+        if not (arxiv_id or pdf):
+            continue
+        seen_links.add(link)
+        targets.append((link, arxiv_id, pdf))
+    if not targets:
         return
+
+    target_links = [link for link, _aid, _pdf in targets]
+
+    # Phase 1 (parent): fetch + parse the arXiv HTML rendition for papers with an
+    # arxiv_id, under a wall-clock deadline mirroring the figure fan-out.
+    html_by_link: dict[str, HtmlSections] = {}
+    html_candidates = [(link, aid) for link, aid, _pdf in targets if aid]
+    if html_candidates:
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import TimeoutError as FuturesTimeout
+
+        section_session = create_session(
+            pool_size=4, scraper_config=app.config.get("SCRAPER_CONFIG"), rate_limit_profile="bulk"
+        )
+
+        def _html_worker(link: str, arxiv_id: str) -> tuple[str, HtmlSections | None]:
+            return link, extract_html_sections(arxiv_id, session=section_session)
+
+        executor = ThreadPoolExecutor(max_workers=4)
+        try:
+            futures = [executor.submit(_html_worker, link, aid) for link, aid in html_candidates]
+            start = time.monotonic()
+            for future in futures:
+                remaining = _SECTION_HTML_TIMEOUT_SECONDS - (time.monotonic() - start)
+                if remaining <= 0:
+                    LOGGER.warning("Section HTML fetch exceeded budget; remaining fall back to PDF")
+                    break
+                try:
+                    link, html = future.result(timeout=remaining)
+                except FuturesTimeout:
+                    LOGGER.warning("Section HTML fetch exceeded budget; remaining fall back to PDF")
+                    break
+                except Exception:
+                    LOGGER.debug("Section HTML fetch failed for one paper; falling back to PDF", exc_info=True)
+                    continue
+                if html is not None and html.sections:
+                    html_by_link[link] = html
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+            section_session.close()
+
+    # Phase 2 (isolated child): pdfplumber fallback ONLY for HTML misses that still
+    # carry PDF bytes. Parse all in one child, then write rows in the parent.
+    pdf_by_link: dict[str, list[tuple[str, str, int]]] = {}
+    pdf_targets = [(link, pdf) for link, _aid, pdf in targets if link not in html_by_link and pdf]
+    if pdf_targets:
+        try:
+            sections_per_target = run_isolated(
+                extract_sections_batch, [pdf for _, pdf in pdf_targets], timeout=_NATIVE_STAGE_TIMEOUT
+            )
+            for (link, _pdf), sections in zip(pdf_targets, sections_per_target):
+                if sections:
+                    pdf_by_link[link] = list(sections)
+        except Exception:
+            LOGGER.warning("PDF section fallback failed (non-fatal)", exc_info=True)
 
     # Section persistence is documented as non-fatal: papers are already committed
     # by _save_results, so a DB error here (e.g. "database is locked" under
     # concurrent runs, disk full) must degrade to skipping sections rather than
     # unwinding into execute_scrape's except and marking the whole scrape failed.
     total_sections = 0
+    html_papers = 0
+    pdf_papers = 0
     try:
         with app.app_context():
-            for (link, _pdf), sections in zip(targets, sections_per_target):
-                if not sections:
+            for link, _aid, _pdf in targets:
+                if link in html_by_link:
+                    section_rows = html_by_link[link].sections
+                    from_html = True
+                elif link in pdf_by_link:
+                    section_rows = pdf_by_link[link]
+                    from_html = False
+                else:
                     continue
                 paper = Paper.query.filter_by(link=link).first()
                 if not paper:
                     continue
                 PaperSection.query.filter_by(paper_id=paper.id).delete()
-                for section_type, text, order_index in sections:
+                for section_type, text, order_index in section_rows:
                     db.session.add(
                         PaperSection(paper_id=paper.id, section_type=section_type, text=text, order_index=order_index)
                     )
-                total_sections += len(sections)
+                total_sections += len(section_rows)
+                if from_html:
+                    html_papers += 1
+                else:
+                    pdf_papers += 1
             db.session.commit()
     except Exception:
         db.session.rollback()
@@ -578,7 +651,13 @@ def _extract_sections(app, results: list[dict]) -> None:
 
     if total_sections <= 0:
         return
-    LOGGER.info("Extracted %d sections from matched papers", total_sections)
+    # Provenance without a DB column: log the html-vs-pdf paper split for this run.
+    LOGGER.info(
+        "Extracted %d sections from matched papers (html=%d papers, pdf=%d papers)",
+        total_sections,
+        html_papers,
+        pdf_papers,
+    )
 
     # Generate section-level embeddings in an isolated child (torch/faiss crash site).
     try:
@@ -586,7 +665,7 @@ def _extract_sections(app, results: list[dict]) -> None:
 
         index_dir = str(get_embedding_service(app).index_dir)
         with app.app_context():
-            sections = PaperSection.query.join(Paper).filter(Paper.link.in_([link for link, _ in targets])).all()
+            sections = PaperSection.query.join(Paper).filter(Paper.link.in_(target_links)).all()
             entries = [(s.paper_id, s.section_type, s.text) for s in sections if s.text]
         if entries:
             # Serialize the section index's load-append-os.replace against any other

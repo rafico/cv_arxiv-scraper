@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/), and the project aims to
 follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-07-03
+
+Wave 3 completion: HTML-first full-text extraction and a local MCP server.
+
+### Added
+- **arXiv-HTML-first section extraction.** Full-text now prefers
+  `arxiv.org/html/{id}` (cleaner structure, literal `<a href>` code/project
+  links, MathML), mapping headings to the same canonical section types the PDF
+  extractor uses, and falling back to pdfplumber on any miss. The scrape
+  pipeline records the source (`html`/`pdf`/`none`); a backfill subcommand
+  re-extracts the corpus. Chat/RAG and the section index are unchanged.
+- **Local MCP server.** `cv-arxiv-mcp` exposes the personalized corpus to
+  Claude Desktop and other assistants via tools: `search_papers`, `get_paper`,
+  `get_summary`, `top_ranked_today`, `list_collections`, `add_to_collection`,
+  `ask_paper`. Ships as an optional extra (`pip install '.[mcp]'`) with the SDK
+  imported lazily, so the core install stays dependency-light.
+
 ## [0.3.0] — 2026-07-03
 
 Wave 3: distribution & operational-trust packaging, plus multi-profile ranking.

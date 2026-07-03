@@ -31,10 +31,35 @@
                     <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-backfill</code></td>
                     <td class="px-6 py-3 text-sm text-fg-muted">Run enrichment backfills on papers already in your database</td>
                 </tr>
+                <tr>
+                    <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-mcp</code></td>
+                    <td class="px-6 py-3 text-sm text-fg-muted">Serve your corpus to Claude Desktop as an MCP backend (see below). Needs <code>pip install '.[mcp]'</code></td>
+                </tr>
             </tbody>
         </table>
     </div>
     <p class="text-sm text-fg-muted mt-3">Standalone scripts (<code>python scrape_cli.py</code>, <code>python export_cli.py</code>, etc.) also work without installing the package.</p>
+</section>
+
+<!-- MCP Server -->
+<section id="mcp-server" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">MCP Server (Claude Desktop)</h2>
+    <p class="text-sm text-fg-muted mb-4">Expose your personalized, ranked, full-text-indexed corpus to Claude Desktop (or any <a href="https://modelcontextprotocol.io" class="font-medium text-blue-600 hover:text-blue-800">Model Context Protocol</a> client) as a <strong>backend</strong>, so the assistant searches and reads <em>your</em> papers instead of the open web.</p>
+    <p class="text-sm text-fg-muted mb-4">Install the optional extra, then add <code>cv-arxiv-mcp</code> to your <code>claude_desktop_config.json</code> (Claude Desktop &rarr; Settings &rarr; Developer &rarr; Edit Config):</p>
+    <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
+        <pre class="bg-surface-2 rounded-lg p-3 text-xs text-fg-muted overflow-x-auto"><code>pip install '.[mcp]'
+
+# claude_desktop_config.json
+{
+  "mcpServers": {
+    "cv-arxiv": {
+      "command": "cv-arxiv-mcp",
+      "env": { "CV_ARXIV_DATA_DIR": "~/.local/share/cv-arxiv" }
+    }
+  }
+}</code></pre>
+    </div>
+    <p class="text-sm text-fg-muted mt-4">Point <code>CV_ARXIV_DATA_DIR</code> at the directory holding your database, FAISS index, and <code>config.yaml</code> (the same one <code>cv-arxiv serve --data-dir</code> uses). Restart Claude Desktop and the tools appear: <code>search_papers</code>, <code>get_paper</code>, <code>get_summary</code>, <code>top_ranked_today</code>, <code>list_collections</code>, <code>ask_paper</code>, and <code>add_to_collection</code>. The <code>mcp</code> package is optional &mdash; the app and web server run without it.</p>
 </section>
 
 <!-- Backfills -->

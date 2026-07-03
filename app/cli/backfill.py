@@ -659,6 +659,89 @@ def backfill_abstracts(app, *, batch_size: int = 200, emit: Emit = print) -> int
     return updated
 
 
+def backfill_sections(
+    app,
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    force: bool = False,
+    emit: Emit = print,
+) -> int:
+    """Re-extract full-text sections HTML-first (arXiv HTML, PDF fallback).
+
+    Replaces each paper's ``PaperSection`` rows with the HTML-first extraction. By
+    default only papers with no sections yet are processed; ``force`` re-extracts
+    every paper (upgrading old pdfplumber sections to the cleaner HTML rendition).
+    Per paper is non-fatal — a fetch/parse failure just leaves that paper unchanged.
+    Note: the section FAISS index is NOT refreshed here (chat/RAG retrieval); rebuild
+    it separately if you need the re-extracted text searchable.
+    """
+    from app.models import PaperSection
+    from app.services.html_extraction import extract_sections as extract_sections_html_first
+
+    total_updated = 0
+    last_seen_id = 0
+    html_papers = 0
+    pdf_papers = 0
+    scraper_config = app.config.get("SCRAPER_CONFIG")
+    session = create_session(pool_size=1, scraper_config=scraper_config, rate_limit_profile="bulk")
+
+    try:
+        with app.app_context():
+            while True:
+                query = Paper.query.filter(Paper.id > last_seen_id, Paper.arxiv_id.is_not(None))
+                if not force:
+                    # Skip papers that already have sections (NOT EXISTS).
+                    query = query.filter(
+                        ~db.session.query(PaperSection.id).filter(PaperSection.paper_id == Paper.id).exists()
+                    )
+                papers = query.order_by(Paper.id).limit(batch_size).all()
+                if not papers:
+                    break
+
+                last_seen_id = papers[-1].id
+                updated_now = 0
+                for paper in papers:
+                    extraction = extract_sections_html_first(
+                        paper.arxiv_id,
+                        pdf_link=paper.pdf_link,
+                        session=session,
+                        scraper_config=scraper_config,
+                    )
+                    if not extraction.sections:
+                        continue
+                    PaperSection.query.filter_by(paper_id=paper.id).delete()
+                    for section_type, text, order_index in extraction.sections:
+                        db.session.add(
+                            PaperSection(
+                                paper_id=paper.id,
+                                section_type=section_type,
+                                text=text,
+                                order_index=order_index,
+                            )
+                        )
+                    if extraction.source == "html":
+                        html_papers += 1
+                    else:
+                        pdf_papers += 1
+                    updated_now += 1
+                    total_updated += 1
+                    if delay_seconds > 0:
+                        time.sleep(delay_seconds)
+
+                db.session.commit()
+                emit(
+                    f"Sections batch through paper {last_seen_id}: "
+                    f"updated {updated_now}/{len(papers)} papers "
+                    f"(total {total_updated}; html={html_papers}, pdf={pdf_papers})"
+                )
+    finally:
+        session.close()
+
+    emit(f"Sections backfill complete: {total_updated} papers updated (html={html_papers}, pdf={pdf_papers})")
+    return total_updated
+
+
 def run_all_backfills(
     app,
     *,
@@ -706,7 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
     insights = subparsers.add_parser("insights", help="Run structured LLM extraction for papers without insights")
     insights.add_argument("--limit", type=_positive_int, default=200, help="Max papers to analyze (one LLM call each)")
 
-    for command in ("citations", "openalex", "comments", "github", "huggingface", "thumbnails", "all"):
+    for command in ("citations", "openalex", "comments", "github", "huggingface", "thumbnails", "sections", "all"):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
         subparser.add_argument("--batch-size", type=_positive_int, default=DEFAULT_BATCH_SIZE)
         subparser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
@@ -716,6 +799,12 @@ def build_parser() -> argparse.ArgumentParser:
                 "--figures",
                 action="store_true",
                 help="Only extract missing inline figure previews (arXiv HTML first, PDF fallback)",
+            )
+        if command == "sections":
+            subparser.add_argument(
+                "--force",
+                action="store_true",
+                help="Re-extract even papers that already have sections (upgrade PDF sections to HTML)",
             )
 
     return parser
@@ -755,6 +844,8 @@ def main(argv: list[str] | None = None) -> int:
                 teasers_only=args.teasers_only,
                 figures=args.figures,
             )
+        elif args.command == "sections":
+            backfill_sections(app, batch_size=args.batch_size, delay_seconds=args.delay, force=args.force)
         else:
             run_all_backfills(app, batch_size=args.batch_size, delay_seconds=args.delay)
     except (RuntimeError, ValueError) as exc:

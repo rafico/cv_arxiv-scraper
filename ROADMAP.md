@@ -92,17 +92,21 @@ production ranker recipe and an 800k-rating public dataset), PaperQA2 / `paper-q
     (Ollama sidecar), CHANGELOG, README quickstart, packaging polish. PyPI publish is the
     one remaining manual release step (README documents the `uvx --from git+…` form until then).
 
-### Wave 3 not-yet-done
+10. **arXiv-HTML-first extraction** ✅ — `app/services/html_extraction.py` fetches
+    `arxiv.org/html/{id}`, maps headings to the same canonical section vocabulary the PDF
+    extractor uses (so the section index + chat/RAG are unchanged), extracts literal
+    `<a href>` code/project links, and falls back to pdfplumber on any miss. Wired into the
+    scrape pipeline's section step (`source` = html/pdf/none) + a backfill subcommand.
+13. **Local MCP server** ✅ — `app/services/mcp_tools.py` (testable logic: `search_papers`,
+    `get_paper`, `get_summary`, `top_ranked_today`, `list_collections`, `add_to_collection`,
+    `ask_paper`) + a thin `app/mcp_server.py` wrapper that imports the MCP SDK lazily.
+    Shipped as an optional extra (`pip install .[mcp]`) + a `cv-arxiv-mcp` console script,
+    so the core install stays dependency-light and tests run without the SDK.
 
-10. **arXiv-HTML-first extraction** — heading-aware chunking, literal `<a href>` code
-    links instead of PDF regex, MathML; PDF becomes the fallback. (Figures already do
-    HTML-first; this generalizes it to section/RAG extraction.)
-13. **Local MCP server** — expose `search_papers`, `get_paper`, `top_ranked_today`,
-    `list_collections`, etc., so Claude Desktop / other assistants use the personalized
-    corpus as a backend. Cheaper than winning the chat-UI arms race.
+**The full researched roadmap (Waves 1–3) is now implemented.**
 
-    Positioning: *the maintained, local-first successor to arxiv-sanity / self-hostable
-    Scholar Inbox* — credible now that free tiers are closing and hosted tools keep dying.
+Positioning: *the maintained, local-first successor to arxiv-sanity / self-hostable
+Scholar Inbox* — credible now that free tiers are closing and hosted tools keep dying.
 
 ## Deliberately not doing
 

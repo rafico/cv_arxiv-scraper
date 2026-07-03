@@ -104,6 +104,7 @@
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Ask This Paper</h2>
     <p class="text-sm text-fg-muted mb-3">Expand a paper&rsquo;s details and open <strong>Ask this paper</strong> to ask questions answered only from that paper&rsquo;s own indexed text. Each claim is cited as <strong>[1]</strong>, <strong>[2]</strong>&hellip; &mdash; click a citation chip to see the quoted passage and which section it came from. Citations that don&rsquo;t map to a real excerpt are stripped automatically, and when the paper doesn&rsquo;t cover your question the answer says so instead of guessing. Follow-up questions in the same panel keep the conversation context.</p>
     <p class="text-sm text-fg-muted">Answers need an <a href="{{ url_for('settings.view_settings', section='ai') }}" class="font-medium text-blue-600 hover:text-blue-800">LLM enabled</a>; without one you get the paper&rsquo;s most relevant sections instead. Papers scraped before full-text section extraction answer from the abstract only (the panel notes this).</p>
+    <p class="text-sm text-fg-muted mt-2">Full-text sections are now read from arXiv&rsquo;s clean <strong>HTML</strong> rendition when it exists (better structure, literal code links, and math), falling back to the PDF for older papers. Re-run extraction over your library with <code>cv-arxiv-backfill sections</code> (add <code>--force</code> to upgrade papers whose sections came from the PDF).</p>
 </section>
 
 <!-- Citation Verification -->
