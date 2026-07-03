@@ -480,9 +480,22 @@ def _one_tap_serializer(secret_key: str):
     return URLSafeTimedSerializer(secret_key, salt=_ONE_TAP_SALT)
 
 
-def make_one_tap_token(app: Flask, paper_id: int, action: str, digest_run_id: int | None = None) -> str:
-    """Sign a (paper_id, action, digest_run_id) one-tap payload with the app secret."""
+def make_one_tap_token(
+    app: Flask,
+    paper_id: int,
+    action: str,
+    digest_run_id: int | None = None,
+    profile_id: int | None = None,
+) -> str:
+    """Sign a (paper_id, action, digest_run_id, profile_id) one-tap payload.
+
+    ``profile_id`` attributes the feedback to the profile whose digest section
+    the paper appeared in. Omitted for pre-Wave-3 tokens (defaults to the
+    default profile on load).
+    """
     payload = {"p": int(paper_id), "a": str(action), "r": digest_run_id}
+    if profile_id is not None:
+        payload["pr"] = int(profile_id)
     return _one_tap_serializer(app.config["SECRET_KEY"]).dumps(payload)
 
 
@@ -490,12 +503,16 @@ def load_one_tap_token(app: Flask, token: str, max_age: int = ONE_TAP_MAX_AGE_SE
     """Verify and decode a one-tap token.
 
     Raises ``itsdangerous.SignatureExpired`` past ``max_age`` and
-    ``itsdangerous.BadSignature`` on tampering or a malformed payload.
+    ``itsdangerous.BadSignature`` on tampering or a malformed payload. Back-compat:
+    a token without ``pr`` (pre-Wave-3, or a non-profile section) decodes fine and
+    the caller defaults it to the default profile.
     """
     from itsdangerous import BadSignature
 
     data = _one_tap_serializer(app.config["SECRET_KEY"]).loads(token, max_age=max_age)
     if not isinstance(data, dict) or not isinstance(data.get("p"), int) or data.get("a") not in ("save", "skip"):
+        raise BadSignature("Malformed one-tap payload")
+    if "pr" in data and not isinstance(data["pr"], int):
         raise BadSignature("Malformed one-tap payload")
     return data
 
@@ -643,16 +660,101 @@ def get_digest_history(limit: int = 6) -> list[DigestRun]:
     return DigestRun.query.order_by(DigestRun.started_at.desc()).limit(limit).all()
 
 
+def _digest_profiles(app: Flask) -> list:
+    """Interest profiles flagged for the digest (default first). Best-effort."""
+    try:
+        from app.models import InterestProfile
+
+        with app.app_context():
+            from app.services.profiles import ensure_default_profile
+
+            ensure_default_profile()
+            return (
+                InterestProfile.query.filter(InterestProfile.include_in_digest.is_(True))
+                .order_by(InterestProfile.is_default.desc(), InterestProfile.created_at.asc())
+                .all()
+            )
+    except Exception:  # pragma: no cover - digest must survive a profile-table problem
+        LOGGER.warning("Digest profile lookup failed (non-fatal)", exc_info=True)
+        return []
+
+
+def _rank_papers_for_profile(app: Flask, papers: list[Paper], profile) -> list[Paper]:
+    """Reorder ``papers`` by ``profile``'s learned model + NL description.
+
+    Best-effort: with no model/embeddings the input order (stored rank score) is
+    kept, so a digest section never breaks because a profile has no model yet.
+    """
+    if not papers:
+        return papers
+    try:
+        from app.services import learned_ranker
+        from app.services.embeddings import get_embedding_service
+        from app.services.profiles import profile_ref
+
+        ref = profile_ref(profile)
+        model = learned_ranker.ensure_learned_model(app, profile=ref)
+        description_vector = learned_ranker._description_vector(ref)
+        if model is None and description_vector is None:
+            return papers
+        blend = 0.7
+        try:
+            with app.app_context():
+                blend = float(learned_ranker.learned_preferences(app.config.get("SCRAPER_CONFIG")).get("blend", 0.7))
+        except Exception:  # pragma: no cover - best-effort
+            pass
+        service = get_embedding_service(app)
+        found, vectors = service.get_paper_vectors([p.id for p in papers])
+        score_by_id: dict[int, float] = {}
+        for idx, pid in enumerate(found):
+            signal, _source = learned_ranker.interest_signal(vectors[idx], None, model, blend, description_vector)
+            if signal is not None:
+                score_by_id[pid] = float(signal)
+        return sorted(papers, key=lambda p: score_by_id.get(p.id, -2.0), reverse=True)
+    except Exception:  # pragma: no cover - ranking is best-effort
+        LOGGER.warning("Per-profile digest ranking failed (non-fatal)", exc_info=True)
+        return papers
+
+
 def build_digest_preview(app: Flask) -> dict:
     email_cfg = _get_email_config(app)
     digest_cfg = get_digest_config(app)
     window = _resolve_lookback(app)
-    papers = _query_todays_papers(
-        app,
-        lookback_hours=window["lookback_hours"],
-        min_score=digest_cfg["min_score"],
-        max_papers=digest_cfg["max_papers"],
-    )
+    max_papers = digest_cfg["max_papers"]
+    profiles = _digest_profiles(app)
+    default_profile_id = next((int(p.id) for p in profiles if p.is_default), None)
+
+    sections: list[dict] | None = None
+    if len(profiles) > 1:
+        # One section per profile, each re-ranked by that profile's model.
+        pool = _query_todays_papers(
+            app,
+            lookback_hours=window["lookback_hours"],
+            min_score=digest_cfg["min_score"],
+            max_papers=max(max_papers * 4, max_papers),
+        )
+        sections = []
+        seen: set[int] = set()
+        papers = []
+        for profile in profiles:
+            ranked = _rank_papers_for_profile(app, list(pool), profile)[:max_papers]
+            if not ranked:
+                continue
+            sections.append({"name": profile.name, "profile_id": int(profile.id), "papers": ranked})
+            for p in ranked:
+                if p.id not in seen:
+                    seen.add(p.id)
+                    papers.append(p)
+        if not sections:
+            sections = None
+    if sections is None:
+        papers = _query_todays_papers(
+            app,
+            lookback_hours=window["lookback_hours"],
+            min_score=digest_cfg["min_score"],
+            max_papers=max_papers,
+        )
+
     alerts_since = window["last_run_at"] or (now_utc() - timedelta(hours=window["lookback_hours"]))
     alerts = _collect_saved_search_alerts(app, since=alerts_since, exclude_paper_ids=[p.id for p in papers])
     today = utc_today()
@@ -666,10 +768,14 @@ def build_digest_preview(app: Flask) -> dict:
 
     ctx = {
         "base_url": digest_cfg["base_url"],
-        "token_for": lambda paper_id, action: make_one_tap_token(app, paper_id, action),
+        "token_for": lambda paper_id, action, profile_id=None: make_one_tap_token(
+            app, paper_id, action, None, profile_id
+        ),
         "figure_srcs": _preview_figure_srcs(app, papers, digest_cfg["base_url"]),
         "catch_up_label": catch_up_label,
         "alerts": alerts,
+        "sections": sections,
+        "default_profile_id": default_profile_id,
     }
     return {
         "recipient": email_cfg["recipient"],
@@ -681,6 +787,8 @@ def build_digest_preview(app: Flask) -> dict:
         "catch_up_label": catch_up_label,
         "lookback_hours": window["lookback_hours"],
         "alerts": alerts,
+        "sections": sections,
+        "default_profile_id": default_profile_id,
     }
 
 
@@ -727,7 +835,7 @@ def _score_chip(paper: Paper) -> str:
     )
 
 
-def _one_tap_buttons(paper: Paper, ctx: dict | None) -> str:
+def _one_tap_buttons(paper: Paper, ctx: dict | None, profile_id: int | None = None) -> str:
     """👍 Save / 👎 Skip links that hit the local one-tap API (token-signed GETs)."""
     ctx = ctx or {}
     token_for = ctx.get("token_for")
@@ -741,7 +849,7 @@ def _one_tap_buttons(paper: Paper, ctx: dict | None) -> str:
     }
     labels = {"save": "👍 Save", "skip": "👎 Skip"}
     for action in ("save", "skip"):
-        url = f"{base_url}/api/feedback/one-tap?token={token_for(paper.id, action)}"
+        url = f"{base_url}/api/feedback/one-tap?token={token_for(paper.id, action, profile_id)}"
         buttons.append(
             f'<a href="{escape(url, quote=True)}" style="display:inline-block;{styles[action]}'
             "padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;"
@@ -761,7 +869,9 @@ def _figure_img(paper: Paper, ctx: dict | None) -> str:
     )
 
 
-def _render_paper_html(paper: Paper, ctx: dict | None = None, *, hero: bool = False) -> str:
+def _render_paper_html(
+    paper: Paper, ctx: dict | None = None, *, hero: bool = False, profile_id: int | None = None
+) -> str:
     """Render a single paper card as HTML with proper escaping.
 
     All styling is inline (email clients strip <style>); the layout is a single
@@ -820,7 +930,7 @@ def _render_paper_html(paper: Paper, ctx: dict | None = None, *, hero: bool = Fa
         {topic_tags}
         {resource_links_html}
       </div>
-      {_one_tap_buttons(paper, ctx)}
+      {_one_tap_buttons(paper, ctx, profile_id)}
     </div>
     """
 
@@ -847,16 +957,43 @@ def _render_alerts_html(alerts: list[dict]) -> str:
     )
 
 
-def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None) -> str:
-    """Compose the full HTML email body (mobile-first, ≤600px single column)."""
-    ctx = ctx or {}
+def _render_profile_section(section: dict, ctx: dict) -> str:
+    """One digest section for a single interest profile (header + its cards)."""
+    papers = section.get("papers") or []
     if not papers:
+        return ""
+    profile_id = section.get("profile_id")
+    header = (
+        '<h2 style="font-size:15px;color:#111827;margin:20px 0 10px;padding-top:6px;'
+        f'border-top:1px solid #e5e7eb;">{escape(section.get("name") or "Papers")}</h2>'
+    )
+    cards = [_render_paper_html(papers[0], ctx, hero=True, profile_id=profile_id)]
+    cards.extend(_render_paper_html(p, ctx, profile_id=profile_id) for p in papers[1:])
+    return header + "\n".join(cards)
+
+
+def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None) -> str:
+    """Compose the full HTML email body (mobile-first, ≤600px single column).
+
+    With 2+ digest-enabled interest profiles, ``ctx["sections"]`` drives one
+    labeled section per profile (each ranked by that profile's model). The
+    single-profile / default case keeps the original headerless hero layout.
+    """
+    ctx = ctx or {}
+    sections = ctx.get("sections")
+    if sections and len(sections) > 1:
+        rendered = [html for html in (_render_profile_section(s, ctx) for s in sections) if html]
+        paper_cards = "\n".join(rendered) or (
+            '<p style="color:#6b7280;text-align:center;padding:40px 0;">No new matching papers found today.</p>'
+        )
+    elif not papers:
         paper_cards = (
             '<p style="color:#6b7280;text-align:center;padding:40px 0;">No new matching papers found today.</p>'
         )
     else:
-        cards = [_render_paper_html(papers[0], ctx, hero=True)]
-        cards.extend(_render_paper_html(p, ctx) for p in papers[1:])
+        default_pid = ctx.get("default_profile_id")
+        cards = [_render_paper_html(papers[0], ctx, hero=True, profile_id=default_pid)]
+        cards.extend(_render_paper_html(p, ctx, profile_id=default_pid) for p in papers[1:])
         paper_cards = "\n".join(cards)
 
     catch_up_banner = ""
@@ -952,10 +1089,14 @@ def send_digest(app: Flask, *, dry_run: bool = False, force: bool = False) -> di
     attachments, figure_srcs = _collect_figure_attachments(app, papers)
     ctx = {
         "base_url": digest_cfg["base_url"],
-        "token_for": lambda paper_id, action: make_one_tap_token(app, paper_id, action, digest_run_id),
+        "token_for": lambda paper_id, action, profile_id=None: make_one_tap_token(
+            app, paper_id, action, digest_run_id, profile_id
+        ),
         "figure_srcs": figure_srcs,
         "catch_up_label": preview["catch_up_label"],
         "alerts": preview["alerts"],
+        "sections": preview.get("sections"),
+        "default_profile_id": preview.get("default_profile_id"),
     }
     html_body = _build_email_body(papers, utc_today(), ctx)
     msg = build_digest_mime(recipient, subject, html_body, attachments)

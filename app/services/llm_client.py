@@ -253,6 +253,25 @@ class LLMClient:
             "why_matched": str(data.get("why_matched") or "").strip()[:160],
         }
 
+    @staticmethod
+    def verify_output_references(text: str | None) -> dict:
+        """Resolve any references an LLM summary/TL;DR names against the corpus.
+
+        Optional post-verify for the summary path (``generate_tldr`` /
+        ``analyze_paper`` outputs): returns the structured
+        :func:`app.services.citation_verifier.verify_text` annotation so a caller
+        can flag or drop fabricated citations. Additive and best-effort — it does
+        not change how the summaries themselves are produced. Requires an app
+        context (it reads the local corpus); returns an empty annotation on any
+        failure so it can never break a scrape.
+        """
+        try:
+            from app.services.citation_verifier import verify_text
+
+            return dict(verify_text(text))
+        except Exception:  # noqa: BLE001 — verification must never break summarization
+            return {"text": text or "", "citations": [], "verified_count": 0, "total": 0, "summary_flag": ""}
+
     def rate_relevance(self, title: str, abstract: str, interests: str) -> float | None:
         system_prompt = (
             "Rate this paper's relevance to the provided research interests from 1 to 10. Respond with ONLY a number."

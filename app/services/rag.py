@@ -186,10 +186,19 @@ def answer_query(query: str, *, top_k: int = 6, app=None) -> dict:
             synthesis = _synthesize(client, query, retrieval["context"])
             llm_used = synthesis is not None
 
+    # Resolve any arXiv ids / DOIs / paper titles the synthesis names against the
+    # local corpus so fabricated citations are flagged (None when no synthesis).
+    verifications = None
+    if synthesis is not None:
+        from app.services import citation_verifier
+
+        verifications = citation_verifier.verify_text(synthesis)
+
     return {
         "query": query,
         "synthesis": synthesis,
         "llm_used": llm_used,
         "sources": sources,
         "no_saved_papers": no_saved_papers,
+        "verifications": verifications,
     }

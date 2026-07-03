@@ -63,6 +63,18 @@ def one_tap_feedback():
     action = data["a"]
     label = _ACTION_LABELS[action]
 
+    # Attribute the feedback to the profile whose digest section carried this
+    # paper. Tokens without "pr" (pre-Wave-3, or a non-profile section) default
+    # to the default profile.
+    profile_id = data.get("pr")
+    if profile_id is None:
+        try:
+            from app.services.profiles import get_default_profile
+
+            profile_id = int(get_default_profile().id)
+        except Exception:
+            profile_id = None
+
     from app.models import PaperFeedback
     from app.services import apply_feedback_action
 
@@ -73,7 +85,7 @@ def one_tap_feedback():
         return _one_tap_page(f"{label} ✓", "Already recorded — you can close this tab.")
 
     try:
-        apply_feedback_action(paper_id, action)
+        apply_feedback_action(paper_id, action, profile_id=profile_id)
     except LookupError:
         return _one_tap_page("Paper not found", "This paper no longer exists in your library.", ok=False), 404
 

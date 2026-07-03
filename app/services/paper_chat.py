@@ -294,6 +294,10 @@ def answer_paper_question(paper_id: int, question: str, history=None, *, app=Non
         "abstract_only": abstract_only,
         "evidence_degraded": False,
         "stripped_citations": [],
+        # External-reference verification (arXiv ids/DOIs/titles the answer names
+        # that are NOT this paper's own [n] section-citations). Populated once an
+        # answer exists; None while there is no synthesized text to verify.
+        "verifications": None,
     }
 
     if not top_chunks:
@@ -319,12 +323,18 @@ def answer_paper_question(paper_id: int, question: str, history=None, *, app=Non
         return result
 
     answer, cited, stripped = _ground_answer(raw_answer, len(evidence))
+    # Verify any external references the answer names against the local corpus.
+    # This is additive to the [n] grounding above: the [n] markers cite this
+    # paper's own excerpts; verifications cover arXiv ids / DOIs / paper titles.
+    from app.services import citation_verifier
+
     result.update(
         {
             "answer": answer,
             "llm_used": True,
             "degraded": False,
             "stripped_citations": stripped,
+            "verifications": citation_verifier.verify_text(answer),
             "citations": [
                 {
                     "n": n,

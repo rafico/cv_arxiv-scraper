@@ -430,6 +430,35 @@
         if (citations.length) citationsEl.classList.remove("hidden");
     }
 
+    /* Citation verification: chips for arXiv ids / DOIs / titles the answer names.
+       Verified links to the local copy; unverified is flagged as possibly fabricated.
+       Shared by per-paper chat and corpus chat — textContent / href only, no innerHTML. */
+    function renderCitationVerifications(refsEl, noteEl, verifications) {
+        if (!verifications || !verifications.total) return;
+        (verifications.citations || []).forEach((c) => {
+            const label = c.ref || c.matched_title || "reference";
+            if (c.status === "verified") {
+                const chip = document.createElement("a");
+                chip.className = "badge bg-save-soft text-save hover:opacity-80";
+                chip.href = "/?q=" + encodeURIComponent(c.matched_title || c.ref || "");
+                chip.title = "Found in your library — open it";
+                chip.textContent = "✓ " + label;
+                refsEl.appendChild(chip);
+            } else {
+                const chip = document.createElement("span");
+                chip.className = "badge badge-warn";
+                chip.title = "not found in your library — may be fabricated";
+                chip.textContent = "⚠ " + label;
+                refsEl.appendChild(chip);
+            }
+        });
+        if (noteEl && verifications.summary_flag) {
+            noteEl.textContent = verifications.summary_flag;
+            noteEl.classList.remove("hidden");
+        }
+        refsEl.classList.remove("hidden");
+    }
+
     async function sendPaperChat(button) {
         const panel = button.closest(".paper-chat-panel");
         if (!panel) return;
@@ -440,16 +469,20 @@
         const quoteEl = panel.querySelector(".paper-chat-quote");
         const noteEl = panel.querySelector(".paper-chat-note");
         const sourcesEl = panel.querySelector(".paper-chat-sources");
+        const refsEl = panel.querySelector(".paper-chat-refs");
+        const refsNoteEl = panel.querySelector(".paper-chat-refs-note");
         const question = input.value.trim();
         if (!question) return;
 
         button.disabled = true;
         answerEl.classList.remove("hidden");
         answerEl.textContent = "Reading the paper…";
-        [citationsEl, quoteEl, noteEl, sourcesEl].forEach((el) => el.classList.add("hidden"));
+        [citationsEl, quoteEl, noteEl, sourcesEl, refsEl, refsNoteEl].forEach((el) => el.classList.add("hidden"));
         citationsEl.textContent = "";
         sourcesEl.textContent = "";
         quoteEl.textContent = "";
+        refsEl.textContent = "";
+        refsNoteEl.textContent = "";
 
         try {
             const history = (paperChatHistories[paperId] || []).slice(-PAPER_CHAT_HISTORY_LIMIT);
@@ -473,6 +506,7 @@
                     .concat([{ question, answer: data.answer }])
                     .slice(-PAPER_CHAT_HISTORY_LIMIT);
                 renderPaperChatCitations(citationsEl, quoteEl, data.citations || []);
+                renderCitationVerifications(refsEl, refsNoteEl, data.verifications);
                 input.value = "";
             } else {
                 answerEl.textContent = "AI is off or unavailable — showing the most relevant sections instead.";

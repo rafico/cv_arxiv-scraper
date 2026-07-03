@@ -49,6 +49,9 @@ RUN apt-get update \
 COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 COPY --chown=appuser:appuser app ./app
 COPY --chown=appuser:appuser config.example.yaml run.py wsgi.py ./
+# Baked config for the docker-compose `local-ai` profile's AI service, selected
+# via CV_ARXIV_CONFIG so `docker compose --profile local-ai up` needs no host file.
+COPY --chown=appuser:appuser config.local-ai.example.yaml ./config.local-ai.yaml
 
 USER appuser
 
@@ -56,7 +59,10 @@ VOLUME ["/app/instance"]
 
 EXPOSE 5000
 
+# Probe the cheap /healthz liveness/readiness endpoint (200 when DB + FAISS are
+# healthy). It reports the version and paper_count too, so a failing container is
+# visible to `docker ps` / compose without hitting a rendered page.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:5000/help/start || exit 1
+    CMD curl -fsS http://127.0.0.1:5000/healthz || exit 1
 
 CMD ["python", "run.py", "--host", "0.0.0.0", "--port", "5000", "--workers", "1", "--threads", "4", "--no-browser", "--expose"]

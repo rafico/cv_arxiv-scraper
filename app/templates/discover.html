@@ -316,6 +316,9 @@
             <button id="chat-send" class="btn-primary text-sm shrink-0">Ask</button>
         </div>
         <div id="chat-answer" class="hidden mt-4 text-sm text-fg leading-relaxed whitespace-pre-wrap rounded-lg border border-edge bg-surface-2 p-3"></div>
+        {# Citation-verification chips: references the answer names, resolved (green) or flagged (amber) against your library. #}
+        <p id="chat-refs-note" class="hidden mt-3 text-[11px] text-fg-subtle"></p>
+        <div id="chat-refs" class="hidden mt-1 flex flex-wrap gap-1"></div>
         <div id="chat-sources" class="hidden mt-3 space-y-1"></div>
     </div>
 </div>
@@ -325,7 +328,36 @@
     const btn = document.getElementById("chat-send");
     const answerEl = document.getElementById("chat-answer");
     const sourcesEl = document.getElementById("chat-sources");
+    const refsEl = document.getElementById("chat-refs");
+    const refsNoteEl = document.getElementById("chat-refs-note");
     if (!btn) return;
+    /* Citation verification chips — verified links to the local copy, unverified is
+       flagged as possibly fabricated. textContent / href only, never innerHTML. */
+    function renderVerifications(verifications) {
+        if (!verifications || !verifications.total) return;
+        (verifications.citations || []).forEach(function (c) {
+            const label = c.ref || c.matched_title || "reference";
+            if (c.status === "verified") {
+                const chip = document.createElement("a");
+                chip.className = "badge bg-save-soft text-save hover:opacity-80";
+                chip.href = "/?q=" + encodeURIComponent(c.matched_title || c.ref || "");
+                chip.title = "Found in your library — open it";
+                chip.textContent = "✓ " + label;
+                refsEl.appendChild(chip);
+            } else {
+                const chip = document.createElement("span");
+                chip.className = "badge badge-warn";
+                chip.title = "not found in your library — may be fabricated";
+                chip.textContent = "⚠ " + label;
+                refsEl.appendChild(chip);
+            }
+        });
+        if (verifications.summary_flag) {
+            refsNoteEl.textContent = verifications.summary_flag;
+            refsNoteEl.classList.remove("hidden");
+        }
+        refsEl.classList.remove("hidden");
+    }
     async function sendChat() {
         const query = input.value.trim();
         if (!query) return;
@@ -334,6 +366,10 @@
         answerEl.textContent = "Thinking…";
         sourcesEl.classList.add("hidden");
         sourcesEl.innerHTML = "";
+        refsEl.classList.add("hidden");
+        refsEl.textContent = "";
+        refsNoteEl.classList.add("hidden");
+        refsNoteEl.textContent = "";
         try {
             const response = await fetch("/api/corpus/chat", {
                 method: "POST",
@@ -355,6 +391,7 @@
                 sourcesEl.appendChild(row);
             });
             if ((data.sources || []).length) sourcesEl.classList.remove("hidden");
+            renderVerifications(data.verifications);
         } catch (e) {
             answerEl.textContent = "Could not reach the server. Please try again.";
         } finally {

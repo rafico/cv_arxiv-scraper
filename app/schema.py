@@ -25,6 +25,10 @@ def _validate_column_name(name: str) -> None:
 FEEDBACK_COLUMN_DEFS = {
     "reason": "TEXT",
     "note": "TEXT",
+    # Wave 3: owning interest profile (NULL = pre-Wave-3 global feedback, treated
+    # as the default profile). Added with a guarded ALTER so older DBs gain it
+    # without rewriting any existing rows.
+    "profile_id": "INTEGER REFERENCES interest_profiles(id)",
 }
 
 SAVED_SEARCH_COLUMN_DEFS = {
@@ -182,6 +186,7 @@ def ensure_schema() -> None:
         DigestRun,
         EnrichmentCache,
         FeedSource,
+        InterestProfile,
         PaperCollection,
         PaperFeedback,
         PaperRelation,
@@ -193,6 +198,9 @@ def ensure_schema() -> None:
         SyncState,
     )
 
+    # interest_profiles must exist before the paper_feedback.profile_id FK column
+    # is added below.
+    InterestProfile.__table__.create(bind=db.engine, checkfirst=True)
     PaperFeedback.__table__.create(bind=db.engine, checkfirst=True)
     ScrapeRun.__table__.create(bind=db.engine, checkfirst=True)
     DigestRun.__table__.create(bind=db.engine, checkfirst=True)
@@ -341,6 +349,24 @@ def ensure_schema() -> None:
 
     _backfill_arxiv_ids()
     _fix_pdf_links()
+    _bootstrap_default_profile()
+
+
+def _bootstrap_default_profile() -> None:
+    """Create the "Default" interest profile if none exist (idempotent).
+
+    All pre-existing global feedback carries ``profile_id IS NULL``; the default
+    profile owns those rows by definition (see app/services/profiles.py), so this
+    bootstrap loses nothing — it merely names the implicit profile that already
+    held every rating.
+    """
+    from app.services.profiles import ensure_default_profile
+
+    try:
+        ensure_default_profile()
+    except Exception:  # pragma: no cover - never let profile bootstrap abort startup
+        LOGGER.warning("Default interest-profile bootstrap failed (non-fatal)", exc_info=True)
+        db.session.rollback()
 
 
 _ARXIV_ID_RE = re.compile(r"arxiv\.org/abs/(.+?)(?:v\d+)?$")

@@ -147,6 +147,19 @@ def view_settings():
             "last_f1": None,
         }
 
+    from app.services import profiles as profiles_service
+
+    app_obj = current_app._get_current_object()
+    profile_cards = []
+    for profile in profiles_service.list_profiles():
+        card = profiles_service.profile_to_dict(profile)
+        try:
+            card["status"] = learned_model_status(app_obj, profile=profiles_service.profile_ref(profile))
+        except Exception:  # settings page must render even if a profile's ranker breaks
+            LOGGER.warning("Per-profile learned status unavailable", exc_info=True)
+            card["status"] = {"available": False, "needed_positive": 5, "last_auc": None}
+        profile_cards.append(card)
+
     mendeley_status = MendeleyClient().check_connection()
     zotero_client = ZoteroClient()
     zotero_status = zotero_client.check_connection()
@@ -164,6 +177,7 @@ def view_settings():
         whitelists=config["whitelists"],
         preferences=preferences,
         learned_status=learned_status,
+        interest_profiles=profile_cards,
         email_config={
             "recipient": email_cfg.get("recipient", ""),
             "subject_prefix": email_cfg.get("subject_prefix", "ArXiv Digest"),

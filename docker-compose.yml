@@ -1,4 +1,5 @@
 services:
+  # Default, no-AI app. `docker compose up` runs only this service, loopback-only.
   arxiv-scraper:
     container_name: arxiv-scraper
     image: ${IMAGE_REPO:-cv_arxiv-scraper}:${IMAGE_TAG:-local}
@@ -15,3 +16,74 @@ services:
     volumes:
       - ./instance:/app/instance
       - ./config.yaml:/app/config.yaml
+
+  # ---- `local-ai` profile: bundled Ollama + an AI-enabled app instance ----
+  # `docker compose --profile local-ai up` adds a local LLM so summaries/chat work
+  # out of the box, without touching the default no-AI path above. Everything stays
+  # loopback-bound. The AI dashboard is on http://127.0.0.1:5001 and shares the same
+  # ./instance corpus as the default service; the plain :5000 instance still starts
+  # (same data, no AI) — ignore or stop it if you only want the AI one.
+  ollama:
+    profiles: ["local-ai"]
+    container_name: arxiv-ollama
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    # GPU is optional. Ollama runs on CPU by default (slower but works). To use an
+    # NVIDIA GPU, install the nvidia-container-toolkit and uncomment this block:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: ["gpu"]
+
+  # One-shot: pull the model into the Ollama volume, then exit. Must match the
+  # `llm.model` in config.local-ai.yaml (override both to use a different model).
+  ollama-pull:
+    profiles: ["local-ai"]
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    command: ["pull", "${OLLAMA_MODEL:-gemma2:2b}"]
+    restart: "no"
+
+  # AI-enabled app: uses the baked config.local-ai.yaml (llm -> ollama sidecar).
+  # The dashboard comes up immediately; the first AI answer waits for ollama-pull
+  # to finish downloading the model.
+  arxiv-scraper-ai:
+    profiles: ["local-ai"]
+    container_name: arxiv-scraper-ai
+    image: ${IMAGE_REPO:-cv_arxiv-scraper}:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORT: 5000
+      CV_ARXIV_CONFIG: /app/config.local-ai.yaml
+    ports:
+      - "127.0.0.1:5001:5000"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./instance:/app/instance
+
+volumes:
+  ollama_models:

@@ -141,12 +141,18 @@ class WhitelistCandidateGenerator:
 
                 model = learned_ranker.peek_learned_model()
                 profile = get_cached_interest_profile()
-                if model is None and profile is None:
+                description_vector = None
+                try:
+                    ref = learned_ranker.get_runtime_active_profile()
+                    description_vector = learned_ranker._description_vector(ref)
+                except Exception:  # pragma: no cover - description blend is best-effort
+                    description_vector = None
+                if model is None and profile is None and description_vector is None:
                     return
                 blend = float(settings.get("blend", 0.7))
 
                 def scorer(vector) -> float | None:
-                    signal, _source = learned_ranker.interest_signal(vector, profile, model, blend)
+                    signal, _source = learned_ranker.interest_signal(vector, profile, model, blend, description_vector)
                     if signal is None:
                         return None
                     # Map the [-1, 1] signal to [0, 1] so the threshold reads as

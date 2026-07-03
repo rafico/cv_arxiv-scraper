@@ -14,6 +14,23 @@ from app.services import SCRAPE_JOB_MANAGER
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+@api_bp.record
+def _register_sibling_blueprints(state) -> None:
+    """Register top-level blueprints that must live *outside* the ``/api`` prefix.
+
+    Uses ``api_bp``'s own registration event (fired by ``app.register_blueprint``
+    in the app factory) so ``/healthz`` can be wired without editing
+    ``app/__init__.py``. ``record`` (not ``record_once``) runs on every app
+    registration, so each ``create_app()`` — including the many the test suite
+    builds — gets its own copy. The membership guard keeps a re-registered
+    ``api_bp`` from raising a duplicate-blueprint error.
+    """
+    from app.routes.health import health_bp
+
+    if health_bp.name not in state.app.blueprints:
+        state.app.register_blueprint(health_bp)
+
+
 @api_bp.errorhandler(HTTPException)
 def _handle_http_exception(exc: HTTPException):
     """Render HTTP errors (e.g. BadRequest from the validation helpers) as JSON."""
@@ -47,6 +64,7 @@ from app.routes.api import (  # noqa: E402
     onboarding,
     one_tap,
     papers,
+    profiles,
     saved_searches,
     scrape,
     search,
@@ -63,6 +81,7 @@ __all__ = [
     "onboarding",
     "one_tap",
     "papers",
+    "profiles",
     "saved_searches",
     "scrape",
     "search",

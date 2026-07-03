@@ -55,22 +55,33 @@ NEGATIVE_WEIGHT_SCALE = 5.0
 MAX_WEAK_NEGATIVES = 3000
 RATING_HALF_LIFE_DAYS = 365.0
 
+# The default profile keeps the legacy filename (back-compat with pre-Wave-3
+# artifacts and callers); non-default profiles get a per-slug artifact.
 ARTIFACT_FILENAME = "learned_ranker.npz"
 _ARTIFACT_VERSION = 1
 
 # Trailing debounce for the retrain-on-feedback hook (seconds).
 RETRAIN_DEBOUNCE_SECONDS = 2.0
 
+# Per-profile caches, keyed by profile slug. Wave 3 gives each interest profile
+# its own learned model, so all module/disk caches are keyed by slug.
 _cache_lock = threading.Lock()
-_cached_model: LearnedModel | None = None
-_cached_fingerprint: tuple[int, int, int] | None = None
-# "unknown" (never trained this process) | "available" | "unavailable"
-_cache_state = "unknown"
+_cached_models: dict[str, LearnedModel | None] = {}
+_cached_fingerprints: dict[str, tuple[int, int, int]] = {}
+# per-slug: "unknown" (never trained this process) | "available" | "unavailable"
+_cache_states: dict[str, str] = {}
 
-# Disk-artifact read cache: (path, mtime_ns, size) -> model, so request-path
+# Disk-artifact read cache: slug -> (path, mtime_ns, size, model), so request-path
 # peeks cost one stat() instead of a parse.
-_artifact_cache_key: tuple[str, int, int] | None = None
-_artifact_cache_model: LearnedModel | None = None
+_artifact_caches: dict[str, tuple[str, int, int, LearnedModel | None]] = {}
+
+# Snapshot of the active profile for app-context-free scrape worker threads.
+_active_profile_lock = threading.Lock()
+_active_profile_ref = None  # ProfileRef | None
+
+# Embedded natural-language description vectors, keyed by (slug, description).
+_description_cache_lock = threading.Lock()
+_description_cache: dict[tuple[str, str], object] = {}
 
 # Snapshot of preferences["learned"] taken whenever a caller that HAS the
 # product config passes through (feature extractor construction, training,
@@ -149,14 +160,15 @@ def get_runtime_learned_prefs() -> dict:
 # ── artifact persistence ────────────────────────────────────────────────
 
 
-def _artifact_path() -> Path | None:
-    """Resolve the artifact location without ever creating heavy services.
+def _artifact_filename(ref) -> str:
+    """Per-profile artifact filename. The default profile keeps the legacy name."""
+    if ref is None or getattr(ref, "is_default", True):
+        return ARTIFACT_FILENAME
+    return f"learned_ranker_{ref.slug}.npz"
 
-    Prefers the active app's FAISS dir, then the already-created embedding
-    service singleton (scrape worker threads have no app context), then the
-    FAISS_INDEX_DIR env var. Returns None when nothing is resolvable — the
-    learned ranker then simply reports unavailable.
-    """
+
+def _artifact_dir() -> Path | None:
+    """Resolve the FAISS/artifact directory without creating heavy services."""
     try:
         from flask import current_app, has_app_context
 
@@ -165,7 +177,7 @@ def _artifact_path() -> Path | None:
                 "FAISS_INDEX_DIR",
                 str(Path(current_app.instance_path) / "faiss_index"),
             )
-            return Path(index_dir) / ARTIFACT_FILENAME
+            return Path(index_dir)
     except Exception:  # pragma: no cover - flask always importable in-app
         pass
 
@@ -173,12 +185,90 @@ def _artifact_path() -> Path | None:
 
     service = peek_embedding_service()
     if service is not None:
-        return Path(service.index_dir) / ARTIFACT_FILENAME
+        return Path(service.index_dir)
 
     env_dir = os.environ.get("FAISS_INDEX_DIR", "").strip()
     if env_dir:
-        return Path(env_dir) / ARTIFACT_FILENAME
+        return Path(env_dir)
     return None
+
+
+def _artifact_path(ref=None) -> Path | None:
+    """Resolve the artifact location for ``ref`` (active profile when None)."""
+    directory = _artifact_dir()
+    if directory is None:
+        return None
+    if ref is None:
+        ref = get_runtime_active_profile()
+    return directory / _artifact_filename(ref)
+
+
+# ── active-profile snapshot + NL-description embedding ───────────────────
+
+
+def set_runtime_active_profile(ref) -> None:
+    global _active_profile_ref
+    with _active_profile_lock:
+        _active_profile_ref = ref
+
+
+def get_runtime_active_profile():
+    """Last-seen active :class:`ProfileRef` (default until any resolves)."""
+    with _active_profile_lock:
+        if _active_profile_ref is not None:
+            return _active_profile_ref
+    from app.services.profiles import ProfileRef
+
+    return ProfileRef.default()
+
+
+def _resolve_active_ref(app=None):
+    """Resolve the active profile from the DB and refresh the runtime snapshot.
+
+    Best-effort: with no app context / DB it falls back to the runtime snapshot
+    (default), so scoring never breaks.
+    """
+    try:
+        from app.services.profiles import active_profile_ref
+
+        ref = active_profile_ref()
+        set_runtime_active_profile(ref)
+        return ref
+    except Exception:  # pragma: no cover - degrade to last-known snapshot
+        return get_runtime_active_profile()
+
+
+def _description_vector(ref):
+    """Embed a profile's NL description (L2-normalized), cached. None when empty."""
+    description = (getattr(ref, "description", "") or "").strip()
+    if not description:
+        return None
+    key = (getattr(ref, "slug", "default"), description)
+    with _description_cache_lock:
+        if key in _description_cache:
+            return _description_cache[key]
+    vector = None
+    try:
+        import numpy as np
+
+        from app.services.embeddings import get_embedding_service
+
+        raw = np.asarray(get_embedding_service().encode([description])[0], dtype=np.float32).reshape(-1)
+        norm = float(np.linalg.norm(raw))
+        if norm > 0.0:
+            vector = (raw / norm).astype(np.float32)
+    except Exception:  # pragma: no cover - description blend is best-effort
+        LOGGER.warning("Profile description embedding failed (non-fatal)", exc_info=True)
+        vector = None
+    with _description_cache_lock:
+        _description_cache[key] = vector
+    return vector
+
+
+def active_description_vector(app=None):
+    """NL-description embedding for the active profile (None when empty)."""
+    ref = _resolve_active_ref(app)
+    return _description_vector(ref)
 
 
 def _save_artifact(model: LearnedModel, path: Path) -> None:
@@ -246,20 +336,19 @@ def _load_artifact(path: Path) -> LearnedModel | None:
         return None
 
 
-def _load_artifact_cached(path: Path) -> LearnedModel | None:
-    global _artifact_cache_key, _artifact_cache_model
+def _load_artifact_cached(path: Path, slug: str) -> LearnedModel | None:
     try:
         stat = path.stat()
     except OSError:
         return None
     key = (str(path), stat.st_mtime_ns, stat.st_size)
     with _cache_lock:
-        if _artifact_cache_key == key:
-            return _artifact_cache_model
+        cached = _artifact_caches.get(slug)
+        if cached is not None and cached[:3] == key:
+            return cached[3]
     model = _load_artifact(path)
     with _cache_lock:
-        _artifact_cache_key = key
-        _artifact_cache_model = model
+        _artifact_caches[slug] = (*key, model)
     return model
 
 
@@ -376,27 +465,47 @@ def _f1_score(labels: np.ndarray, scores: np.ndarray, threshold: float = 0.5) ->
 # ── training data assembly ──────────────────────────────────────────────
 
 
-def _feedback_fingerprint_counts() -> tuple[int, int]:
+def _profile_feedback_condition(ref):
+    """SQLAlchemy predicate selecting the feedback rows owned by ``ref``.
+
+    The default profile also owns pre-Wave-3 rows (``profile_id IS NULL``). When
+    ``ref`` has no id (no DB profile yet) every row is in scope — preserving the
+    single-model behavior for callers/tests without profiles.
+    """
     from app.models import PaperFeedback, db
 
-    count, max_id = (
-        db.session.query(db.func.count(PaperFeedback.id), db.func.max(PaperFeedback.id))
-        .filter(PaperFeedback.action.in_(POSITIVE_ACTIONS + NEGATIVE_ACTIONS))
-        .one()
+    if ref is None or getattr(ref, "id", None) is None:
+        return None
+    conditions = [PaperFeedback.profile_id == ref.id]
+    if getattr(ref, "is_default", False):
+        conditions.append(PaperFeedback.profile_id.is_(None))
+    return db.or_(*conditions)
+
+
+def _feedback_fingerprint_counts(ref=None) -> tuple[int, int]:
+    from app.models import PaperFeedback, db
+
+    query = db.session.query(db.func.count(PaperFeedback.id), db.func.max(PaperFeedback.id)).filter(
+        PaperFeedback.action.in_(POSITIVE_ACTIONS + NEGATIVE_ACTIONS)
     )
+    condition = _profile_feedback_condition(ref)
+    if condition is not None:
+        query = query.filter(condition)
+    count, max_id = query.one()
     return int(count or 0), int(max_id or 0)
 
 
-def _labeled_examples() -> tuple[list[tuple[int, datetime | None]], list[tuple[int, datetime | None]]]:
+def _labeled_examples(ref=None) -> tuple[list[tuple[int, datetime | None]], list[tuple[int, datetime | None]]]:
     """(paper_id, latest feedback created_at) per class; positives win conflicts."""
     from app.models import PaperFeedback, db
 
-    rows = (
-        db.session.query(PaperFeedback.paper_id, PaperFeedback.action, PaperFeedback.created_at)
-        .filter(PaperFeedback.action.in_(POSITIVE_ACTIONS + NEGATIVE_ACTIONS))
-        .order_by(PaperFeedback.created_at.asc(), PaperFeedback.id.asc())
-        .all()
+    query = db.session.query(PaperFeedback.paper_id, PaperFeedback.action, PaperFeedback.created_at).filter(
+        PaperFeedback.action.in_(POSITIVE_ACTIONS + NEGATIVE_ACTIONS)
     )
+    condition = _profile_feedback_condition(ref)
+    if condition is not None:
+        query = query.filter(condition)
+    rows = query.order_by(PaperFeedback.created_at.asc(), PaperFeedback.id.asc()).all()
     positive: dict[int, datetime | None] = {}
     negative: dict[int, datetime | None] = {}
     for paper_id, action, created_at in rows:
@@ -505,20 +614,34 @@ def _resolve_app(app):
     return None
 
 
-def _set_cache(model: LearnedModel | None, fingerprint: tuple[int, int, int] | None, state: str) -> None:
-    global _cached_model, _cached_fingerprint, _cache_state
+def _store_cache(slug: str, model: LearnedModel | None, fingerprint: tuple[int, int, int] | None, state: str) -> None:
     with _cache_lock:
-        _cached_model = model
-        _cached_fingerprint = fingerprint
-        _cache_state = state
+        _cached_models[slug] = model
+        if fingerprint is not None:
+            _cached_fingerprints[slug] = fingerprint
+        else:
+            _cached_fingerprints.pop(slug, None)
+        _cache_states[slug] = state
 
 
-def train_learned_ranker(app=None, *, force: bool = False) -> dict:
-    """(Re)train the learned ranker if feedback/index state changed.
+def _set_cache(model: LearnedModel | None, fingerprint: tuple[int, int, int] | None, state: str) -> None:
+    """Back-compat single-model cache seed: targets the active profile's slug.
 
-    Returns a status dict: ``{"available", "n_positive", "n_negative",
-    "needed_positive", "trained_at", "reason"}``. Never raises — any failure
-    logs and reports unavailable so feedback handling and scrapes survive.
+    Retained for callers/tests that predate per-profile models and seed the
+    cache directly (e.g. tests that inject a model then read it via
+    ``peek_learned_model()``).
+    """
+    _store_cache(getattr(get_runtime_active_profile(), "slug", "default"), model, fingerprint, state)
+
+
+def train_learned_ranker(app=None, *, force: bool = False, profile=None) -> dict:
+    """(Re)train a profile's learned ranker if feedback/index state changed.
+
+    ``profile`` is a :class:`ProfileRef`; when None the active profile is
+    resolved. Returns a status dict: ``{"available", "n_positive",
+    "n_negative", "needed_positive", "trained_at", "reason"}``. Never raises —
+    any failure logs and reports unavailable so feedback handling and scrapes
+    survive.
     """
     status: dict[str, object] = {
         "available": False,
@@ -535,7 +658,9 @@ def train_learned_ranker(app=None, *, force: bool = False) -> dict:
 
     try:
         with app.app_context():
-            pos_items, neg_items = _labeled_examples()
+            ref = profile if profile is not None else _resolve_active_ref(app)
+            slug = getattr(ref, "slug", "default")
+            pos_items, neg_items = _labeled_examples(ref)
             status["n_positive"] = len(pos_items)
             status["n_negative"] = len(neg_items)
             status["needed_positive"] = max(0, MIN_POSITIVE_FEEDBACK - len(pos_items))
@@ -546,20 +671,24 @@ def train_learned_ranker(app=None, *, force: bool = False) -> dict:
 
             if len(pos_items) < MIN_POSITIVE_FEEDBACK:
                 # Cold start: cheap DB-only exit, no embedding service needed.
-                _set_cache(None, None, "unavailable")
-                _delete_artifact(_artifact_path())
+                _store_cache(slug, None, None, "unavailable")
+                _delete_artifact(_artifact_path(ref))
                 status["reason"] = "not-enough-feedback"
                 return status
 
             from app.services.embeddings import get_embedding_service
 
             service = get_embedding_service(app)
-            count, max_id = _feedback_fingerprint_counts()
+            count, max_id = _feedback_fingerprint_counts(ref)
             fingerprint = (count, max_id, service.index_size())
 
             with _cache_lock:
-                if not force and _cached_fingerprint == fingerprint and _cache_state != "unknown":
-                    model = _cached_model
+                if (
+                    not force
+                    and _cached_fingerprints.get(slug) == fingerprint
+                    and _cache_states.get(slug, "unknown") != "unknown"
+                ):
+                    model = _cached_models.get(slug)
                     status["available"] = model is not None
                     status["trained_at"] = model.trained_at if model else None
                     status["reason"] = "cached" if model else "not-enough-embeddings"
@@ -567,14 +696,14 @@ def train_learned_ranker(app=None, *, force: bool = False) -> dict:
 
             training_set = _assemble_training_set(service, pos_items, neg_items)
             if training_set is None:
-                _set_cache(None, fingerprint, "unavailable")
+                _store_cache(slug, None, fingerprint, "unavailable")
                 status["reason"] = "not-enough-embeddings"
                 return status
 
             x_raw, y, weights, pca_sample, counts = training_set
             model = _fit_model(x_raw, y, weights, pca_sample, counts, fingerprint)
-            _set_cache(model, fingerprint, "available")
-            artifact = _artifact_path()
+            _store_cache(slug, model, fingerprint, "available")
+            artifact = _artifact_path(ref)
             if artifact is not None:
                 try:
                     _save_artifact(model, artifact)
@@ -585,14 +714,15 @@ def train_learned_ranker(app=None, *, force: bool = False) -> dict:
             status["trained_at"] = model.trained_at
             status["reason"] = "trained"
             LOGGER.info(
-                "Learned ranker retrained: %d positives, %d negatives, %d weak negatives",
+                "Learned ranker retrained (profile %s): %d positives, %d negatives, %d weak negatives",
+                slug,
                 model.n_positive,
                 model.n_negative,
                 model.n_weak,
             )
 
             try:
-                evaluate_learned_ranker(app)
+                evaluate_learned_ranker(app, profile=ref)
             except Exception:
                 LOGGER.warning("Learned-ranker evaluation failed (non-fatal)", exc_info=True)
             return status
@@ -602,29 +732,35 @@ def train_learned_ranker(app=None, *, force: bool = False) -> dict:
         return status
 
 
-def ensure_learned_model(app=None) -> LearnedModel | None:
-    """Train if stale (fingerprint-cached) and return the active model."""
-    train_learned_ranker(app)
+def ensure_learned_model(app=None, profile=None) -> LearnedModel | None:
+    """Train if stale (fingerprint-cached) and return the profile's model."""
+    app = _resolve_app(app)
+    ref = profile if profile is not None else _resolve_active_ref(app)
+    train_learned_ranker(app, profile=ref)
     with _cache_lock:
-        return _cached_model
+        return _cached_models.get(getattr(ref, "slug", "default"))
 
 
-def peek_learned_model() -> LearnedModel | None:
-    """Return the trained model WITHOUT touching the DB or training.
+def peek_learned_model(profile=None) -> LearnedModel | None:
+    """Return a profile's trained model WITHOUT touching the DB or training.
 
-    Uses the in-process cache when this process has trained/decided already,
-    else falls back to the on-disk artifact (kept fresh by the feedback
-    retrain hook, possibly by another process). Cheap enough per paper row.
+    ``profile`` is a :class:`ProfileRef`; when None the active profile (runtime
+    snapshot) is used. Uses the in-process cache when this process has
+    trained/decided already, else falls back to the on-disk artifact (kept
+    fresh by the feedback retrain hook, possibly by another process).
     """
+    ref = profile if profile is not None else get_runtime_active_profile()
+    slug = getattr(ref, "slug", "default")
     with _cache_lock:
-        if _cache_state == "available":
-            return _cached_model
-        if _cache_state == "unavailable":
+        state = _cache_states.get(slug, "unknown")
+        if state == "available":
+            return _cached_models.get(slug)
+        if state == "unavailable":
             return None
-    path = _artifact_path()
+    path = _artifact_path(ref)
     if path is None:
         return None
-    return _load_artifact_cached(path)
+    return _load_artifact_cached(path, slug)
 
 
 def score_vectors(vectors, model: LearnedModel | None = None):
@@ -643,12 +779,18 @@ def interest_signal(
     profile: InterestProfile | None,
     model: LearnedModel | None,
     blend: float,
+    description_vector=None,
 ) -> tuple[float | None, str | None]:
     """Blended interest signal in [-1, 1] plus its source label.
 
     LR probability is mapped to [-1, 1] so ``interest_weight`` keeps its
     existing semantics. With no model the centroid similarity passes through
     unchanged (source "centroid"); with no profile the LR signal is used alone.
+    ``description_vector`` (the L2-normalized embedding of a profile's editable
+    NL description) is averaged into the signal when present, so a brand-new
+    profile that only has a description still ranks papers by cosine similarity
+    to it (cold start). Its source is "description" when nothing else
+    contributes.
     """
     centroid_score = None
     if profile is not None:
@@ -663,14 +805,30 @@ def interest_signal(
         probability = float(model.predict_proba(np.asarray(vector, dtype=np.float32))[0])
         lr_signal = 2.0 * probability - 1.0
 
-    if lr_signal is None and centroid_score is None:
-        return None, None
     if lr_signal is None:
-        return centroid_score, "centroid"
-    if centroid_score is None:
-        return lr_signal, "learned"
-    blend = min(max(float(blend), 0.0), 1.0)
-    return blend * lr_signal + (1.0 - blend) * centroid_score, "learned"
+        main_signal, source = centroid_score, ("centroid" if centroid_score is not None else None)
+    elif centroid_score is None:
+        main_signal, source = lr_signal, "learned"
+    else:
+        blend = min(max(float(blend), 0.0), 1.0)
+        main_signal, source = blend * lr_signal + (1.0 - blend) * centroid_score, "learned"
+
+    desc_score = None
+    if description_vector is not None:
+        import numpy as np
+
+        vec = np.asarray(vector, dtype=np.float32).reshape(-1)
+        norm = float(np.linalg.norm(vec))
+        if norm > 0.0:
+            desc_score = max(-1.0, min(1.0, float(np.dot(vec / norm, description_vector))))
+
+    if main_signal is None and desc_score is None:
+        return None, None
+    if main_signal is None:
+        return desc_score, "description"
+    if desc_score is None:
+        return main_signal, source
+    return 0.5 * main_signal + 0.5 * desc_score, source
 
 
 def resolve_interest_source(config: dict | None) -> str:
@@ -684,7 +842,14 @@ def resolve_interest_source(config: dict | None) -> str:
     return "centroid"
 
 
-def model_status(app=None) -> dict:
+def _metric_name(base: str, ref) -> str:
+    """Per-profile metric name; the default profile keeps the legacy base name."""
+    if ref is None or getattr(ref, "is_default", True):
+        return base
+    return f"{base}:{ref.slug}"
+
+
+def model_status(app=None, profile=None) -> dict:
     """Status snapshot for the settings UI. Never raises."""
     status: dict[str, object] = {
         "enabled": True,
@@ -701,9 +866,10 @@ def model_status(app=None) -> dict:
         return status
     try:
         with app.app_context():
+            ref = profile if profile is not None else _resolve_active_ref(app)
             prefs = learned_preferences(app.config.get("SCRAPER_CONFIG"))
             status["enabled"] = bool(prefs.get("enabled", True))
-            train_status = train_learned_ranker(app)
+            train_status = train_learned_ranker(app, profile=ref)
             status.update(
                 {
                     "available": bool(train_status["available"]) and status["enabled"],
@@ -716,9 +882,9 @@ def model_status(app=None) -> dict:
 
             from app.models import RecommendationMetric
 
-            for metric_name, key in (("learned_ranker_auc", "last_auc"), ("learned_ranker_f1", "last_f1")):
+            for base, key in (("learned_ranker_auc", "last_auc"), ("learned_ranker_f1", "last_f1")):
                 row = (
-                    RecommendationMetric.query.filter_by(metric_name=metric_name)
+                    RecommendationMetric.query.filter_by(metric_name=_metric_name(base, ref))
                     .order_by(RecommendationMetric.measured_at.desc(), RecommendationMetric.id.desc())
                     .first()
                 )
@@ -729,7 +895,7 @@ def model_status(app=None) -> dict:
     return status
 
 
-def evaluate_learned_ranker(app=None) -> dict | None:
+def evaluate_learned_ranker(app=None, profile=None) -> dict | None:
     """Offline eval: AUC + F1 on a time-ordered holdout of the user's feedback.
 
     Trains the recipe on the earliest 80% of labeled feedback and scores the
@@ -744,7 +910,8 @@ def evaluate_learned_ranker(app=None) -> dict | None:
         return None
 
     with app.app_context():
-        pos_items, neg_items = _labeled_examples()
+        ref = profile if profile is not None else _resolve_active_ref(app)
+        pos_items, neg_items = _labeled_examples(ref)
         labeled = [(pid, ts, 1) for pid, ts in pos_items] + [(pid, ts, 0) for pid, ts in neg_items]
         if len(labeled) < 8:
             return None
@@ -788,12 +955,17 @@ def evaluate_learned_ranker(app=None) -> dict | None:
             "source": "learned_ranker_eval",
             "n_train": len(train_part),
             "n_test": int(len(found_ids)),
+            "profile": getattr(ref, "slug", "default"),
         }
         db.session.add(
-            RecommendationMetric(metric_name="learned_ranker_auc", metric_value=float(auc), config_snapshot=snapshot)
+            RecommendationMetric(
+                metric_name=_metric_name("learned_ranker_auc", ref), metric_value=float(auc), config_snapshot=snapshot
+            )
         )
         db.session.add(
-            RecommendationMetric(metric_name="learned_ranker_f1", metric_value=float(f1), config_snapshot=snapshot)
+            RecommendationMetric(
+                metric_name=_metric_name("learned_ranker_f1", ref), metric_value=float(f1), config_snapshot=snapshot
+            )
         )
         db.session.commit()
         LOGGER.info("Learned-ranker holdout eval: AUC=%.3f F1=%.3f (n_test=%d)", auc, f1, len(found_ids))
@@ -868,11 +1040,16 @@ def cancel_pending_retrain() -> None:
 
 def reset_learned_ranker_cache() -> None:
     """Reset all module state (for testing)."""
-    global _artifact_cache_key, _artifact_cache_model, _runtime_prefs
+    global _runtime_prefs, _active_profile_ref
     cancel_pending_retrain()
-    _set_cache(None, None, "unknown")
     with _cache_lock:
-        _artifact_cache_key = None
-        _artifact_cache_model = None
+        _cached_models.clear()
+        _cached_fingerprints.clear()
+        _cache_states.clear()
+        _artifact_caches.clear()
     with _runtime_prefs_lock:
         _runtime_prefs = None
+    with _active_profile_lock:
+        _active_profile_ref = None
+    with _description_cache_lock:
+        _description_cache.clear()

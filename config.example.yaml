@@ -65,6 +65,12 @@ preferences:
     # Learned interest signal (see preferences.learned below); inert until
     # >= 5 saved papers have embeddings. This weight multiplies the signal.
     interest_weight: 12.0
+    # Implementation-readiness boost: a small additive bonus for "runnable"
+    # papers, from already-extracted signals (has-code repo + star count +
+    # license + repo freshness, plus project page / HF upvotes). Scaled by the
+    # 0-100 readiness score, so this weight is the *maximum* points it can add.
+    # Deliberately small so it never overrides the learned interest signal.
+    readiness_weight: 2.0
     freshness_half_life_days: 14.0
   learned:
     # Learned ranking: a per-user logistic regression over PCA-compressed
@@ -81,6 +87,11 @@ preferences:
     # Set candidate_top_k: 0 to keep the feed whitelist-only.
     candidate_threshold: 0.6
     candidate_top_k: 10
+    # Multiple interest profiles (e.g. "3D reconstruction" vs "VLM efficiency"),
+    # each with its own learned ranker, feed tab, and digest section, are managed
+    # in the UI (Settings > Ranking > Interest profiles) and stored per-profile in
+    # the database — there are intentionally no per-profile config keys here. The
+    # `blend`/`candidate_*` knobs above apply to whichever profile is active.
   muted:
     authors: []
     affiliations: []

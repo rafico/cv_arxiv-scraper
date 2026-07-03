@@ -23,6 +23,26 @@
 
 {# ════════════ Top-bar tools: search, sort, density, bulk ════════════ #}
 {% block topbar_tools %}
+{% if profiles and profiles|length > 0 %}
+<select id="profile-switcher" class="input-base py-1.5 text-xs" title="Interest profile"
+        data-csrf="{{ csrf_token }}"
+        onchange="switchProfile(this.value)">
+    {% for profile in profiles %}
+    <option value="{{ profile.id }}" {{ 'selected' if profile.id == active_profile_id }}>{{ profile.name }}</option>
+    {% endfor %}
+</select>
+<script>
+    function switchProfile(profileId) {
+        var el = document.getElementById('profile-switcher');
+        fetch('/api/profiles/' + encodeURIComponent(profileId) + '/activate', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': el.getAttribute('data-csrf') },
+        }).then(function (resp) {
+            if (resp.ok) { window.location.reload(); }
+        });
+    }
+</script>
+{% endif %}
 <div class="relative hidden sm:block w-40 md:w-56 lg:w-72">
     <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-subtle" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -100,6 +120,7 @@
         <option value="all" {{ 'selected' if current_filters.resource_filter == 'all' }}>All resource states</option>
         <option value="available" {{ 'selected' if current_filters.resource_filter == 'available' }}>Has resources ({{ filter_options.resources.available }})</option>
         <option value="missing" {{ 'selected' if current_filters.resource_filter == 'missing' }}>No resources ({{ filter_options.resources.missing }})</option>
+        <option value="runnable" {{ 'selected' if current_filters.resource_filter == 'runnable' }}>Runnable (has code)</option>
     </select>
     <select id="reading_status" class="input-base w-full py-1.5 text-xs" onchange="applyFilters({ reading_status: this.value })">
         <option value="" {{ 'selected' if not current_filters.reading_status }}>All statuses</option>
@@ -317,7 +338,7 @@
     {% if current_filters.venue %}{% set _ = active_chips.append(('venue', 'Venue: ' ~ current_filters.venue)) %}{% endif %}
     {% if current_filters.dataset %}{% set _ = active_chips.append(('dataset', 'Dataset: ' ~ current_filters.dataset)) %}{% endif %}
     {% if current_filters.reading_status %}{% set _ = active_chips.append(('reading_status', current_filters.reading_status|replace('_', ' ')|title)) %}{% endif %}
-    {% if current_filters.resource_filter != 'all' %}{% set _ = active_chips.append(('resource_filter', 'Has resources' if current_filters.resource_filter == 'available' else 'No resources')) %}{% endif %}
+    {% if current_filters.resource_filter != 'all' %}{% set _ = active_chips.append(('resource_filter', {'available': 'Has resources', 'missing': 'No resources', 'runnable': 'Runnable'}.get(current_filters.resource_filter, current_filters.resource_filter))) %}{% endif %}
     {% if current_filters.view == 'inbox' and current_filters.timeframe != 'daily' %}{% set _ = active_chips.append(('timeframe', current_filters.timeframe|title)) %}{% endif %}
     {% if current_filters.include_hidden %}{% set _ = active_chips.append(('include_hidden', 'Including hidden')) %}{% endif %}
 

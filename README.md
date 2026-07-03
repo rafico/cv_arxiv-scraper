@@ -42,12 +42,39 @@ No account, no cloud, no inbox of 200 PDFs to feel guilty about.
 
 ## ⚡ Quick Start
 
+Pick whichever fits. All three are **localhost-only, single-user, no auth** by design
+(see [Private by design](#-private-by-design)).
+
+**Run it with `uvx` (no install):**
+
+```bash
+uvx cv-arxiv-scraper serve          # once published to PyPI
+# until then, straight from git:
+uvx --from git+https://github.com/rafico/cv_arxiv-scraper cv-arxiv serve
+```
+
+`serve` keeps everything (DB, search index, config, secrets) in one **data directory** —
+`--data-dir DIR`, else `$CV_ARXIV_DATA_DIR`, else `~/.local/share/cv-arxiv`. A config is
+seeded on first run. Loopback-only unless you pass `--expose`.
+
+**Install with `pip`:**
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m pip install .            # from a checkout (or `cv-arxiv-scraper` from PyPI)
+cv-arxiv serve                     # or: cv-arxiv serve --data-dir ~/papers --port 8000
+cv-arxiv --version                 # print the version
+```
+
+**Run with Docker Compose** — see [Run with Docker](#-run-with-docker) (with or without a
+bundled local LLM).
+
+**Develop from source:**
+
 ```bash
 git clone https://github.com/rafico/cv_arxiv-scraper.git
 cd cv_arxiv-scraper
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip
+python3 -m venv .venv && source .venv/bin/activate
 python -m pip install -e .
 cp config.example.yaml config.yaml
 python run.py --debug
@@ -57,9 +84,9 @@ Open **http://127.0.0.1:5000** and click **Run Scrape** (top bar). The first run
 ~30–60s — it fetches and ranks today's arXiv feed, so an empty Inbox *before* you scrape
 is normal. Matched papers then land in the Inbox, ranked by score.
 
-If you skip the copy step, the app runs from `config.example.yaml` defaults and only
-creates `instance/config.yaml` after your first saved change. No auth, localhost-only by
-design (see [Private by design](#-private-by-design)).
+**Health check:** `GET /healthz` returns JSON `{status, version, db_ok, faiss_ok,
+paper_count}` — 200 when healthy, 503 when degraded. Handy for uptime probes and the
+Docker healthcheck.
 
 ---
 
@@ -169,6 +196,7 @@ After `pip install -e .`:
 
 | Command | What it does |
 |---|---|
+| `cv-arxiv serve` | Launch the web server against one `--data-dir` (also `cv-arxiv --version`) |
 | `cv-arxiv-scrape` | One-shot scrape, prints matches to terminal |
 | `cv-arxiv-digest` | Send email digest (`--dry-run`, `--send-only`) |
 | `cv-arxiv-sync` | Historical sync (`--from`, `--to`, `--category`) |
@@ -195,6 +223,7 @@ Full REST API at `/api/`. Key endpoints:
 | Export | `GET /api/export`, `GET /api/export/bibtex` |
 | Backup | `GET /api/backup/export`, `POST /api/backup/import` |
 | Feed sources | `GET/POST /api/feed-sources` |
+| Health | `GET /healthz` (liveness/readiness JSON, no `/api` prefix) |
 
 See the in-app help at `/help` for full documentation.
 
@@ -269,8 +298,29 @@ on a network interface, put it behind an authenticated reverse proxy first.
 
 ```bash
 cp config.example.yaml config.yaml
-docker compose up
+docker compose up                       # no AI, just the app on http://127.0.0.1:5000
 ```
+
+The container's health is the [`/healthz`](#-quick-start) endpoint, so `docker ps` shows
+`healthy` once the app is serving.
+
+### With a bundled local LLM (`local-ai` profile)
+
+Want AI summaries and chat without signing up for anything? The `local-ai` profile adds an
+[Ollama](https://ollama.com/) sidecar and an AI-enabled app instance already wired to it:
+
+```bash
+cp config.example.yaml config.yaml
+docker compose --profile local-ai up
+```
+
+This starts the plain app on `127.0.0.1:5000` (no AI, as above) **plus** the AI dashboard on
+`127.0.0.1:5001`, sharing the same corpus. Ollama runs **CPU-only by default** (slower but
+works with zero setup); to use an NVIDIA GPU, install the nvidia-container-toolkit and
+uncomment the `deploy` block on the `ollama` service in `docker-compose.yml`. The model
+(default `gemma2:2b`) is pulled on first start, so the first AI answer waits for that
+download; override it with `OLLAMA_MODEL=... docker compose --profile local-ai up` (and edit
+`llm.model` in `config.local-ai.example.yaml` to match). All ports stay loopback-bound.
 
 ---
 

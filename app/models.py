@@ -336,6 +336,29 @@ class EnrichmentCache(db.Model):
         return (reference - self.fetched_at) <= timedelta(hours=self.ttl_hours)
 
 
+class InterestProfile(db.Model):
+    """A named interest profile: its own learned ranker, feed, and digest section.
+
+    NOTE: distinct from :class:`app.services.interest_model.InterestProfile`, which
+    is the in-memory embedding-centroid dataclass. This is the persisted profile
+    record. Invariants (exactly one active, exactly one default, cannot delete the
+    default or the last profile) are enforced in :mod:`app.services.profiles`.
+    """
+
+    __tablename__ = "interest_profiles"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False)
+    slug = db.Column(db.String(160), nullable=False, unique=True)
+    # Editable natural-language interest description, embedded and blended into
+    # scoring so a brand-new profile ranks sensibly before it has any feedback.
+    description = db.Column(db.Text, nullable=False, default="")
+    is_default = db.Column(db.Boolean, nullable=False, default=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=False)
+    include_in_digest = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
+
+
 class PaperFeedback(db.Model):
     __tablename__ = "paper_feedback"
     __table_args__ = (
@@ -348,6 +371,9 @@ class PaperFeedback(db.Model):
     action = db.Column(db.String(16), nullable=False)
     reason = db.Column(db.String(64), nullable=True)
     note = db.Column(db.Text, nullable=True)
+    # Owning interest profile; NULL means the pre-Wave-3 global feedback, which is
+    # treated as belonging to the default profile (see app/services/profiles.py).
+    profile_id = db.Column(db.Integer, db.ForeignKey("interest_profiles.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
 
     paper = db.relationship("Paper", back_populates="feedback")

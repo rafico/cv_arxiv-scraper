@@ -420,6 +420,108 @@
             <span class="text-xs font-medium uppercase tracking-[0.16em] text-fg-subtle">Controls</span>
         </div>
 
+        {# ── Interest profiles (Wave 3) ── #}
+        <div class="rounded-2xl border border-edge bg-surface p-5 mb-5" id="interest-profiles-card"
+             data-csrf="{{ csrf_token }}">
+            <div class="flex items-center justify-between gap-3 mb-1">
+                <h3 class="text-sm font-semibold text-fg">Interest profiles</h3>
+                <span class="text-xs text-fg-subtle">Each profile has its own learned ranker, feed &amp; digest section</span>
+            </div>
+            <p class="text-xs text-fg-muted mb-4">Keep separate feeds (e.g. "3D reconstruction" vs "VLM efficiency"). The active profile ranks your dashboard and trains from your saves/skips. An editable description blends into scoring so a brand-new profile ranks sensibly before it has ratings.</p>
+
+            <div class="space-y-4">
+                {% for profile in interest_profiles %}
+                <div class="rounded-xl border border-edge p-4" data-profile-id="{{ profile.id }}">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-semibold text-fg">{{ profile.name }}</span>
+                            {% if profile.is_active %}<span class="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent text-white">Active</span>{% endif %}
+                            {% if profile.is_default %}<span class="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-edge text-fg-muted">Default</span>{% endif %}
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            {% if not profile.is_active %}
+                            <button type="button" class="btn-ghost py-1 text-xs" onclick="profileAction('{{ profile.id }}/activate', 'POST')">Set active</button>
+                            {% endif %}
+                            <button type="button" class="btn-ghost py-1 text-xs" onclick="renameProfile('{{ profile.id }}', this)" data-name="{{ profile.name }}">Rename</button>
+                            {% if not profile.is_default %}
+                            <button type="button" class="btn-ghost py-1 text-xs text-rose-600" onclick="deleteProfile('{{ profile.id }}')">Delete</button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <p class="text-xs text-fg-subtle mb-2">
+                        {% if profile.status.available %}
+                            Model active{% if profile.status.last_auc is not none %} &middot; AUC {{ '%.2f'|format(profile.status.last_auc) }}{% endif %}
+                        {% else %}
+                            Needs {{ profile.status.needed_positive }} more rated paper{{ 's' if profile.status.needed_positive != 1 }}
+                        {% endif %}
+                    </p>
+                    <label class="block text-xs font-medium text-fg-muted mb-1">Description (blended into scoring)</label>
+                    <textarea class="input-base w-full text-sm" rows="2" data-profile-desc="{{ profile.id }}"
+                              placeholder="e.g. neural rendering, gaussian splatting, multi-view 3D reconstruction">{{ profile.description }}</textarea>
+                    <div class="flex items-center justify-between gap-2 mt-2">
+                        <label class="flex items-center gap-2 cursor-pointer text-xs text-fg-muted">
+                            <input type="checkbox" class="h-4 w-4 rounded border-edge accent-accent"
+                                   {% if profile.include_in_digest %}checked{% endif %}
+                                   onchange="profileDigest('{{ profile.id }}', this.checked)">
+                            Include in email digest
+                        </label>
+                        <button type="button" class="btn-ghost py-1 text-xs" onclick="saveDescription('{{ profile.id }}')">Save description</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="flex items-center gap-2 mt-4 pt-4 border-t border-edge">
+                <input type="text" id="new-profile-name" class="input-base flex-1 text-sm" placeholder="New profile name">
+                <button type="button" class="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors" onclick="createProfile()">Add profile</button>
+            </div>
+        </div>
+
+        <script>
+            (function () {
+                var card = document.getElementById('interest-profiles-card');
+                if (!card) return;
+                var csrf = card.getAttribute('data-csrf');
+                function api(path, method, body) {
+                    return fetch('/api/profiles/' + path, {
+                        method: method,
+                        headers: { 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+                        body: body ? JSON.stringify(body) : undefined,
+                    });
+                }
+                window.profileAction = function (path, method) {
+                    api(path, method).then(function (r) { if (r.ok) window.location.reload(); });
+                };
+                window.createProfile = function () {
+                    var name = (document.getElementById('new-profile-name').value || '').trim();
+                    if (!name) return;
+                    api('', 'POST', { name: name }).then(function (r) { if (r.ok) window.location.reload(); });
+                };
+                window.renameProfile = function (id, btn) {
+                    var current = btn.getAttribute('data-name') || '';
+                    var name = window.prompt('Rename profile', current);
+                    if (!name) return;
+                    api(id + '/rename', 'POST', { name: name }).then(function (r) { if (r.ok) window.location.reload(); });
+                };
+                window.deleteProfile = function (id) {
+                    if (!window.confirm('Delete this profile? Its ratings move to the default profile.')) return;
+                    api(id, 'DELETE').then(function (r) {
+                        if (r.ok) { window.location.reload(); }
+                        else { r.json().then(function (d) { window.alert(d.error || 'Delete failed'); }); }
+                    });
+                };
+                window.saveDescription = function (id) {
+                    var ta = document.querySelector('[data-profile-desc="' + id + '"]');
+                    api(id + '/description', 'POST', { description: ta.value }).then(function (r) {
+                        if (r.ok) window.location.reload();
+                    });
+                };
+                window.profileDigest = function (id, checked) {
+                    api(id + '/digest', 'POST', { include_in_digest: checked });
+                };
+            })();
+        </script>
+
         <form method="POST" action="/settings/preferences" id="preferences-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="grid grid-cols-1 gap-5 xl:grid-cols-2">

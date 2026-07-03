@@ -1,0 +1,16 @@
+# Source-distribution contents. The wheel ships app/ package-data (templates,
+# static, compiled style.css) via [tool.setuptools.package-data]; this list
+# rounds out the sdist with the top-level ops/docs files.
+include README.md
+include CHANGELOG.md
+include LICENSE
+include pyproject.toml
+include requirements.lock
+include config.example.yaml
+include config.local-ai.example.yaml
+include Dockerfile
+include docker-compose.yml
+include run.py
+include wsgi.py
+recursive-include app/templates *.html
+recursive-include app/static *

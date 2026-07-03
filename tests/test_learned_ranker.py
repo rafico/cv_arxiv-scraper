@@ -129,9 +129,7 @@ class LearnedRankerTestCase(FlaskDBTestCase):
             db.session.add(paper)
             db.session.flush()
             action = "save" if label else "skip"
-            db.session.add(
-                PaperFeedback(paper_id=paper.id, action=action, created_at=base + timedelta(hours=idx))
-            )
+            db.session.add(PaperFeedback(paper_id=paper.id, action=action, created_at=base + timedelta(hours=idx)))
             vectors[paper.id] = _noisy_unit(0 if label else 1, seed=idx)
             papers.append(paper)
         db.session.commit()
@@ -376,16 +374,12 @@ class DenseRetrievalCandidateTests(LearnedRankerTestCase):
 
     def test_respects_top_k_cap_per_generator(self):
         generator = self._generator(top_k=2)
-        admitted = [
-            generator.process_single(_entry(f"2606.3{i}", f"Interest paper {i}", _unit(0))) for i in range(4)
-        ]
+        admitted = [generator.process_single(_entry(f"2606.3{i}", f"Interest paper {i}", _unit(0))) for i in range(4)]
         self.assertEqual(sum(1 for c in admitted if c is not None), 2)
 
     def test_whitelist_match_still_wins_over_interest_gate(self):
         generator = self._generator()
-        candidate = generator.process_single(
-            _entry("2606.4", "A paper", _unit(0), authors=["Jane Doe"])
-        )
+        candidate = generator.process_single(_entry("2606.4", "A paper", _unit(0), authors=["Jane Doe"]))
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate.match_types, ["Author"])
 

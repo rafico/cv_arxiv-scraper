@@ -34,14 +34,36 @@ def _load_feedback_rows(paper_id: int) -> list[PaperFeedback]:
     return PaperFeedback.query.filter_by(paper_id=paper_id).all()
 
 
+def _resolve_profile_id(profile_id: int | None) -> int | None:
+    """Resolve the owning profile id for a new feedback row (active when None).
+
+    Best-effort: any failure leaves ``profile_id`` NULL (the default profile
+    owns NULL rows), so feedback never breaks because profile resolution failed.
+    """
+    if profile_id is not None:
+        return profile_id
+    try:
+        from app.services.profiles import get_active_profile
+
+        return int(get_active_profile().id)
+    except Exception:
+        LOGGER.warning("Active-profile resolution for feedback failed (non-fatal)", exc_info=True)
+        return None
+
+
 def apply_feedback_action(
     paper_id: int,
     action: str,
     *,
     reason: str | None = None,
     note: str | None = None,
+    profile_id: int | None = None,
 ) -> dict:
     """Toggle a feedback action and return updated ranking metadata.
+
+    New rows are tagged with the active interest profile (or ``profile_id`` when
+    given, e.g. a digest one-tap link that names the profile whose section the
+    paper appeared in).
 
     The toggle is a read-modify-write on rows guarded by a unique (paper_id,
     action) constraint plus paper.feedback_score. Concurrent requests (gthread,
@@ -54,9 +76,12 @@ def apply_feedback_action(
     if action not in ALLOWED_ACTIONS:
         raise ValueError(f"Unsupported action '{action}'")
 
+    resolved_profile_id = _resolve_profile_id(profile_id)
     for attempt in range(_MAX_COMMIT_RETRIES):
         try:
-            return _apply_feedback_action_once(paper_id, action, reason=reason, note=note)
+            return _apply_feedback_action_once(
+                paper_id, action, reason=reason, note=note, profile_id=resolved_profile_id
+            )
         except IntegrityError:
             db.session.rollback()
             if attempt == _MAX_COMMIT_RETRIES - 1:
@@ -71,6 +96,7 @@ def _apply_feedback_action_once(
     *,
     reason: str | None = None,
     note: str | None = None,
+    profile_id: int | None = None,
 ) -> dict:
     """Perform one attempt of the feedback toggle; may raise IntegrityError on commit."""
     paper = db.session.get(Paper, paper_id)
@@ -100,7 +126,7 @@ def _apply_feedback_action_once(
                 db.session.delete(implied_save)
                 delta -= compute_feedback_delta(FeedbackAction.SAVE.value)
     else:
-        fb = PaperFeedback(paper_id=paper_id, action=action)
+        fb = PaperFeedback(paper_id=paper_id, action=action, profile_id=profile_id)
         # Never let a client-supplied reason masquerade as the internal
         # priority-implied marker — it drives cascade-deletes on un-prioritize, so
         # an explicit save carrying that string would be silently removed later.
@@ -135,6 +161,7 @@ def _apply_feedback_action_once(
                             paper_id=paper_id,
                             action=FeedbackAction.SAVE.value,
                             reason=_IMPLIED_BY_PRIORITY,
+                            profile_id=profile_id,
                         )
                     )
                     delta += compute_feedback_delta(FeedbackAction.SAVE.value)

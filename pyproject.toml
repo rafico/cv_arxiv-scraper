@@ -4,18 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cv-arxiv-scraper"
-version = "0.1.0"
-description = "arXiv CV scraping, enrichment, ranking, and digest tooling."
+dynamic = ["version"]
+description = "Local-first arXiv computer-vision paper scraper, ranker, and daily digest — a self-hostable, maintained take on arxiv-sanity / Scholar Inbox."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
+authors = [{ name = "rafico" }]
+keywords = ["arxiv", "computer-vision", "research", "recommender", "self-hosted", "digest", "local-first"]
 classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Web Environment",
+  "Framework :: Flask",
+  "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
 ]
 dependencies = [
   "flask==3.1.3",
@@ -56,8 +65,13 @@ dev = [
 Homepage = "https://github.com/rafico/cv_arxiv-scraper"
 Repository = "https://github.com/rafico/cv_arxiv-scraper"
 Issues = "https://github.com/rafico/cv_arxiv-scraper/issues"
+Changelog = "https://github.com/rafico/cv_arxiv-scraper/blob/main/CHANGELOG.md"
 
 [project.scripts]
+# `cv-arxiv-scraper` matches the distribution name so `uvx cv-arxiv-scraper serve`
+# works; `cv-arxiv` is the short alias. Both dispatch to the same serve CLI.
+cv-arxiv-scraper = "app.cli.serve:main"
+cv-arxiv = "app.cli.serve:main"
 cv-arxiv-scrape = "app.cli.scrape:main"
 cv-arxiv-sync = "app.cli.sync:main"
 cv-arxiv-backfill = "app.cli.backfill:main"
@@ -66,6 +80,12 @@ cv-arxiv-digest = "app.cli.digest:main"
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.dynamic]
+# Single source of truth for the version. setuptools reads the literal
+# statically (no import of the `app` package), so the wheel metadata always
+# matches the running app's `app._version.__version__`.
+version = { attr = "app._version.__version__" }
+
 [tool.setuptools.packages.find]
 include = ["app*"]
 
@@ -73,7 +93,11 @@ include = ["app*"]
 app = [
   "templates/*.html",
   "templates/**/*.html",
+  "static/*",
   "static/**/*",
+  # Explicit: the committed, Tailwind-compiled stylesheet must ship in the wheel
+  # so a `pip install`/`uvx` server renders correctly with no build step.
+  "static/style.css",
 ]
 
 [tool.pytest.ini_options]

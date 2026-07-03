@@ -225,6 +225,8 @@ class ExplainScoreTests(unittest.TestCase):
             "citation_bonus",
             "venue_bonus",
             "interest_bonus",
+            # Small additive implementation-readiness boost (Wave 3).
+            "readiness_bonus",
             # Honest labeling of the interest component ("learned" vs
             # "centroid"), added with the learned ranker (Wave 2).
             "interest_source",

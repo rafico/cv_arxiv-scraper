@@ -94,6 +94,16 @@ class DefaultFeatureExtractor:
         except Exception:  # pragma: no cover - preference resolution is best-effort
             LOGGER.warning("Learned preferences resolution failed (non-fatal)", exc_info=True)
             self.learned_preferences = {"enabled": False, "blend": 0.7}
+        # Active profile's editable NL description, embedded once and blended into
+        # the interest signal so a description-only cold-start profile still ranks.
+        self.description_vector = None
+        try:
+            if self.learned_preferences.get("enabled", True):
+                from app.services.learned_ranker import active_description_vector
+
+                self.description_vector = active_description_vector()
+        except Exception:  # pragma: no cover - description blend is best-effort
+            LOGGER.warning("Profile description vector unavailable (non-fatal)", exc_info=True)
         self._learned_model = _UNRESOLVED
 
     def _resolve_learned_model(self):
@@ -120,7 +130,7 @@ class DefaultFeatureExtractor:
         twice.
         """
         model = self._resolve_learned_model()
-        if self.interest_profile is None and model is None:
+        if self.interest_profile is None and model is None and self.description_vector is None:
             return None, 0.0, None
         try:
             vector = entry.get("_embedding")
@@ -138,6 +148,7 @@ class DefaultFeatureExtractor:
                 self.interest_profile,
                 model,
                 float(self.learned_preferences.get("blend", 0.7)),
+                self.description_vector,
             )
             if signal is None:
                 return None, 0.0, None

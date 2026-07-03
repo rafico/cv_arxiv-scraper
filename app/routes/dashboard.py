@@ -22,6 +22,7 @@ from app.models import (
     inbox_freshness_clause,
 )
 from app.services.feedback import get_feedback_snapshot
+from app.services.implementation_readiness import implementation_readiness
 from app.services.preferences import first_author_name, get_preferences
 from app.services.ranking import (
     combined_rank_score,
@@ -47,7 +48,7 @@ TIMEFRAME_DAYS = {
 
 VIEW_OPTIONS = {"inbox", "saved"}
 SORT_OPTIONS = {option.value for option in SortOption}
-RESOURCE_FILTER_OPTIONS = {"all", "available", "missing"}
+RESOURCE_FILTER_OPTIONS = {"all", "available", "missing", "runnable"}
 
 # Mendeley connectivity only gates a decorative "send to Mendeley" affordance, but
 # check_connection() hits the network when a token exists — up to ~40s (a 10s GET
@@ -174,7 +175,36 @@ def _apply_resource_filter(query: Query, resource_filter: str) -> Query:
         return query.filter(resources_expr != "[]")
     if resource_filter == "missing":
         return query.filter(db.or_(resources_expr == "[]", resources_expr.is_(None)))
+    if resource_filter == "runnable":
+        return _apply_runnable_filter(query)
     return query
+
+
+def _apply_runnable_filter(query: Query) -> Query:
+    """Narrow to papers whose implementation-readiness tier is ``runnable``.
+
+    The tier is computed on the fly (no column), so resolve the matching ids in
+    Python over the already-narrowed query, then constrain by id. A code repo is
+    a precondition for the runnable tier, so pre-filter to repo-bearing rows to
+    keep this bounded; only the lightweight scoring columns are loaded.
+    """
+    rows = (
+        query.order_by(None)
+        .filter(Paper.github_repo.isnot(None))
+        .with_entities(
+            Paper.id,
+            Paper.github_repo,
+            Paper.github_stars,
+            Paper.github_license,
+            Paper.resource_links,
+            Paper.hf_upvotes,
+            Paper.scraped_at,
+            Paper.publication_dt,
+        )
+        .all()
+    )
+    runnable_ids = [row.id for row in rows if implementation_readiness(row).tier == "runnable"]
+    return query.filter(Paper.id.in_(runnable_ids))
 
 
 def _apply_venue_filter(query: Query, venue: str | None) -> Query:
@@ -336,6 +366,9 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
         paper.feedback_counts = feedback["counts"]
         paper.active_actions = feedback["active_actions"]
         paper.rank_score_value = combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0))
+        # Implementation-readiness (on the fly from existing columns — no new column);
+        # drives the "Runnable" badge, the readiness score-factor, and this filter.
+        paper.readiness = implementation_readiness(paper)
         paper.score_breakdown = explain_score(
             match_types=paper.match_types,
             matched_terms_count=len(paper.matched_terms_list),
@@ -345,6 +378,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
             citation_count=paper.citation_count,
             acceptance_status=paper.acceptance_status,
             interest_similarity=paper.interest_similarity,
+            readiness_score=paper.readiness.score,
             feedback_score=int(paper.feedback_score or 0),
             config=config,
             ranking_config=active_ranking_config,
@@ -550,9 +584,16 @@ def index():
     _enrich_cards_with_feedback_and_related(papers, candidate_pool, config)
     mendeley_connected = _mendeley_connected()
 
+    from app.services.profiles import get_active_profile, list_profiles, profile_to_dict
+
+    profile_list = [profile_to_dict(p) for p in list_profiles()]
+    active_profile_id = get_active_profile().id
+
     return render_template(
         "dashboard.html",
         papers=papers,
+        profiles=profile_list,
+        active_profile_id=active_profile_id,
         pagination=pagination,
         type_counts=type_counts,
         current_filters={

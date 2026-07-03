@@ -1,0 +1,90 @@
+# Config used by the docker-compose `local-ai` profile's AI-enabled app service.
+#
+# It is baked into the image as /app/config.local-ai.yaml (see Dockerfile) and
+# selected via CV_ARXIV_CONFIG in docker-compose.yml, so `docker compose
+# --profile local-ai up` gets working LLM summaries/chat out of the box against
+# the Ollama sidecar — no host file to copy. The default (no-profile) service
+# keeps using ./config.yaml with the LLM off.
+#
+# Keep the non-llm sections roughly in sync with config.example.yaml. Because
+# this file lives inside the image, edits here need a rebuild to take effect;
+# settings changed in the running AI container do not persist across recreates.
+email:
+  recipient: ""
+  subject_prefix: ArXiv Digest
+digest:
+  weekdays: [mon, tue, wed, thu, fri, sat, sun]
+  min_score: 0.0
+  max_papers: 15
+  base_url: http://127.0.0.1:5001
+scraper:
+  feed_url: https://rss.arxiv.org/rss/cs.CV
+  rolling_window_days: 4
+  max_workers: 8
+  pdf_attempts: 2
+  pdf_lines_start: 2
+  pdf_max_header_lines: 50
+  pdf_smart_header: true
+  thumbnail_dpi: 150
+ingest:
+  backends:
+    - rss
+    - arxiv_api
+llm:
+  # Enabled and wired to the bundled Ollama sidecar. GPU is optional (see the
+  # commented deploy block on the `ollama` service in docker-compose.yml); on CPU
+  # it is slower but works. The model must match the one pulled by `ollama-pull`.
+  enabled: true
+  structured_insights: true
+  provider: ollama
+  model: gemma2:2b
+  base_url: http://ollama:11434/v1
+  max_concurrent: 1
+openalex:
+  enabled: true
+  email: ""
+github:
+  enabled: true
+  token: ""
+preferences:
+  ranking:
+    author_weight: 44.0
+    affiliation_weight: 26.0
+    title_weight: 14.0
+    ai_weight: 5.0
+    citation_weight: 0.05
+    venue_weight: 8.0
+    interest_weight: 12.0
+    freshness_half_life_days: 14.0
+  learned:
+    enabled: true
+    blend: 0.7
+    candidate_threshold: 0.6
+    candidate_top_k: 10
+  muted:
+    authors: []
+    affiliations: []
+    topics: []
+# Replace these examples with your own interests, or manage them in the UI under
+# Settings > Research Setup.
+whitelists:
+  titles:
+    - Few Shot
+    - Nerf
+    - Open Set
+    - Remote Sensing
+    - Zero Shot
+  affiliations:
+    - Apple
+    - Berkeley
+    - DeepMind
+    - Google
+    - Meta
+    - MIT
+    - Nvidia
+    - Stanford
+  authors:
+    - Kaiming He
+    - Li Fei-Fei
+    - Jitendra Malik
+    - Andrew Zisserman

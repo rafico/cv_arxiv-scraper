@@ -337,9 +337,7 @@ class NotifyOnMatchTests(FlaskDBTestCase):
         self.assertIn("Tracking Small Objects", preview["html"])
 
     def test_no_notify_searches_means_no_alert_section(self):
-        db.session.add(
-            SavedSearch(name="Silent", include_keywords=["Tracking"], notify_on_match=False, is_active=True)
-        )
+        db.session.add(SavedSearch(name="Silent", include_keywords=["Tracking"], notify_on_match=False, is_active=True))
         db.session.add(_make_paper(title="Tracking Things", link="https://arxiv.org/abs/2607.50003"))
         db.session.commit()
 

@@ -12,3 +12,6 @@
 {% if paper.hf_upvotes %}
 <span class="badge badge-neutral" title="Hugging Face Papers upvotes{{ ' · ' ~ paper.hf_comments_count ~ ' comments' if paper.hf_comments_count }}">🤗 {{ paper.hf_upvotes }}</span>
 {% endif %}
+{% if paper.readiness and paper.readiness.tier == 'runnable' %}
+<span class="badge badge-outline" title="Implementation-ready — {{ paper.readiness.reasons | join(' · ') }}">⚙ Runnable</span>
+{% endif %}

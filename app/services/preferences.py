@@ -22,6 +22,9 @@ DEFAULT_PREFERENCES: dict[str, dict] = {
         "citation_weight": 0.05,
         "venue_weight": 8.0,
         "interest_weight": 12.0,
+        # Small additive boost for runnable papers (has-code + stars + license +
+        # freshness); kept low so it never overrides the learned interest signal.
+        "readiness_weight": 2.0,
         "freshness_half_life_days": 14.0,
     },
     "display": {

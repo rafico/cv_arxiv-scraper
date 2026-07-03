@@ -106,6 +106,17 @@
     <p class="text-sm text-fg-muted">Answers need an <a href="{{ url_for('settings.view_settings', section='ai') }}" class="font-medium text-blue-600 hover:text-blue-800">LLM enabled</a>; without one you get the paper&rsquo;s most relevant sections instead. Papers scraped before full-text section extraction answer from the abstract only (the panel notes this).</p>
 </section>
 
+<!-- Citation Verification -->
+<section id="citation-verification" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Citation Verification</h2>
+    <p class="text-sm text-fg-muted mb-3">Every AI answer &mdash; in <strong>Ask this paper</strong> and in <strong>Chat with your saved papers</strong> &mdash; is checked against your own library. Any arXiv ID, DOI, or paper title the answer names is resolved locally:</p>
+    <ul class="space-y-2 text-sm text-fg-muted pl-5 list-disc marker:text-fg-subtle">
+        <li class="pl-1">A <span class="badge bg-save-soft text-save">&check; verified</span> reference is one that exists in your corpus &mdash; click the green chip to open your copy.</li>
+        <li class="pl-1">An <span class="badge badge-warn">&#9888; unverified</span> reference is not in your library and may be fabricated. Treat it with suspicion until you confirm it independently.</li>
+    </ul>
+    <p class="text-sm text-fg-muted mt-3">A short &ldquo;N of M references verified&rdquo; note summarizes each answer. This runs on every answer automatically &mdash; there is no setting to turn it off, because it is a guarantee rather than an option.</p>
+</section>
+
 <!-- Related Papers & Duplicates -->
 <section id="related" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Related Papers & Duplicates</h2>
@@ -119,5 +130,12 @@
             <p class="mt-1 text-sm text-fg-muted">Papers with nearly identical titles get an orange <strong>Dup</strong> badge so you can avoid reviewing or exporting the same work twice.</p>
         </div>
     </div>
+</section>
+
+<!-- Implementation Readiness -->
+<section id="implementation-readiness" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Implementation Readiness</h2>
+    <p class="text-sm text-fg-muted mb-3">Papers whose code looks ready to run get a <span class="badge badge-outline">&#9881; Runnable</span> badge. The score combines signals already collected during enrichment &mdash; a GitHub repo, its star count, a recognised (ideally permissive) license, whether the repo is archived, how recently it was pushed, plus a project page or Hugging Face upvotes. Hover the badge to see which signals earned it.</p>
+    <p class="text-sm text-fg-muted">Pick <strong>Runnable (has code)</strong> in the sidebar&rsquo;s resource filter to show only these papers, and it adds a small <strong>Runnable</strong> factor to a paper&rsquo;s score bars. The boost is intentionally tiny (tune <code>readiness_weight</code> in <a href="{{ url_for('settings.view_settings', section='ranking') }}" class="font-medium text-blue-600 hover:text-blue-800">Ranking</a>) so it never outweighs what you actually save and skip.</p>
 </section>
 {% endblock %}

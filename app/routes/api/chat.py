@@ -33,6 +33,7 @@ def corpus_chat():
                 "llm_used": False,
                 "sources": [],
                 "no_saved_papers": True,
+                "verifications": None,
                 "message": "Save some papers first, then chat over your corpus.",
             }
         )

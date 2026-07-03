@@ -23,9 +23,14 @@ NEGATIVE_ACTIONS = ("skip", "ignore")
 MIN_POSITIVE_FEEDBACK = 5
 MIN_NEGATIVE_FEEDBACK = 3
 
+# Per-interest-profile centroid caches, keyed by profile id (None-key = the
+# "no DB profile" fallback that behaves like the old single global model).
 _cache_lock = threading.Lock()
-_cached_profile: InterestProfile | None = None
-_cached_fingerprint: tuple[int, ...] | None = None
+_cached_profiles: dict[object, InterestProfile | None] = {}
+_cached_fingerprints: dict[object, tuple[int, ...]] = {}
+# Profile id whose centroid was most recently built for the active feed, so
+# scrape worker threads (no app context) can read it via get_cached_interest_profile.
+_cached_active_key: object = None
 
 
 @dataclass(slots=True)
@@ -37,23 +42,40 @@ class InterestProfile:
     fingerprint: tuple[int, ...]
 
 
-def _feedback_fingerprint() -> tuple[int, int]:
+def _profile_condition(ref):
+    """Predicate for feedback rows owned by ``ref`` (default owns NULL rows)."""
+    from app.models import PaperFeedback, db
+
+    if ref is None or getattr(ref, "id", None) is None:
+        return None
+    conditions = [PaperFeedback.profile_id == ref.id]
+    if getattr(ref, "is_default", False):
+        conditions.append(PaperFeedback.profile_id.is_(None))
+    return db.or_(*conditions)
+
+
+def _feedback_fingerprint(ref=None) -> tuple[int, int]:
     """Cheap cache key over relevant feedback rows: (count, max id)."""
     from app.models import PaperFeedback, db
 
-    count, max_id = (
-        db.session.query(db.func.count(PaperFeedback.id), db.func.max(PaperFeedback.id))
-        .filter(PaperFeedback.action.in_(POSITIVE_ACTIONS + NEGATIVE_ACTIONS))
-        .one()
+    query = db.session.query(db.func.count(PaperFeedback.id), db.func.max(PaperFeedback.id)).filter(
+        PaperFeedback.action.in_(POSITIVE_ACTIONS + NEGATIVE_ACTIONS)
     )
+    condition = _profile_condition(ref)
+    if condition is not None:
+        query = query.filter(condition)
+    count, max_id = query.one()
     return int(count or 0), int(max_id or 0)
 
 
-def _paper_ids_for_actions(actions: tuple[str, ...]) -> list[int]:
+def _paper_ids_for_actions(actions: tuple[str, ...], ref=None) -> list[int]:
     from app.models import PaperFeedback, db
 
-    rows = db.session.query(PaperFeedback.paper_id).filter(PaperFeedback.action.in_(actions)).distinct().all()
-    return [row[0] for row in rows]
+    query = db.session.query(PaperFeedback.paper_id).filter(PaperFeedback.action.in_(actions))
+    condition = _profile_condition(ref)
+    if condition is not None:
+        query = query.filter(condition)
+    return [row[0] for row in query.distinct().all()]
 
 
 def _normalized_centroid(vectors: np.ndarray) -> np.ndarray | None:
@@ -68,16 +90,31 @@ def _normalized_centroid(vectors: np.ndarray) -> np.ndarray | None:
     return (centroid / norm).astype(np.float32)
 
 
-def build_interest_profile(app) -> InterestProfile | None:
-    """Build (or return cached) interest centroids from feedback.
+def build_interest_profile(app, profile=None) -> InterestProfile | None:
+    """Build (or return cached) interest centroids from a profile's feedback.
 
-    Returns None until enough positive feedback exists — callers treat that
-    as "feature disabled". Never raises: any failure degrades to None.
+    ``profile`` is a :class:`app.services.profiles.ProfileRef`; when None the
+    active profile is resolved so the centroid tracks whichever profile the feed
+    is currently showing. Returns None until enough positive feedback exists —
+    callers treat that as "feature disabled". Never raises: degrades to None.
     """
-    global _cached_profile, _cached_fingerprint
+    global _cached_active_key
 
     try:
         with app.app_context():
+            ref = profile
+            if ref is None:
+                try:
+                    # Resolve the active profile AND publish it to the learned-ranker
+                    # runtime snapshot, so scrape worker threads (no app context)
+                    # score candidates against the active profile's model/description.
+                    from app.services import learned_ranker
+
+                    ref = learned_ranker._resolve_active_ref(app)
+                except Exception:  # pragma: no cover - degrade to the global model
+                    ref = None
+            key = getattr(ref, "id", None)
+
             from app.services.embeddings import get_embedding_service
 
             service = get_embedding_service(app)
@@ -86,32 +123,34 @@ def build_interest_profile(app) -> InterestProfile | None:
             # (None) at 5 saves. Once the backlog embeds (index grows) with no new
             # feedback, the feedback-only key wouldn't change and the stale None
             # would stick. Keying on index size too forces the recompute.
-            fingerprint = (*_feedback_fingerprint(), service.index_size())
+            fingerprint = (*_feedback_fingerprint(ref), service.index_size())
             with _cache_lock:
-                if _cached_fingerprint == fingerprint:
-                    return _cached_profile
+                if _cached_fingerprints.get(key) == fingerprint and key in _cached_profiles:
+                    _cached_active_key = key
+                    return _cached_profiles[key]
 
-            pos_ids = _paper_ids_for_actions(POSITIVE_ACTIONS)
+            pos_ids = _paper_ids_for_actions(POSITIVE_ACTIONS, ref)
             _, pos_vectors = service.get_paper_vectors(pos_ids)
-            profile: InterestProfile | None = None
+            profile_obj: InterestProfile | None = None
             if pos_vectors.shape[0] >= MIN_POSITIVE_FEEDBACK:
                 pos_centroid = _normalized_centroid(pos_vectors)
                 if pos_centroid is not None:
-                    neg_ids = _paper_ids_for_actions(NEGATIVE_ACTIONS)
+                    neg_ids = _paper_ids_for_actions(NEGATIVE_ACTIONS, ref)
                     _, neg_vectors = service.get_paper_vectors(neg_ids)
                     neg_centroid = (
                         _normalized_centroid(neg_vectors) if neg_vectors.shape[0] >= MIN_NEGATIVE_FEEDBACK else None
                     )
-                    profile = InterestProfile(
+                    profile_obj = InterestProfile(
                         pos_centroid=pos_centroid,
                         neg_centroid=neg_centroid,
                         fingerprint=fingerprint,
                     )
 
             with _cache_lock:
-                _cached_profile = profile
-                _cached_fingerprint = fingerprint
-            return profile
+                _cached_profiles[key] = profile_obj
+                _cached_fingerprints[key] = fingerprint
+                _cached_active_key = key
+            return profile_obj
     except Exception:
         LOGGER.warning("Interest profile build failed (non-fatal)", exc_info=True)
         return None
@@ -140,15 +179,16 @@ def get_cached_interest_profile() -> InterestProfile | None:
     warms the cache at scrape start; returns None when nothing is cached.
     """
     with _cache_lock:
-        return _cached_profile
+        return _cached_profiles.get(_cached_active_key)
 
 
 def reset_interest_profile_cache() -> None:
     """Reset the module cache (for testing)."""
-    global _cached_profile, _cached_fingerprint
+    global _cached_active_key
     with _cache_lock:
-        _cached_profile = None
-        _cached_fingerprint = None
+        _cached_profiles.clear()
+        _cached_fingerprints.clear()
+        _cached_active_key = None
 
 
 def recompute_interest_similarities(app, *, batch_size: int = 500) -> int:
@@ -165,20 +205,26 @@ def recompute_interest_similarities(app, *, batch_size: int = 500) -> int:
 
     # Learned-model blend (best-effort: any failure degrades to centroid-only).
     learned_model = None
+    description_vector = None
     blend = 0.7
     try:
-        from app.services.learned_ranker import ensure_learned_model, learned_preferences
+        from app.services.learned_ranker import (
+            active_description_vector,
+            ensure_learned_model,
+            learned_preferences,
+        )
 
         with app.app_context():
             learned_prefs = learned_preferences(app.config.get("SCRAPER_CONFIG"))
         blend = float(learned_prefs.get("blend", 0.7))
         if learned_prefs.get("enabled", True):
             learned_model = ensure_learned_model(app)
+        description_vector = active_description_vector(app)
     except Exception:
         LOGGER.warning("Learned-ranker lookup failed (non-fatal); using centroid only", exc_info=True)
 
     service = None
-    if profile is not None or learned_model is not None:
+    if profile is not None or learned_model is not None or description_vector is not None:
         from app.services.embeddings import get_embedding_service
 
         service = get_embedding_service(app)
@@ -201,7 +247,7 @@ def recompute_interest_similarities(app, *, batch_size: int = 500) -> int:
                 found_ids, vectors = service.get_paper_vectors([paper.id for paper in papers])
                 similarity_by_id = {}
                 for idx, paper_id in enumerate(found_ids):
-                    signal, _source = interest_signal(vectors[idx], profile, learned_model, blend)
+                    signal, _source = interest_signal(vectors[idx], profile, learned_model, blend, description_vector)
                     if signal is not None:
                         similarity_by_id[paper_id] = signal
                 for paper in papers:

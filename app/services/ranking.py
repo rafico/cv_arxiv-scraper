@@ -128,6 +128,7 @@ def resolve_ranking_preferences(config: dict | None = None, *, ranking_config=No
         "citation_weight": float(weights["citation_weight"]),
         "venue_weight": float(weights["venue_weight"]),
         "interest_weight": float(weights["interest_weight"]),
+        "readiness_weight": float(weights["readiness_weight"]),
         "half_life_days": float(weights["freshness_half_life_days"]),
     }
 
@@ -158,9 +159,11 @@ def compute_paper_score(
     citation_count: int | None = None,
     acceptance_status: str | None = None,
     interest_similarity: float | None = None,
+    readiness_score: float | None = None,
     config: dict | None = None,
     ranking_config=None,
 ) -> float:
+    from app.services.implementation_readiness import readiness_bonus as _readiness_bonus
     from app.services.venues import venue_bonus
 
     preferences = resolve_ranking_preferences(config, ranking_config=ranking_config)
@@ -177,11 +180,21 @@ def compute_paper_score(
         citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
     venue_score = venue_bonus(acceptance_status, preferences["venue_weight"])
     interest_bonus = (interest_similarity or 0.0) * preferences["interest_weight"]
+    readiness_bonus = _readiness_bonus(readiness_score, preferences["readiness_weight"])
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
 
     return round(
-        (match_score + term_score + resource_score + llm_bonus + citation_bonus + venue_score + interest_bonus)
+        (
+            match_score
+            + term_score
+            + resource_score
+            + llm_bonus
+            + citation_bonus
+            + venue_score
+            + interest_bonus
+            + readiness_bonus
+        )
         * recency,
         3,
     )
@@ -197,10 +210,12 @@ def explain_score(
     citation_count: int | None = None,
     acceptance_status: str | None = None,
     interest_similarity: float | None = None,
+    readiness_score: float | None = None,
     feedback_score: int = 0,
     config: dict | None = None,
     ranking_config=None,
 ) -> dict[str, float | str | None]:
+    from app.services.implementation_readiness import readiness_bonus as _readiness_bonus
     from app.services.venues import venue_bonus
 
     preferences = resolve_ranking_preferences(config, ranking_config=ranking_config)
@@ -217,6 +232,7 @@ def explain_score(
         citation_bonus = math.log1p(citation_count) * preferences["citation_weight"]
     venue_score = venue_bonus(acceptance_status, preferences["venue_weight"])
     interest_bonus = (interest_similarity or 0.0) * preferences["interest_weight"]
+    readiness_bonus = _readiness_bonus(readiness_score, preferences["readiness_weight"])
 
     recency = recency_multiplier(publication_dt, half_life_days=preferences["half_life_days"])
     # Delegate the final headline score to the canonical formula so the displayed
@@ -230,6 +246,7 @@ def explain_score(
         citation_count=citation_count,
         acceptance_status=acceptance_status,
         interest_similarity=interest_similarity,
+        readiness_score=readiness_score,
         config=config,
         ranking_config=ranking_config,
     )
@@ -252,6 +269,7 @@ def explain_score(
         "citation_bonus": round(citation_bonus, 3),
         "venue_bonus": round(venue_score, 3),
         "interest_bonus": round(interest_bonus, 3),
+        "readiness_bonus": round(readiness_bonus, 3),
         "interest_source": interest_source,
         "recency_multiplier": round(recency, 3),
         "base_score": base_score,
@@ -271,6 +289,7 @@ _SCORE_FACTORS: list[tuple[str, str, str]] = [
     ("citation_bonus", "Citations", "info"),
     ("venue_bonus", "Venue", "priority"),
     ("resource_score", "Resources", "save"),
+    ("readiness_bonus", "Runnable", "save"),
     ("feedback_bonus", "Feedback", "save"),
 ]
 
@@ -338,6 +357,7 @@ def top_score_contributors(
 
 def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
     from app.models import Paper, db
+    from app.services.implementation_readiness import implementation_readiness
 
     updated = 0
     with app.app_context():
@@ -362,6 +382,7 @@ def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
                     citation_count=paper.citation_count,
                     acceptance_status=paper.acceptance_status,
                     interest_similarity=paper.interest_similarity,
+                    readiness_score=implementation_readiness(paper).score,
                     config=config,
                     ranking_config=active_ranking_config,
                 )

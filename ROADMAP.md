@@ -74,25 +74,33 @@ production ranker recipe and an 800k-rating public dataset), PaperQA2 / `paper-q
 - Optional `scraper.extract_figures` opt-out flag (figure fetch is always-on best-effort
   with a 25-papers/run cap and 180s deadline).
 
-## Wave 3 — Later (differentiators)
+## Wave 3 — Delivered (July 2026), except items 10 & 13
 
-9. **Multiple interest profiles** (e.g. "3D reconstruction" vs "VLM efficiency") — the
-   most-requested feature in the category per Scholar Inbox's own paper — each with its
-   own learned ranker, feed tab, and digest section; plus an LLM-synthesized,
-   *user-editable* natural-language interest profile blended with the learned model.
+9. **Multiple interest profiles** ✅ — named profiles, each with its own learned ranker
+   (artifacts keyed by slug), feed switcher, and per-profile digest section, plus an
+   editable natural-language description blended into scoring. New `interest_profiles`
+   table + nullable `paper_feedback.profile_id` (NULL ⇒ Default profile); a zero-data-loss
+   additive migration verified by `tests/test_interest_profiles.py`.
+11. **Citation-verification layer** ✅ — `app/services/citation_verifier.py` resolves every
+    arXiv ID/DOI/title in chat, corpus-chat, and summary output against the local corpus
+    (verified chip → links to the paper; else amber "unverified"). Always-on.
+12. **Implementation-readiness score** ✅ — `app/services/implementation_readiness.py`:
+    has-code + star velocity + license + repo freshness → ⚙ Runnable badge, dashboard
+    "Runnable (has code)" filter, and a small additive ranking bonus (honest in explain).
+14. **Distribution** ✅ — `cv-arxiv serve` (single DATA_DIR), top-level `/healthz`,
+    single-source version (`app/_version.py`, 0.3.0), docker-compose `local-ai` profile
+    (Ollama sidecar), CHANGELOG, README quickstart, packaging polish. PyPI publish is the
+    one remaining manual release step (README documents the `uvx --from git+…` form until then).
+
+### Wave 3 not-yet-done
+
 10. **arXiv-HTML-first extraction** — heading-aware chunking, literal `<a href>` code
-    links instead of PDF regex, MathML; PDF becomes the fallback.
-11. **Citation-verification layer** on every LLM output — any mentioned arXiv ID/DOI/title
-    must resolve against the local corpus (green check) or be flagged. "Zero fabricated
-    citations by construction" — the #1 documented failure of cloud AI research tools.
-12. **Implementation-readiness score** — has-code + star velocity + license + repo
-    freshness (data already extracted) as a badge/filter/ranking boost.
+    links instead of PDF regex, MathML; PDF becomes the fallback. (Figures already do
+    HTML-first; this generalizes it to section/RAG extraction.)
 13. **Local MCP server** — expose `search_papers`, `get_paper`, `top_ranked_today`,
     `list_collections`, etc., so Claude Desktop / other assistants use the personalized
     corpus as a backend. Cheaper than winning the chat-UI arms race.
-14. **Distribution** — PyPI publish (`uvx cv-arxiv-scraper serve`), docker-compose
-    profile bundling a local model, versioned releases, `/healthz`. In this niche,
-    packaging is a growth lever (zotero-arxiv-daily: 5.6k stars largely on packaging).
+
     Positioning: *the maintained, local-first successor to arxiv-sanity / self-hostable
     Scholar Inbox* — credible now that free tiers are closing and hosted tools keep dying.
 

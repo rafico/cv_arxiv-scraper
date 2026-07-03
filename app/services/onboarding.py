@@ -305,15 +305,25 @@ def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
     return summary
 
 
+def _active_profile_ref():
+    """Active-profile handle for scoping onboarding to the current profile."""
+    try:
+        from app.services.profiles import active_profile_ref
+
+        return active_profile_ref()
+    except Exception:  # pragma: no cover - degrade to global (unscoped) onboarding
+        return None
+
+
 def _papers_with_feedback() -> set[int]:
-    """Paper ids carrying any save/priority/skip/ignore feedback row."""
+    """Paper ids carrying any save/priority/skip/ignore feedback in the active profile."""
     from app.services.interest_model import (
         NEGATIVE_ACTIONS,
         POSITIVE_ACTIONS,
         _paper_ids_for_actions,
     )
 
-    return set(_paper_ids_for_actions(POSITIVE_ACTIONS + NEGATIVE_ACTIONS))
+    return set(_paper_ids_for_actions(POSITIVE_ACTIONS + NEGATIVE_ACTIONS, _active_profile_ref()))
 
 
 def select_uncertain_papers(*, limit: int = 2, min_saves: int = 3) -> list[dict]:
@@ -329,11 +339,13 @@ def select_uncertain_papers(*, limit: int = 2, min_saves: int = 3) -> list[dict]
     import numpy as np
 
     from app.models import Paper, PaperFeedback, db
+    from app.services.interest_model import _profile_condition
 
-    saved_ids = [
-        row[0]
-        for row in db.session.query(PaperFeedback.paper_id).filter(PaperFeedback.action == "save").distinct().all()
-    ]
+    saved_query = db.session.query(PaperFeedback.paper_id).filter(PaperFeedback.action == "save")
+    condition = _profile_condition(_active_profile_ref())
+    if condition is not None:
+        saved_query = saved_query.filter(condition)
+    saved_ids = [row[0] for row in saved_query.distinct().all()]
     if len(saved_ids) < min_saves:
         return []
 
