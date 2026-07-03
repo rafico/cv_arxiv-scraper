@@ -461,6 +461,39 @@
                         {% endfor %}
                     </div>
 
+                    <div class="mt-5 pt-4 border-t border-edge" id="learned-ranking-block">
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" name="learned_enabled" id="learned_enabled"
+                                       class="h-4 w-4 rounded border-edge accent-accent"
+                                       {% if preferences.learned.enabled %}checked{% endif %}>
+                                <span class="text-sm font-medium text-fg-muted">Learned ranking</span>
+                            </label>
+                            <span id="learned-status" class="text-xs text-fg-subtle tabular-nums"
+                                  data-learned-active="{{ 'true' if learned_status.available else 'false' }}">
+                                {%- if not preferences.learned.enabled -%}
+                                    Off
+                                {%- elif learned_status.available -%}
+                                    Model active{% if learned_status.last_auc is not none %} &middot; AUC {{ '%.2f'|format(learned_status.last_auc) }}{% endif %}
+                                {%- else -%}
+                                    Needs {{ learned_status.needed_positive }} more rated paper{{ 's' if learned_status.needed_positive != 1 }}
+                                {%- endif -%}
+                            </span>
+                        </div>
+                        <p class="text-xs text-fg-subtle ml-6 mb-3">A personal model retrained from every save/skip. When active it sharpens the "Learned interests" signal above and admits on-topic papers beyond your whitelists.</p>
+                        <label for="slider_learned_blend" class="block text-sm font-medium text-fg-muted mb-1">Model vs. saved-paper profile blend</label>
+                        <input type="range" min="0" max="100" step="5" id="slider_learned_blend"
+                               value="{{ (preferences.learned.blend * 100)|round|int }}"
+                               oninput="document.getElementById('pref_learned_blend').value=(this.value/100).toFixed(2); document.getElementById('learned_blend_label').textContent=this.value+'%'"
+                               class="w-full h-1.5 bg-edge rounded-full appearance-none cursor-pointer accent-gray-900">
+                        <input type="hidden" name="pref_learned_blend" id="pref_learned_blend" value="{{ preferences.learned.blend }}">
+                        <div class="flex justify-between text-xs text-fg-subtle mt-1">
+                            <span>Saved-paper profile</span>
+                            <span id="learned_blend_label">{{ (preferences.learned.blend * 100)|round|int }}%</span>
+                            <span>Learned model</span>
+                        </div>
+                    </div>
+
                     <div class="mt-5 pt-4 border-t border-edge">
                         <label for="pref_freshness_half_life_days" class="block text-sm font-medium text-fg-muted mb-1">Freshness preference</label>
                         <input type="range" min="1" max="60" step="1" id="freshness_slider"
@@ -895,6 +928,54 @@
                         </button>
                     </form>
                 </div>
+
+                <form method="POST" action="/settings/digest-options" id="digest-options-form" class="rounded-2xl border border-edge bg-surface p-5">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <h3 class="text-base font-semibold text-fg">Digest Options</h3>
+                    <p class="text-sm text-fg-muted mt-1">Which days the scheduled digest goes out and what it contains. The manual Send Test Digest button ignores the weekday schedule.</p>
+                    <div class="mt-4 space-y-4">
+                        <div>
+                            <span class="block text-sm font-medium text-fg-muted mb-1">Send on</span>
+                            <p class="text-xs text-fg-subtle mb-2">Scheduled and cron-triggered digests are only sent on the checked days (UTC).</p>
+                            <div class="flex flex-wrap gap-3">
+                                {% for day in digest_weekday_keys %}
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" name="digest_weekday_{{ day }}" value="1"
+                                           class="h-4 w-4 rounded border-edge accent-accent"
+                                           {% if day in digest_config.weekdays %}checked{% endif %}>
+                                    <span class="text-sm text-fg-muted">{{ day.capitalize() }}</span>
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="digest_min_score" class="block text-sm font-medium text-fg-muted mb-1">Minimum score</label>
+                                <p class="text-xs text-fg-subtle mb-1">Papers below this relevance score are left out.</p>
+                                <input type="number" step="0.5" name="digest_min_score" id="digest_min_score" value="{{ digest_config.min_score }}"
+                                       class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
+                            </div>
+                            <div>
+                                <label for="digest_max_papers" class="block text-sm font-medium text-fg-muted mb-1">Max papers</label>
+                                <p class="text-xs text-fg-subtle mb-1">Cap per email (1&ndash;100).</p>
+                                <input type="number" min="1" max="100" step="1" name="digest_max_papers" id="digest_max_papers" value="{{ digest_config.max_papers }}"
+                                       class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
+                            </div>
+                        </div>
+                        <div>
+                            <label for="digest_base_url" class="block text-sm font-medium text-fg-muted mb-1">One-tap link base URL</label>
+                            <p class="text-xs text-fg-subtle mb-1">The Save/Skip buttons in the email link here &mdash; it must be reachable from the device you read email on (default: this app on localhost).</p>
+                            <input type="text" name="digest_base_url" id="digest_base_url" value="{{ digest_config.base_url }}" placeholder="http://127.0.0.1:5000"
+                                   class="w-full rounded-xl border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-transparent focus:bg-surface focus:ring-2 focus:ring-accent">
+                        </div>
+                    </div>
+                    <div class="mt-4 flex justify-end">
+                        <button type="submit" id="digest-options-save-btn"
+                                class="px-5 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            Save Digest Options
+                        </button>
+                    </div>
+                </form>
         </div>
         </div>{# /auto-digest #}
 

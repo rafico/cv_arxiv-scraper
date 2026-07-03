@@ -2,6 +2,12 @@
    Lives inside a `.card-details` wrapper that the row/card provides.
    Context: `paper`, `shell`, `mendeley_connected`, `preferences`. #}
 
+{# ── Inline figure previews (empty when none extracted) ── #}
+{% include "partials/_paper_figures.html" %}
+
+{# ── Ask this paper (grounded Q&A) ── #}
+{% include "partials/_paper_chat.html" %}
+
 {# ── TL;DR / abstract (click to expand) ── #}
 <div class="cursor-pointer group/summary mb-3" onclick="toggleSummary(this)">
     <span class="text-[11px] font-medium text-fg-subtle">TL;DR</span>

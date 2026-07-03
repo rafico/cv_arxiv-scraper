@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
+import os
+import re
 from datetime import date, timedelta
 from html import escape
 from pathlib import Path
@@ -41,6 +44,23 @@ GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_CREDENTIALS_PATH = _PROJECT_ROOT / "credentials.json"
 DEFAULT_TOKEN_PATH = _PROJECT_ROOT / "token.json"
+
+# ── Digest 2.0 knobs (config `digest:` block, Settings → Automation → Digest) ──
+DIGEST_WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+DEFAULT_DIGEST_MAX_PAPERS = 15
+DEFAULT_LOOKBACK_HOURS = 26
+# Widen the window ("catch-up digest") when the last successful send is older than this.
+CATCH_UP_AFTER_HOURS = 48
+CATCH_UP_MAX_DAYS = 7
+# One-tap 👍/👎 links stay valid this long (signed, itsdangerous).
+ONE_TAP_MAX_AGE_SECONDS = 7 * 24 * 3600
+_ONE_TAP_SALT = "digest-one-tap"
+# Total bytes of inline (CID) figure images attached per email; figures past the
+# cap are silently dropped so the message stays small on mobile connections.
+MAX_INLINE_FIGURE_BYTES = 1_500_000
+INLINE_FIGURE_PAPERS = 5
+# Mirrors dashboard._thumbnail_storage_key so digest figures resolve the same files.
+_STORAGE_KEY_RE = re.compile(r"^[A-Za-z0-9._\-]+(?:/[A-Za-z0-9._\-]+)?$")
 
 
 def check_gmail_auth_status(
@@ -400,6 +420,189 @@ def _get_email_config(app: Flask) -> dict:
     }
 
 
+def get_digest_config(app: Flask) -> dict:
+    """Read the ``digest:`` config block with defensive defaults.
+
+    A hand-edited block must never crash a send or a settings render, so every
+    field falls back to its default on any type problem.
+    """
+    scraper_config = app.config.get("SCRAPER_CONFIG", {})
+    raw = scraper_config.get("digest") if isinstance(scraper_config, dict) else None
+    if not isinstance(raw, dict):
+        raw = {}
+
+    weekdays: list[str] = []
+    raw_weekdays = raw.get("weekdays")
+    if isinstance(raw_weekdays, list):
+        normalized = {str(day).strip().lower()[:3] for day in raw_weekdays}
+        weekdays = [key for key in DIGEST_WEEKDAY_KEYS if key in normalized]
+    if not weekdays:
+        weekdays = list(DIGEST_WEEKDAY_KEYS)
+
+    try:
+        min_score = float(raw.get("min_score", 0.0))
+        if not math.isfinite(min_score):
+            min_score = 0.0
+    except (TypeError, ValueError):
+        min_score = 0.0
+
+    try:
+        max_papers = int(raw.get("max_papers", DEFAULT_DIGEST_MAX_PAPERS))
+    except (TypeError, ValueError):
+        max_papers = DEFAULT_DIGEST_MAX_PAPERS
+    max_papers = max(1, min(100, max_papers))
+
+    base_url = raw.get("base_url")
+    if not isinstance(base_url, str) or not base_url.strip():
+        # Mirrors run.py's default bind (127.0.0.1, PORT env or 5000). The app has
+        # no canonical external URL — digests may be built outside a request.
+        base_url = f"http://127.0.0.1:{os.environ.get('PORT', '5000')}"
+    return {
+        "weekdays": weekdays,
+        "min_score": min_score,
+        "max_papers": max_papers,
+        "base_url": base_url.strip().rstrip("/"),
+    }
+
+
+def weekday_allowed(digest_cfg: dict, today: date | None = None) -> bool:
+    """True when the digest is scheduled to go out on ``today`` (UTC)."""
+    key = DIGEST_WEEKDAY_KEYS[(today or utc_today()).weekday()]
+    return key in digest_cfg.get("weekdays", DIGEST_WEEKDAY_KEYS)
+
+
+# ── One-tap feedback tokens ──────────────────────────────────────────────
+
+
+def _one_tap_serializer(secret_key: str):
+    from itsdangerous import URLSafeTimedSerializer
+
+    return URLSafeTimedSerializer(secret_key, salt=_ONE_TAP_SALT)
+
+
+def make_one_tap_token(app: Flask, paper_id: int, action: str, digest_run_id: int | None = None) -> str:
+    """Sign a (paper_id, action, digest_run_id) one-tap payload with the app secret."""
+    payload = {"p": int(paper_id), "a": str(action), "r": digest_run_id}
+    return _one_tap_serializer(app.config["SECRET_KEY"]).dumps(payload)
+
+
+def load_one_tap_token(app: Flask, token: str, max_age: int = ONE_TAP_MAX_AGE_SECONDS) -> dict:
+    """Verify and decode a one-tap token.
+
+    Raises ``itsdangerous.SignatureExpired`` past ``max_age`` and
+    ``itsdangerous.BadSignature`` on tampering or a malformed payload.
+    """
+    from itsdangerous import BadSignature
+
+    data = _one_tap_serializer(app.config["SECRET_KEY"]).loads(token, max_age=max_age)
+    if not isinstance(data, dict) or not isinstance(data.get("p"), int) or data.get("a") not in ("save", "skip"):
+        raise BadSignature("Malformed one-tap payload")
+    return data
+
+
+# ── Catch-up window / figures / saved-search alerts ─────────────────────
+
+
+def _resolve_lookback(app: Flask) -> dict:
+    """Pick the query window: 26h normally, widened after a send gap (cap 7 days)."""
+    with app.app_context():
+        last = DigestRun.query.filter(DigestRun.status == "success").order_by(DigestRun.started_at.desc()).first()
+        last_run_at = last.started_at if last is not None else None
+
+    state = {
+        "catch_up": False,
+        "lookback_hours": DEFAULT_LOOKBACK_HOURS,
+        "days": None,
+        "last_run_at": last_run_at,
+    }
+    if last_run_at is None:
+        return state
+
+    gap_hours = (now_utc() - last_run_at).total_seconds() / 3600.0
+    if gap_hours <= CATCH_UP_AFTER_HOURS:
+        return state
+
+    # +2h of overlap so a paper scraped just before the last send isn't dropped.
+    lookback_hours = int(math.ceil(min(gap_hours + 2.0, CATCH_UP_MAX_DAYS * 24.0)))
+    state.update(
+        {
+            "catch_up": True,
+            "lookback_hours": lookback_hours,
+            "days": max(2, min(CATCH_UP_MAX_DAYS, math.ceil(lookback_hours / 24.0))),
+        }
+    )
+    return state
+
+
+def _figure_storage_key(paper: Paper) -> str | None:
+    candidate: str | None = None
+    if paper.arxiv_id:
+        candidate = paper.arxiv_id
+    elif paper.link:
+        candidate = paper.link.rstrip("/").split("/")[-1]
+    if candidate and _STORAGE_KEY_RE.fullmatch(candidate):
+        return candidate
+    return None
+
+
+def _first_figure_path(app: Flask, paper: Paper) -> Path | None:
+    from app.services.thumbnail_generator import figure_paths_for
+
+    storage_key = _figure_storage_key(paper)
+    if not storage_key or not app.static_folder:
+        return None
+    try:
+        paths = figure_paths_for(storage_key, app.static_folder)
+    except Exception:  # figures are decorative; never break digest assembly
+        LOGGER.debug("Figure lookup failed for %s", storage_key, exc_info=True)
+        return None
+    return paths[0] if paths else None
+
+
+def _preview_figure_srcs(app: Flask, papers: list[Paper], base_url: str) -> dict[int, str]:
+    """HTTP figure URLs for the browser preview (email uses CID parts instead)."""
+    srcs: dict[int, str] = {}
+    for paper in papers[:INLINE_FIGURE_PAPERS]:
+        if _first_figure_path(app, paper) is not None:
+            srcs[paper.id] = f"{base_url}/papers/{paper.id}/figures/1.png"
+    return srcs
+
+
+def _collect_figure_attachments(app: Flask, papers: list[Paper]) -> tuple[list[tuple[str, bytes]], dict[int, str]]:
+    """Read figure files for the top papers as (cid, bytes) parts, capped in size."""
+    attachments: list[tuple[str, bytes]] = []
+    srcs: dict[int, str] = {}
+    total = 0
+    for paper in papers[:INLINE_FIGURE_PAPERS]:
+        path = _first_figure_path(app, paper)
+        if path is None:
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if not data or total + len(data) > MAX_INLINE_FIGURE_BYTES:
+            continue
+        total += len(data)
+        cid = f"fig-{paper.id}"
+        attachments.append((cid, data))
+        srcs[paper.id] = f"cid:{cid}"
+    return attachments, srcs
+
+
+def _collect_saved_search_alerts(app: Flask, *, since, exclude_paper_ids: list[int]) -> list[dict]:
+    """Saved searches flagged notify_on_match → new matches since the last digest."""
+    from app.services.saved_search import run_notify_searches
+
+    try:
+        with app.app_context():
+            entries = run_notify_searches(since=since, exclude_paper_ids=exclude_paper_ids)
+            return [{"name": entry["search"].name, "papers": entry["papers"]} for entry in entries]
+    except Exception:  # alerts are additive; a broken saved search must not kill the digest
+        LOGGER.warning("Saved-search alert assembly failed", exc_info=True)
+        return []
+
+
 def _create_digest_run(
     app: Flask,
     *,
@@ -442,15 +645,42 @@ def get_digest_history(limit: int = 6) -> list[DigestRun]:
 
 def build_digest_preview(app: Flask) -> dict:
     email_cfg = _get_email_config(app)
-    papers = _query_todays_papers(app)
+    digest_cfg = get_digest_config(app)
+    window = _resolve_lookback(app)
+    papers = _query_todays_papers(
+        app,
+        lookback_hours=window["lookback_hours"],
+        min_score=digest_cfg["min_score"],
+        max_papers=digest_cfg["max_papers"],
+    )
+    alerts_since = window["last_run_at"] or (now_utc() - timedelta(hours=window["lookback_hours"]))
+    alerts = _collect_saved_search_alerts(app, since=alerts_since, exclude_paper_ids=[p.id for p in papers])
     today = utc_today()
-    subject = f"{email_cfg['subject_prefix']} — {today.strftime('%b %d, %Y')} ({len(papers)} papers)"
+
+    catch_up_label = None
+    if window["catch_up"]:
+        catch_up_label = f"Catch-up digest — last {window['days']} days"
+        subject = f"{email_cfg['subject_prefix']} — {catch_up_label} ({len(papers)} papers)"
+    else:
+        subject = f"{email_cfg['subject_prefix']} — {today.strftime('%b %d, %Y')} ({len(papers)} papers)"
+
+    ctx = {
+        "base_url": digest_cfg["base_url"],
+        "token_for": lambda paper_id, action: make_one_tap_token(app, paper_id, action),
+        "figure_srcs": _preview_figure_srcs(app, papers, digest_cfg["base_url"]),
+        "catch_up_label": catch_up_label,
+        "alerts": alerts,
+    }
     return {
         "recipient": email_cfg["recipient"],
         "subject": subject,
         "papers_count": len(papers),
         "papers": papers,
-        "html": _build_email_body(papers, today),
+        "html": _build_email_body(papers, today, ctx),
+        "catch_up": window["catch_up"],
+        "catch_up_label": catch_up_label,
+        "lookback_hours": window["lookback_hours"],
+        "alerts": alerts,
     }
 
 
@@ -466,25 +696,77 @@ def get_digest_status_snapshot(app: Flask) -> dict:
     }
 
 
-def _query_todays_papers(app: Flask, lookback_hours: int = 26) -> list[Paper]:
+def _query_todays_papers(
+    app: Flask,
+    lookback_hours: int = DEFAULT_LOOKBACK_HOURS,
+    *,
+    min_score: float = 0.0,
+    max_papers: int | None = None,
+) -> list[Paper]:
     """Return papers scraped within the lookback window, ranked by score."""
-    from app.services.text import now_utc
-
     cutoff = now_utc() - timedelta(hours=lookback_hours)
     with app.app_context():
-        return (
-            Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
-            .order_by(
-                rank_score_order_expr().desc(),
-                Paper.publication_dt.desc(),
-                Paper.scraped_at.desc(),
-            )
-            .all()
+        query = Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
+        if min_score > 0:
+            query = query.filter(rank_score_order_expr() >= min_score)
+        query = query.order_by(
+            rank_score_order_expr().desc(),
+            Paper.publication_dt.desc(),
+            Paper.scraped_at.desc(),
         )
+        if max_papers is not None and max_papers > 0:
+            query = query.limit(max_papers)
+        return query.all()
 
 
-def _render_paper_html(paper: Paper) -> str:
-    """Render a single paper card as HTML with proper escaping."""
+def _score_chip(paper: Paper) -> str:
+    score = combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0))
+    return (
+        '<span style="display:inline-block;background:#eef2ff;color:#3730a3;padding:2px 10px;'
+        f'border-radius:999px;font-size:12px;font-weight:600;">Score: {score:.1f}</span>'
+    )
+
+
+def _one_tap_buttons(paper: Paper, ctx: dict | None) -> str:
+    """👍 Save / 👎 Skip links that hit the local one-tap API (token-signed GETs)."""
+    ctx = ctx or {}
+    token_for = ctx.get("token_for")
+    base_url = ctx.get("base_url")
+    if not token_for or not base_url:
+        return ""
+    buttons = []
+    styles = {
+        "save": "background:#dcfce7;color:#166534;",
+        "skip": "background:#fee2e2;color:#991b1b;",
+    }
+    labels = {"save": "👍 Save", "skip": "👎 Skip"}
+    for action in ("save", "skip"):
+        url = f"{base_url}/api/feedback/one-tap?token={token_for(paper.id, action)}"
+        buttons.append(
+            f'<a href="{escape(url, quote=True)}" style="display:inline-block;{styles[action]}'
+            "padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;"
+            f'text-decoration:none;margin-right:8px;">{labels[action]}</a>'
+        )
+    return '<div style="margin-top:10px;">' + "".join(buttons) + "</div>"
+
+
+def _figure_img(paper: Paper, ctx: dict | None) -> str:
+    src = ((ctx or {}).get("figure_srcs") or {}).get(paper.id)
+    if not src:
+        return ""
+    return (
+        f'<img src="{escape(src, quote=True)}" alt="Figure from {escape(paper.title[:80], quote=True)}" '
+        'width="560" style="display:block;width:100%;max-width:100%;height:auto;'
+        'border:1px solid #e5e7eb;border-radius:8px;margin:0 0 10px;">'
+    )
+
+
+def _render_paper_html(paper: Paper, ctx: dict | None = None, *, hero: bool = False) -> str:
+    """Render a single paper card as HTML with proper escaping.
+
+    All styling is inline (email clients strip <style>); the layout is a single
+    column so it reads well at phone width.
+    """
     match_badges = "".join(
         f'<span style="display:inline-block;background:#e0e7ff;color:#3730a3;'
         f'padding:2px 8px;border-radius:12px;font-size:12px;margin-right:4px;">'
@@ -509,58 +791,102 @@ def _render_paper_html(paper: Paper) -> str:
         label = escape(res.get("type", "link"))
         resource_links_html += f' <a href="{url}" style="color:#2563eb;font-size:12px;margin-right:6px;">[{label}]</a>'
 
+    hero_banner = ""
+    if hero:
+        hero_banner = (
+            '<div style="color:#7c3aed;font-size:11px;font-weight:700;letter-spacing:0.08em;'
+            'text-transform:uppercase;margin-bottom:6px;">Top pick</div>'
+        )
+    title_size = "20px" if hero else "16px"
+    border = "2px solid #c7d2fe" if hero else "1px solid #e5e7eb"
+
     return f"""
-    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:12px;">
+    <div style="border:{border};border-radius:12px;padding:16px;margin-bottom:14px;background:#ffffff;">
+      {hero_banner}
+      {_figure_img(paper, ctx)}
       <div style="margin-bottom:4px;">{match_badges}</div>
       <a href="{escape(paper.link, quote=True)}"
-         style="color:#1d4ed8;font-size:16px;font-weight:600;text-decoration:none;">
+         style="color:#1d4ed8;font-size:{title_size};font-weight:600;text-decoration:none;">
         {escape(paper.title)}
       </a>
       <div style="color:#6b7280;font-size:13px;margin:4px 0;">
         {escape(paper.authors[:200])}
       </div>
-      <div style="color:#374151;font-size:13px;margin:6px 0;">
+      <div style="color:#374151;font-size:13px;line-height:1.5;margin:6px 0;">
         {escape(paper.summary_text or paper.abstract_text[:300])}
       </div>
-      <div style="margin-top:6px;">
+      <div style="margin-top:8px;">
+        {_score_chip(paper)}
         {topic_tags}
         {resource_links_html}
-        <span style="float:right;color:#9ca3af;font-size:12px;">
-          Score: {combined_rank_score(float(paper.paper_score or 0.0), int(paper.feedback_score or 0)):.1f}
-        </span>
       </div>
+      {_one_tap_buttons(paper, ctx)}
     </div>
     """
 
 
-def _build_email_body(papers: list[Paper], today: date) -> str:
-    """Compose the full HTML email body."""
+def _render_alerts_html(alerts: list[dict]) -> str:
+    """ "Saved search alerts" section: new matches per notify-flagged saved search."""
+    if not alerts:
+        return ""
+    sections = []
+    for entry in alerts:
+        items = "".join(
+            f'<li style="margin:4px 0;"><a href="{escape(p.link, quote=True)}" '
+            f'style="color:#1d4ed8;font-size:13px;text-decoration:none;">{escape(p.title)}</a></li>'
+            for p in entry["papers"]
+        )
+        sections.append(
+            '<div style="margin-bottom:12px;">'
+            f'<div style="font-size:13px;font-weight:600;color:#374151;">{escape(entry["name"])}</div>'
+            f'<ul style="margin:4px 0 0;padding-left:18px;">{items}</ul></div>'
+        )
+    return (
+        '<hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0 12px;">'
+        '<h2 style="font-size:16px;color:#111827;margin:0 0 10px;">Saved search alerts</h2>' + "".join(sections)
+    )
+
+
+def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None) -> str:
+    """Compose the full HTML email body (mobile-first, ≤600px single column)."""
+    ctx = ctx or {}
     if not papers:
         paper_cards = (
             '<p style="color:#6b7280;text-align:center;padding:40px 0;">No new matching papers found today.</p>'
         )
     else:
-        paper_cards = "\n".join(_render_paper_html(p) for p in papers)
+        cards = [_render_paper_html(papers[0], ctx, hero=True)]
+        cards.extend(_render_paper_html(p, ctx) for p in papers[1:])
+        paper_cards = "\n".join(cards)
+
+    catch_up_banner = ""
+    if ctx.get("catch_up_label"):
+        catch_up_banner = (
+            '<div style="background:#fef3c7;color:#92400e;border-radius:8px;padding:10px 14px;'
+            f'font-size:13px;font-weight:600;margin:0 0 16px;">{escape(ctx["catch_up_label"])}</div>'
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f9fafb;font-family:
   -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <div style="max-width:680px;margin:0 auto;padding:24px;">
-    <div style="background:white;border-radius:12px;padding:24px;
+  <div style="max-width:600px;margin:0 auto;padding:12px;">
+    <div style="background:white;border-radius:12px;padding:16px;
                 box-shadow:0 1px 3px rgba(0,0,0,0.1);">
       <h1 style="font-size:22px;color:#111827;margin:0 0 4px;">
         ArXiv CV Digest
       </h1>
-      <p style="color:#6b7280;font-size:14px;margin:0 0 20px;">
+      <p style="color:#6b7280;font-size:14px;margin:0 0 16px;">
         {escape(today.strftime("%A, %B %d, %Y"))} &mdash;
         {len(papers)} paper{"s" if len(papers) != 1 else ""} matched
       </p>
+      {catch_up_banner}
       {paper_cards}
+      {_render_alerts_html(ctx.get("alerts") or [])}
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0 12px;">
       <p style="color:#9ca3af;font-size:11px;text-align:center;margin:0;">
-        Sent by ArXiv CV Scraper &middot; Manage your whitelists in the dashboard
+        Sent by ArXiv CV Scraper &middot; 👍/👎 links train your ranking without opening the app
       </p>
     </div>
   </div>
@@ -568,24 +894,51 @@ def _build_email_body(papers: list[Paper], today: date) -> str:
 </html>"""
 
 
-def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
-    """Query today's papers and send a digest via Gmail API.
+def build_digest_mime(recipient: str, subject: str, html_body: str, attachments: list[tuple[str, bytes]]):
+    """Assemble the outgoing message.
 
-    Returns a dict with keys: ``papers_count``, ``sent``, ``recipient``.
+    With inline figures the structure is multipart/related (HTML first, then the
+    CID-referenced PNG parts); without figures it stays the historical
+    multipart/alternative with a single HTML part.
     """
+    from email.mime.image import MIMEImage
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
+    msg = MIMEMultipart("related" if attachments else "alternative")
+    msg["From"] = "me"
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html"))
+    for cid, data in attachments:
+        image = MIMEImage(data, _subtype="png")
+        image.add_header("Content-ID", f"<{cid}>")
+        image.add_header("Content-Disposition", "inline", filename=f"{cid}.png")
+        msg.attach(image)
+    return msg
+
+
+def send_digest(app: Flask, *, dry_run: bool = False, force: bool = False) -> dict:
+    """Query today's papers and send a digest via Gmail API.
+
+    Returns a dict with keys: ``papers_count``, ``sent``, ``recipient`` (plus
+    ``skipped_reason`` when the weekday schedule suppressed the send). Pass
+    ``force=True`` (the manual "Send Test Digest" button) to ignore the schedule.
+    """
     email_cfg = _get_email_config(app)
+    digest_cfg = get_digest_config(app)
 
     recipient = email_cfg["recipient"]
     if not recipient:
         raise ValueError("No recipient configured. Set 'email.recipient' in config.yaml.")
 
+    if not force and not weekday_allowed(digest_cfg):
+        LOGGER.info("Digest skipped: %s is not in the configured weekdays", utc_today().strftime("%A"))
+        return {"papers_count": 0, "sent": False, "recipient": recipient, "skipped_reason": "weekday"}
+
     preview = build_digest_preview(app)
     subject = preview["subject"]
     papers = preview["papers"]
-    html_body = preview["html"]
     digest_run_id = _create_digest_run(
         app,
         recipient=recipient,
@@ -594,11 +947,18 @@ def send_digest(app: Flask, *, dry_run: bool = False) -> dict:
         preview_only=dry_run,
     )
 
-    msg = MIMEMultipart("alternative")
-    msg["From"] = "me"
-    msg["To"] = recipient
-    msg["Subject"] = subject
-    msg.attach(MIMEText(html_body, "html"))
+    # Re-render for email delivery: figures become CID attachments (mail clients
+    # can't fetch localhost URLs) and one-tap tokens carry the digest run id.
+    attachments, figure_srcs = _collect_figure_attachments(app, papers)
+    ctx = {
+        "base_url": digest_cfg["base_url"],
+        "token_for": lambda paper_id, action: make_one_tap_token(app, paper_id, action, digest_run_id),
+        "figure_srcs": figure_srcs,
+        "catch_up_label": preview["catch_up_label"],
+        "alerts": preview["alerts"],
+    }
+    html_body = _build_email_body(papers, utc_today(), ctx)
+    msg = build_digest_mime(recipient, subject, html_body, attachments)
 
     if dry_run:
         LOGGER.info("Dry run — email not sent (would send to %s)", recipient)

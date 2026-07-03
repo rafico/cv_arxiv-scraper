@@ -1,0 +1,24 @@
+{# "Ask this paper" — grounded per-paper Q&A panel. Context: `paper`.
+   Collapsible like the score-breakdown block; all response content is rendered
+   via textContent in _dashboard_scripts.html (no innerHTML of user/LLM data). #}
+<details class="paper-chat-panel mb-3 rounded-xl border border-edge bg-surface-2 px-3 py-2" data-paper-id="{{ paper.id }}">
+    <summary class="cursor-pointer list-none flex items-center justify-between gap-3 text-[11px] font-medium text-fg-muted">
+        <span>Ask this paper</span>
+        <span class="text-fg-subtle">Grounded Q&amp;A</span>
+    </summary>
+    <div class="mt-2">
+        <div class="flex gap-2">
+            <input type="text"
+                   placeholder="e.g. What datasets does it evaluate on?"
+                   onkeydown="paperChatKeydown(event, this)"
+                   class="paper-chat-input input-base flex-1 text-xs">
+            <button type="button" onclick="sendPaperChat(this)"
+                    class="paper-chat-send btn-primary shrink-0 px-3 py-1.5 text-xs">Ask</button>
+        </div>
+        <p class="paper-chat-note hidden mt-2 text-[11px] text-fg-subtle"></p>
+        <div class="paper-chat-answer hidden mt-2 whitespace-pre-wrap rounded-lg border border-edge bg-surface p-3 text-xs text-fg leading-relaxed"></div>
+        <div class="paper-chat-citations hidden mt-2 flex flex-wrap gap-1"></div>
+        <div class="paper-chat-quote hidden mt-2 whitespace-pre-wrap rounded-lg border border-edge bg-surface p-3 text-[11px] text-fg-muted leading-relaxed"></div>
+        <div class="paper-chat-sources hidden mt-2 space-y-1"></div>
+    </div>
+</details>

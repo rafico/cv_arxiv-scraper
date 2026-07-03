@@ -12,6 +12,9 @@ MATCH_TYPE_WEIGHTS = {
     "Author": 44.0,
     "Affiliation": 26.0,
     "Title": 14.0,
+    # Dense-retrieval candidates admitted purely by the learned interest model
+    # (no whitelist hit) — deliberately below Title so explicit interests win.
+    "Interest": 10.0,
 }
 
 TERM_MATCH_WEIGHT = 3.0
@@ -197,7 +200,7 @@ def explain_score(
     feedback_score: int = 0,
     config: dict | None = None,
     ranking_config=None,
-) -> dict[str, float]:
+) -> dict[str, float | str | None]:
     from app.services.venues import venue_bonus
 
     preferences = resolve_ranking_preferences(config, ranking_config=ranking_config)
@@ -231,6 +234,16 @@ def explain_score(
         ranking_config=ranking_config,
     )
     feedback_bonus = round(feedback_score * FEEDBACK_BOOST, 3)
+
+    # Honest labeling of the interest component: "learned" when the trained
+    # per-user model produced/produces the signal, else "centroid" (the
+    # embedding-similarity interest profile). None when no interest signal.
+    interest_source = None
+    if interest_similarity is not None:
+        from app.services.learned_ranker import resolve_interest_source
+
+        interest_source = resolve_interest_source(config)
+
     return {
         "match_score": round(match_score, 3),
         "term_score": round(term_score, 3),
@@ -239,6 +252,7 @@ def explain_score(
         "citation_bonus": round(citation_bonus, 3),
         "venue_bonus": round(venue_score, 3),
         "interest_bonus": round(interest_bonus, 3),
+        "interest_source": interest_source,
         "recency_multiplier": round(recency, 3),
         "base_score": base_score,
         "feedback_bonus": feedback_bonus,
@@ -297,6 +311,10 @@ def top_score_contributors(
     for key, label, color in _SCORE_FACTORS:
         raw = float(breakdown.get(key, 0.0) or 0.0)
         value = raw if key == "feedback_bonus" else raw * recency
+        if key == "interest_bonus" and breakdown.get("interest_source") == "learned":
+            # Honest labeling: the signal came from the trained per-user model,
+            # not the centroid interest profile.
+            label = "Learned"
         contributions.append((key, label, color, value))
         if key != "feedback_bonus":
             additive_total += value
@@ -394,6 +412,8 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
                 explanations.append(f"Title matches: {', '.join(matched_terms)}")
             else:
                 explanations.append("Title matches your interests")
+        elif mt == "Interest":
+            explanations.append("Matched your learned interests")
 
     # Venue acceptance explanation
     if paper.venue and paper.acceptance_status and paper.acceptance_status != "mentioned":
@@ -421,12 +441,15 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
         interest_similarity=paper.interest_similarity,
         config=config,
     )
-    if breakdown["recency_multiplier"] > 0.9:
+    if float(breakdown["recency_multiplier"] or 0.0) > 0.9:
         explanations.append("Published very recently")
 
-    # Learned interest profile (embedding similarity to saved/skipped papers)
+    # Interest signal: learned model (LR over embeddings) or centroid profile.
     if paper.interest_similarity is not None and paper.interest_similarity > 0.5:
-        explanations.append("Closely matches papers you saved")
+        if breakdown.get("interest_source") == "learned":
+            explanations.append("Matches your learned interest model")
+        else:
+            explanations.append("Closely matches papers you saved")
 
     # AI relevance explanation
     if paper.llm_relevance_score and paper.llm_relevance_score >= 7:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from app.enums import FeedbackAction
 from app.models import Paper, PaperFeedback, db
 from app.services.ranking import compute_feedback_delta
+
+LOGGER = logging.getLogger(__name__)
 
 ALLOWED_ACTIONS = {action.value for action in FeedbackAction}
 
@@ -151,6 +154,8 @@ def _apply_feedback_action_once(
     paper.is_hidden = FeedbackAction.SKIP.value in active_actions
     db.session.commit()
 
+    _schedule_learned_retrain(action)
+
     return {
         "paper_id": paper.id,
         "action": action,
@@ -160,6 +165,24 @@ def _apply_feedback_action_once(
         "feedback_score": int(paper.feedback_score or 0),
         "rank_score": paper.rank_score,
     }
+
+
+def _schedule_learned_retrain(action: str) -> None:
+    """Kick the learned ranker's debounced retrain after a label-changing commit.
+
+    Strictly best-effort: feedback must never fail because training failed.
+    """
+    try:
+        from app.services.learned_ranker import (
+            NEGATIVE_ACTIONS,
+            POSITIVE_ACTIONS,
+            request_retrain,
+        )
+
+        if action in POSITIVE_ACTIONS + NEGATIVE_ACTIONS:
+            request_retrain()
+    except Exception:
+        LOGGER.warning("Learned-ranker retrain hook failed (non-fatal)", exc_info=True)
 
 
 def get_feedback_snapshot(paper_ids: list[int]) -> dict[int, dict]:

@@ -8,6 +8,7 @@
     'Author':      {},
     'Affiliation': {},
     'Title':       {},
+    'Interest':    {},
 } %}
 
 {% set FEEDBACK = {
@@ -66,7 +67,7 @@
     <button type="button" onclick="applyFilters({ match_type: '' })"
             class="px-2.5 py-1 text-xs font-medium rounded-full transition-colors
                    {{ 'bg-accent text-accent-fg' if not current_filters.match_type else 'text-fg-muted hover:bg-surface-2' }}">All</button>
-    {% for mtype in ['Author', 'Affiliation', 'Title'] %}
+    {% for mtype in ['Author', 'Affiliation', 'Title', 'Interest'] %}
     <button type="button" onclick="applyFilters({ match_type: '{{ mtype }}' })"
             class="px-2.5 py-1 text-xs font-medium rounded-full transition-colors
                    {{ 'bg-accent text-accent-fg' if current_filters.match_type == mtype else 'text-fg-muted hover:bg-surface-2' }}">

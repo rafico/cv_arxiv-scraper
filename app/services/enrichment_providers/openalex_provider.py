@@ -67,7 +67,9 @@ def parse_openalex_work(work: dict) -> dict[str, Any]:
 class OpenAlexProvider(EnrichmentProvider):
     source = "openalex"
 
-    def __init__(self, *, ttl_hours: int = DEFAULT_CACHE_TTL_HOURS, request_fn=None, api_key: str | None = None) -> None:
+    def __init__(
+        self, *, ttl_hours: int = DEFAULT_CACHE_TTL_HOURS, request_fn=None, api_key: str | None = None
+    ) -> None:
         self.ttl_hours = ttl_hours
         self._request_fn = request_fn
         self._api_key = api_key

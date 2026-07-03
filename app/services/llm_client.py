@@ -118,6 +118,33 @@ class LLMClient:
                 **extra,
             )
 
+    def complete_text(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float = 0.2,
+        **extra,
+    ) -> str | None:
+        """Throttled completion returning stripped text, or None on any failure.
+
+        Convenience over :meth:`complete` for callers that follow this module's
+        None-on-failure convention (e.g. per-paper chat evidence/synthesis calls).
+        """
+        try:
+            response = self.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **extra,
+            )
+            content = response.choices[0].message.content
+        except Exception:
+            return None
+        return content.strip() if isinstance(content, str) and content.strip() else None
+
     def generate_tldr(self, title: str, abstract: str) -> str | None:
         system_prompt = "Produce a specific 1-2 sentence TLDR for a research paper. Keep it under 280 characters."
         user_prompt = f"Title: {title}\n\nAbstract: {abstract}"

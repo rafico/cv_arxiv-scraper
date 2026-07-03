@@ -143,6 +143,11 @@ def _build_client(app=None):
     return client
 
 
+def build_llm_client(app=None):
+    """Public alias of the shared chat LLM-client builder (also used by paper_chat)."""
+    return _build_client(app=app)
+
+
 def _synthesize(client, query: str, context: str) -> str | None:
     """Call the low-level completion helper; return text or None on any failure."""
     user_prompt = f"Context from saved papers:\n\n{context}\n\nQuestion: {query}"

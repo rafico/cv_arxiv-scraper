@@ -228,6 +228,55 @@ def _validate_config(config: dict, *, config_path: Path | None = None) -> None:
     for key, items in normalized_preferences["muted"].items():
         if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
             raise ValueError(f"'preferences.muted.{key}' must be a list of strings")
+    learned = normalized_preferences["learned"]
+    for key in ("blend", "candidate_threshold"):
+        value = float(learned[key])
+        if not math.isfinite(value) or value < 0 or value > 1:
+            raise ValueError(f"'preferences.learned.{key}' must be between 0 and 1")
+    top_k = learned["candidate_top_k"]
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 0 or top_k > 50:
+        raise ValueError("'preferences.learned.candidate_top_k' must be an integer between 0 and 50")
+
+    digest = config.get("digest")
+    if digest is not None:
+        if not isinstance(digest, dict):
+            raise ValueError("'digest' must be a dict")
+
+        weekdays = digest.get("weekdays")
+        if weekdays is not None:
+            valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+            if not isinstance(weekdays, list) or not weekdays:
+                raise ValueError("'digest.weekdays' must be a non-empty list of weekday names (mon..sun)")
+            unknown = [str(day) for day in weekdays if str(day).strip().lower()[:3] not in valid_days]
+            if unknown:
+                raise ValueError(f"'digest.weekdays' contains unknown weekdays: {', '.join(unknown)}")
+
+        min_score = digest.get("min_score")
+        if min_score is not None:
+            if isinstance(min_score, bool):
+                raise ValueError("'digest.min_score' must be a finite number")
+            try:
+                if not math.isfinite(float(min_score)):
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise ValueError("'digest.min_score' must be a finite number") from None
+
+        max_papers = digest.get("max_papers")
+        if max_papers is not None:
+            if isinstance(max_papers, bool):
+                raise ValueError("'digest.max_papers' must be an integer between 1 and 100")
+            try:
+                max_papers_value = int(max_papers)
+                if float(max_papers_value) != float(max_papers) or not (1 <= max_papers_value <= 100):
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise ValueError("'digest.max_papers' must be an integer between 1 and 100") from None
+
+        base_url = digest.get("base_url")
+        if base_url is not None and (
+            not isinstance(base_url, str) or not base_url.strip().startswith(("http://", "https://"))
+        ):
+            raise ValueError("'digest.base_url' must be an http(s) URL")
 
     llm = config.get("llm")
     if llm is None:

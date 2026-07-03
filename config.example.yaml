@@ -1,6 +1,17 @@
 email:
   recipient: ""
   subject_prefix: ArXiv Digest
+digest:
+  # Weekdays the scheduled/cron digest is sent (the manual "Send Test Digest"
+  # button ignores this). Default: every day.
+  weekdays: [mon, tue, wed, thu, fri, sat, sun]
+  # Papers scoring below this combined relevance score are left out of the email.
+  min_score: 0.0
+  # Maximum papers per digest email (1-100).
+  max_papers: 15
+  # Base URL for the one-tap Save/Skip links inside the email. Must be reachable
+  # from the device you read email on; defaults to this app's local dev server.
+  base_url: http://127.0.0.1:5000
 scraper:
   feed_url: https://rss.arxiv.org/rss/cs.CV
   # How many days back the arXiv-API fallback fetches when the daily RSS feed is
@@ -51,10 +62,25 @@ preferences:
     ai_weight: 5.0
     citation_weight: 0.05
     venue_weight: 8.0
-    # Learned interest profile (embedding similarity to your saved/skipped
-    # papers); inert until >= 5 saved papers have embeddings.
+    # Learned interest signal (see preferences.learned below); inert until
+    # >= 5 saved papers have embeddings. This weight multiplies the signal.
     interest_weight: 12.0
     freshness_half_life_days: 14.0
+  learned:
+    # Learned ranking: a per-user logistic regression over PCA-compressed
+    # paper embeddings (the Scholar Inbox recipe), retrained automatically on
+    # every save/skip. Until enough rated papers exist it falls back to the
+    # centroid interest profile, so new installs behave exactly as before.
+    enabled: true
+    # Blend inside the "Learned interests" signal once the model is active:
+    # 0 = centroid profile only, 1 = learned model only.
+    blend: 0.7
+    # Dense-retrieval candidates: papers with NO whitelist match are admitted
+    # to the feed (match type "Interest") when the model scores them above
+    # this probability threshold — at most candidate_top_k per scrape.
+    # Set candidate_top_k: 0 to keep the feed whitelist-only.
+    candidate_threshold: 0.6
+    candidate_top_k: 10
   muted:
     authors: []
     affiliations: []

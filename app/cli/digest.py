@@ -39,6 +39,10 @@ def main() -> None:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
+    if info.get("skipped_reason") == "weekday":
+        print("Digest skipped - today is not in the configured digest weekdays (Settings -> Automation -> Digest)")
+        return
+
     status = "sent" if info["sent"] else "prepared (dry run)"
     print(f"Digest {status} - {info['papers_count']} papers -> {info['recipient']}")
 

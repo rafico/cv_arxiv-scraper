@@ -28,6 +28,19 @@ DEFAULT_PREFERENCES: dict[str, dict] = {
         "summary_lines": 3,
         "show_score_breakdown_bars": True,
     },
+    # Learned ranking (logistic regression over PCA-compressed embeddings,
+    # retrained on every save/skip — see app/services/learned_ranker.py).
+    "learned": {
+        "enabled": True,
+        # Blend of the learned model vs the centroid interest profile inside
+        # the "Learned interests" signal (0 = centroid only, 1 = model only).
+        "blend": 0.7,
+        # Dense-retrieval candidates: papers with no whitelist match are
+        # admitted when the interest score (probability, 0-1) clears this
+        # threshold — at most candidate_top_k per scrape (0 disables).
+        "candidate_threshold": 0.6,
+        "candidate_top_k": 10,
+    },
     "muted": {
         "authors": [],
         "affiliations": [],
@@ -94,6 +107,23 @@ def get_preferences(config: dict | None) -> dict:
             except (TypeError, ValueError):
                 merged["display"][key] = int(default_value)
 
+    learned = raw.get("learned", {})
+    if isinstance(learned, dict):
+        from app import _is_truthy_flag
+
+        for key, default_value in merged["learned"].items():
+            value = learned.get(key)
+            if isinstance(default_value, bool):
+                merged["learned"][key] = default_value if value is None else _is_truthy_flag(value)
+                continue
+            try:
+                if value is not None:
+                    # Keep the raw value; _validate_config rejects out-of-range /
+                    # non-finite entries at config-load and settings-save time.
+                    merged["learned"][key] = int(value) if isinstance(default_value, int) else float(value)
+            except (TypeError, ValueError):
+                merged["learned"][key] = default_value
+
     muted = raw.get("muted", {})
     if isinstance(muted, dict):
         for key in merged["muted"]:
@@ -125,6 +155,12 @@ def update_preferences_from_form(config: dict, form) -> dict:
                 display[key] = max(1, min(10, int(raw)))
             except (TypeError, ValueError):
                 pass
+
+    learned = preferences["learned"]
+    learned["enabled"] = "learned_enabled" in form
+    raw = form.get("pref_learned_blend", "").strip()
+    if raw:
+        learned["blend"] = float(raw)
 
     muted = preferences["muted"]
     for key in muted:

@@ -355,6 +355,35 @@ class EmbeddingService:
 
         return found_ids, np.asarray(vectors, dtype=np.float32)
 
+    def sample_paper_vectors(
+        self,
+        count: int,
+        exclude_ids: set[int] | None = None,
+        seed: int | None = None,
+    ) -> tuple[list[int], np.ndarray]:
+        """Random sample of indexed papers and their vectors (without replacement).
+
+        Used by the learned ranker to draw weak-negative corpus papers.
+        ``exclude_ids`` (e.g. labeled papers) are never sampled. Deterministic
+        when ``seed`` is given.
+        """
+        if count <= 0:
+            return [], np.empty((0, DIMENSION), dtype=np.float32)
+
+        with self._lock:
+            exclude = exclude_ids or set()
+            pool = [(pid, row) for row, pid in enumerate(self._id_map) if pid not in exclude]
+            if not pool:
+                return [], np.empty((0, DIMENSION), dtype=np.float32)
+            rng = np.random.default_rng(seed)
+            if len(pool) > count:
+                chosen = rng.choice(len(pool), size=count, replace=False)
+                pool = [pool[int(idx)] for idx in chosen]
+            found_ids = [pid for pid, _row in pool]
+            vectors = [self._index.reconstruct(row) for _pid, row in pool]
+
+        return found_ids, np.asarray(vectors, dtype=np.float32)
+
     def _ensure_section_index(self) -> None:
         """Load or create the section-level FAISS index (double-checked locking).
 
@@ -619,6 +648,16 @@ def get_embedding_service(app=None) -> EmbeddingService:
 
         _service_instance = EmbeddingService(index_dir)
         return _service_instance
+
+
+def peek_embedding_service() -> EmbeddingService | None:
+    """Return the singleton if it already exists, WITHOUT creating it.
+
+    Lets lightweight callers (learned-ranker artifact resolution) locate the
+    index dir from scrape worker threads with no app context, while never
+    triggering a FAISS index load as a side effect.
+    """
+    return _service_instance
 
 
 def reset_embedding_service() -> None:

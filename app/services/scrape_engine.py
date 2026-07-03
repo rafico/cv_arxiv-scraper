@@ -42,6 +42,12 @@ _NATIVE_STAGE_TIMEOUT = float(os.environ.get("CV_ARXIV_NATIVE_STAGE_TIMEOUT", "9
 # Wall-clock budget for the whole thumbnail-generation fan-out (see _generate_thumbnails).
 _THUMBNAIL_TIMEOUT_SECONDS = 120.0
 
+# Figure extraction is best-effort and bounded: only the top-scored papers of a run
+# get the arXiv-HTML fetch + image downloads, under one wall-clock deadline
+# (mirrors the thumbnail fan-out bounds; see _generate_figures).
+_FIGURES_PER_RUN_CAP = 25
+_FIGURES_TIMEOUT_SECONDS = 180.0
+
 # Serializes the FAISS index read-append-rename performed by run_isolated inside
 # _generate_embeddings / _extract_sections. The historical search
 # (POST /api/search/historical) runs the pipeline synchronously in the request
@@ -408,6 +414,60 @@ def _generate_thumbnails(app, results: list[dict], session: requests.Session) ->
                 break
             except Exception:
                 LOGGER.warning("Thumbnail generation failed for one paper", exc_info=True)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _generate_figures(app, results: list[dict], session: requests.Session) -> None:
+    """Extract inline figure previews for the top-scored papers of this run.
+
+    Strictly non-fatal: every failure degrades to "no figure strip" for that
+    paper. Reads ``result["pdf_content"]`` via ``.get()`` only — the bytes are
+    still consumed by section extraction afterwards, so they must not be popped.
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeout
+
+    from app.services.thumbnail_generator import DEFAULT_THUMBNAIL_DPI, generate_paper_figures
+
+    static_folder = app.static_folder if app.static_folder else Path(__file__).parent.parent / "static"
+    scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {}) or {}
+    resolution = int(scraper_config.get("thumbnail_dpi", DEFAULT_THUMBNAIL_DPI))
+
+    def worker(res):
+        arxiv_id = res.get("arxiv_id") or (res.get("link") or "").split("/")[-1]
+        if not arxiv_id:
+            return
+        generate_paper_figures(
+            arxiv_id,
+            static_folder,
+            session=session,
+            pdf_content=res.get("pdf_content"),
+            pdf_link=res.get("pdf_link"),
+            resolution=resolution,
+        )
+
+    # Same deadline-walk pattern as _generate_thumbnails: submit explicitly and
+    # drop the remainder at the wall-clock budget instead of letting the executor
+    # shutdown block on slow hosts. `results` is sorted best-first by
+    # _sort_results, so the per-run cap keeps figures for the likeliest reads.
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        futures = [executor.submit(worker, res) for res in results[:_FIGURES_PER_RUN_CAP]]
+        start = time.monotonic()
+        for future in futures:
+            remaining = _FIGURES_TIMEOUT_SECONDS - (time.monotonic() - start)
+            if remaining <= 0:
+                LOGGER.warning("Figure extraction exceeded %ss, skipping remaining", _FIGURES_TIMEOUT_SECONDS)
+                break
+            try:
+                future.result(timeout=remaining)
+            except FuturesTimeout:
+                LOGGER.warning("Figure extraction exceeded %ss, skipping remaining", _FIGURES_TIMEOUT_SECONDS)
+                break
+            except Exception:
+                LOGGER.warning("Figure extraction failed for one paper", exc_info=True)
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
@@ -1108,6 +1168,9 @@ def _finalize_results(
 
     _emit(event_callback, "status", {"phase": "thumbnails", "message": "Generating PDF thumbnails..."})
     _generate_thumbnails(app, results, session)
+
+    _emit(event_callback, "status", {"phase": "figures", "message": "Extracting paper figures..."})
+    _generate_figures(app, results, session)
 
     _emit(event_callback, "status", {"phase": "embeddings", "message": "Generating embeddings..."})
     _generate_embeddings(app, results)

@@ -133,6 +133,16 @@ def score_vector(profile: InterestProfile, vector: np.ndarray) -> float:
     return max(-1.0, min(1.0, similarity))
 
 
+def get_cached_interest_profile() -> InterestProfile | None:
+    """Last profile built by :func:`build_interest_profile`, without any DB access.
+
+    Scrape worker threads (no app context) read this after the scrape engine
+    warms the cache at scrape start; returns None when nothing is cached.
+    """
+    with _cache_lock:
+        return _cached_profile
+
+
 def reset_interest_profile_cache() -> None:
     """Reset the module cache (for testing)."""
     global _cached_profile, _cached_fingerprint
@@ -145,14 +155,30 @@ def recompute_interest_similarities(app, *, batch_size: int = 500) -> int:
     """Refresh Paper.interest_similarity for all indexed papers, then rescore.
 
     Cheap when a profile exists (vectors come from FAISS reconstruct, no model
-    load). Clears similarities when the profile has gone away.
+    load). Blends in the learned ranker's probability when that model is
+    active (see app/services/learned_ranker.py); clears similarities when
+    neither signal source exists anymore.
     """
     profile = build_interest_profile(app)
 
     from app.models import Paper, db
 
+    # Learned-model blend (best-effort: any failure degrades to centroid-only).
+    learned_model = None
+    blend = 0.7
+    try:
+        from app.services.learned_ranker import ensure_learned_model, learned_preferences
+
+        with app.app_context():
+            learned_prefs = learned_preferences(app.config.get("SCRAPER_CONFIG"))
+        blend = float(learned_prefs.get("blend", 0.7))
+        if learned_prefs.get("enabled", True):
+            learned_model = ensure_learned_model(app)
+    except Exception:
+        LOGGER.warning("Learned-ranker lookup failed (non-fatal); using centroid only", exc_info=True)
+
     service = None
-    if profile is not None:
+    if profile is not None or learned_model is not None:
         from app.services.embeddings import get_embedding_service
 
         service = get_embedding_service(app)
@@ -164,16 +190,20 @@ def recompute_interest_similarities(app, *, batch_size: int = 500) -> int:
             papers = Paper.query.order_by(Paper.id).offset(offset).limit(batch_size).all()
             if not papers:
                 break
-            if profile is None:
+            if service is None:
                 for paper in papers:
                     if paper.interest_similarity is not None:
                         paper.interest_similarity = None
                         updated += 1
             else:
+                from app.services.learned_ranker import interest_signal
+
                 found_ids, vectors = service.get_paper_vectors([paper.id for paper in papers])
-                similarity_by_id = {
-                    paper_id: score_vector(profile, vectors[idx]) for idx, paper_id in enumerate(found_ids)
-                }
+                similarity_by_id = {}
+                for idx, paper_id in enumerate(found_ids):
+                    signal, _source = interest_signal(vectors[idx], profile, learned_model, blend)
+                    if signal is not None:
+                        similarity_by_id[paper_id] = signal
                 for paper in papers:
                     similarity = similarity_by_id.get(paper.id)
                     if similarity is not None:

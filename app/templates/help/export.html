@@ -99,6 +99,12 @@
         </div>
     </div>
 
+    <h3 class="text-lg font-bold text-fg mb-3">What the email contains</h3>
+    <div class="space-y-2 mb-6">
+        <p class="text-sm text-fg-muted">The digest is a mobile-friendly single column: the top-ranked paper gets a hero card, each paper shows its relevance score, and the top papers include an inline figure when one has been extracted. Every paper has one-tap <strong>&#128077; Save</strong> / <strong>&#128078; Skip</strong> buttons that record feedback (and train your ranking) without opening the app &mdash; the links are signed, valid for 7 days, and point at the base URL set in <a href="{{ url_for('settings.view_settings', section='automation') }}" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation &rarr; Digest</a>, so the app must be running and reachable from the device you read email on.</p>
+        <p class="text-sm text-fg-muted">The same settings card controls which weekdays the scheduled digest goes out, a minimum relevance score, and a maximum paper count. If the last successful digest is more than two days old, the next one automatically becomes a <em>catch-up digest</em> covering the gap (up to 7 days). Saved searches with the <strong>Notify</strong> flag add a "Saved search alerts" section listing their new matches since the last digest.</p>
+    </div>
+
     <div class="help-admonition bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg">
         <div class="flex items-start">
             <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>

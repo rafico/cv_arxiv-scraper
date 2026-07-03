@@ -184,3 +184,41 @@ def execute_saved_search(
     query = query.order_by(Paper.paper_score.desc())
 
     return query.limit(limit).all()
+
+
+def run_notify_searches(
+    *,
+    since=None,
+    exclude_paper_ids=(),
+    per_search_limit: int = 5,
+) -> list[dict]:
+    """Run saved searches flagged ``notify_on_match`` for digest alerting.
+
+    Returns ``[{"search": SavedSearch, "papers": [Paper, ...]}, ...]`` keeping only
+    papers scraped on/after ``since`` (new since the last digest) and not in
+    ``exclude_paper_ids`` (already featured in the digest's main list). Papers are
+    also deduped across searches so one paper never appears in two alert sections.
+    A single broken search is skipped rather than failing the whole digest.
+    """
+    searches = (
+        SavedSearch.query.filter(SavedSearch.notify_on_match.is_(True), SavedSearch.is_active.is_(True))
+        .order_by(SavedSearch.name)
+        .all()
+    )
+    seen: set[int] = set(exclude_paper_ids)
+    results: list[dict] = []
+    for search in searches:
+        try:
+            papers = execute_saved_search(search)
+        except Exception:
+            LOGGER.warning("Saved search %r failed during digest alerting", search.name, exc_info=True)
+            continue
+        fresh = [
+            paper
+            for paper in papers
+            if paper.id not in seen and (since is None or (paper.scraped_at is not None and paper.scraped_at >= since))
+        ][:per_search_limit]
+        if fresh:
+            seen.update(paper.id for paper in fresh)
+            results.append({"search": search, "papers": fresh})
+    return results

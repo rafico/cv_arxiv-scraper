@@ -33,6 +33,7 @@ from app.services.ranking import (
 )
 from app.services.related import build_vector, top_related_papers
 from app.services.text import now_utc
+from app.services.thumbnail_generator import MAX_PAPER_FIGURES
 from app.services.thumbnail_warmer import THUMBNAIL_WARMER
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -325,6 +326,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
     # Resolve the active RankingConfig once for the whole page instead of issuing a
     # fresh query + DEFAULT_PREFERENCES deepcopy inside explain_score for every row.
     active_ranking_config = get_active_ranking_config()
+    figure_static_root = _static_root()
 
     for paper in papers:
         feedback = feedback_snapshot.get(
@@ -370,6 +372,7 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
         ]
 
         paper.ranking_explanations = generate_ranking_explanation(paper, config=config)
+        paper.figure_indices = _existing_figure_indices(_thumbnail_storage_key(paper), figure_static_root)
 
 
 @dashboard_bp.route("/")
@@ -527,6 +530,7 @@ def index():
             db.func.sum(db.case((Paper.match_type.contains("Author"), 1), else_=0)).label("author_count"),
             db.func.sum(db.case((Paper.match_type.contains("Affiliation"), 1), else_=0)).label("affiliation_count"),
             db.func.sum(db.case((Paper.match_type.contains("Title"), 1), else_=0)).label("title_count"),
+            db.func.sum(db.case((Paper.match_type.contains("Interest"), 1), else_=0)).label("interest_count"),
         )
         .first()
     )
@@ -534,6 +538,7 @@ def index():
         "Author": int(type_counts_row.author_count or 0),
         "Affiliation": int(type_counts_row.affiliation_count or 0),
         "Title": int(type_counts_row.title_count or 0),
+        "Interest": int(type_counts_row.interest_count or 0),
     }
 
     candidate_pool = (
@@ -614,6 +619,40 @@ def paper_thumbnail(paper_id: int):
         return _missing_thumbnail_response()
 
     return send_file(thumbnail_path, mimetype="image/png", conditional=True, max_age=86400)
+
+
+def _existing_figure_indices(storage_key: str | None, static_root: Path) -> list[int]:
+    """Figure indices with a cached file on disk, for the details figure strip.
+
+    Figures use deterministic filenames ({storage_key}_fig{n}.png), so presence on
+    disk is the source of truth — no DB column (see thumbnail_generator).
+    """
+    if not storage_key:
+        return []
+    indices: list[int] = []
+    for index in range(1, MAX_PAPER_FIGURES + 1):
+        path = _resolved_thumbnail_path(storage_key, static_root, suffix=f"_fig{index}")
+        if path is not None and path.exists():
+            indices.append(index)
+    return indices
+
+
+@dashboard_bp.route("/papers/<int:paper_id>/figures/<int:figure_index>.png")
+def paper_figure(paper_id: int, figure_index: int):
+    """Inline figure preview extracted from the arXiv HTML/PDF (same cache dir and
+    traversal guard as thumbnails). No inline generation: figures are produced by
+    the scrape pipeline / backfill CLI; a missing file simply renders no strip."""
+    if not 1 <= figure_index <= MAX_PAPER_FIGURES:
+        return ("", 404)
+    paper = Paper.query.get_or_404(paper_id)
+    storage_key = _thumbnail_storage_key(paper)
+    if not storage_key:
+        return ("", 404)
+
+    figure_path = _resolved_thumbnail_path(storage_key, _static_root(), suffix=f"_fig{figure_index}")
+    if figure_path is None or not figure_path.exists():
+        return ("", 404)
+    return send_file(figure_path, mimetype="image/png", conditional=True, max_age=86400)
 
 
 @dashboard_bp.route("/papers/<int:paper_id>/teaser.png")

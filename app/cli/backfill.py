@@ -490,9 +490,16 @@ def backfill_thumbnails(
     batch_size: int = DEFAULT_BATCH_SIZE,
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
     teasers_only: bool = False,
+    figures: bool = False,
     emit: Emit = print,
 ) -> int:
-    from app.search_.thumbnail_generator import generate_thumbnail
+    """Generate missing thumbnails/teasers, or (with ``figures``) inline figure previews.
+
+    ``figures`` takes precedence over ``teasers_only``: it extracts up to four
+    figure images per paper (arXiv HTML first, PDF fallback) and skips papers that
+    already have any figure file cached.
+    """
+    from app.search_.thumbnail_generator import figure_paths_for, generate_paper_figures, generate_thumbnail
 
     total_generated = 0
     last_seen_id = 0
@@ -520,6 +527,17 @@ def backfill_thumbnails(
                 last_seen_id = papers[-1].id
                 generated_now = 0
                 for paper in papers:
+                    if figures:
+                        if figure_paths_for(paper.arxiv_id, static_dir):
+                            continue
+                        if generate_paper_figures(paper.arxiv_id, static_dir, session=session, pdf_link=paper.pdf_link):
+                            generated_now += 1
+                            total_generated += 1
+
+                        if delay_seconds > 0:
+                            time.sleep(delay_seconds)
+                        continue
+
                     thumbnail_path = thumbnails_dir / f"{paper.arxiv_id}.png"
                     teaser_path = thumbnails_dir / f"{paper.arxiv_id}_teaser.png"
                     if teasers_only:
@@ -535,9 +553,10 @@ def backfill_thumbnails(
                     if delay_seconds > 0:
                         time.sleep(delay_seconds)
 
+                label = "figure sets" if figures else "thumbnails"
                 emit(
                     f"Thumbnail batch through paper {last_seen_id}: "
-                    f"generated {generated_now}/{len(papers)} thumbnails (total {total_generated})"
+                    f"generated {generated_now}/{len(papers)} {label} (total {total_generated})"
                 )
     finally:
         session.close()
@@ -693,6 +712,11 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
         if command == "thumbnails":
             subparser.add_argument("--teasers-only", action="store_true", help="Only generate missing teaser figures")
+            subparser.add_argument(
+                "--figures",
+                action="store_true",
+                help="Only extract missing inline figure previews (arXiv HTML first, PDF fallback)",
+            )
 
     return parser
 
@@ -725,7 +749,11 @@ def main(argv: list[str] | None = None) -> int:
             backfill_huggingface(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "thumbnails":
             backfill_thumbnails(
-                app, batch_size=args.batch_size, delay_seconds=args.delay, teasers_only=args.teasers_only
+                app,
+                batch_size=args.batch_size,
+                delay_seconds=args.delay,
+                teasers_only=args.teasers_only,
+                figures=args.figures,
             )
         else:
             run_all_backfills(app, batch_size=args.batch_size, delay_seconds=args.delay)

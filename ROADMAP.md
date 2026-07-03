@@ -38,7 +38,7 @@ production ranker recipe and an 800k-rating public dataset), PaperQA2 / `paper-q
 4. **Feed-sources management UI** in Settings — closes the docs-vs-reality gap (help
    pages promised it; only the API existed).
 
-## Wave 2 — Next (highest impact, medium effort)
+## Wave 2 — Delivered (July 2026)
 
 5. **Inline figure previews** on cards + digest. Scholar Inbox's single most-praised,
    retention-linked feature; for CV papers the figures *are* the paper. The PDF-fetch +
@@ -61,6 +61,18 @@ production ranker recipe and an 800k-rating public dataset), PaperQA2 / `paper-q
    per-chunk evidence scoring, cited synthesis) via `paper-qa` (Apache-2.0, supports
    Ollama/LiteLLM + sentence-transformers — our exact stack). Section/quote-level
    citations are 2026 table stakes (alphaXiv, Bytez, NotebookLM).
+
+### Wave 2 leftovers (deferred, small)
+
+- Benchmark the learned ranker offline against the Scholar Inbox public 800k-rating
+  dataset (currently evaluated only on the user's own feedback via `RecommendationMetric`).
+- Labeled exploration slots (2–3 per feed/digest) from the Scholar Inbox recipe.
+- Dense-retrieval admission is first-K-above-threshold in scrape stream order; a true
+  corpus-wide top-K would need a batch pass in `scrape_engine`.
+- `backfill thumbnails --figures` re-attempts papers with zero extractable figures on
+  every run (no negative-result sentinel); harmless but wasteful.
+- Optional `scraper.extract_figures` opt-out flag (figure fetch is always-on best-effort
+  with a 25-papers/run cap and 180s deadline).
 
 ## Wave 3 — Later (differentiators)
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import requests
 
+from app.enums import MatchType
 from app.services.matching import (
     check_author_match,
     check_whitelist_match,
@@ -35,7 +37,15 @@ class CandidateGenerator(Protocol):
 
 
 class WhitelistCandidateGenerator:
-    """Generates candidates by matching against author/title/affiliation whitelists."""
+    """Generates candidates by matching against author/title/affiliation whitelists.
+
+    Entries with no whitelist hit get a second chance through the dense-retrieval
+    interest gate: when the learned ranker (or the centroid interest profile as
+    cold-start fallback) scores their embedding above a configurable threshold,
+    they are admitted with match type "Interest" — bounded to
+    ``candidate_top_k`` admissions per generator instance (i.e. per scrape) so a
+    bad model can never flood the feed.
+    """
 
     def __init__(
         self,
@@ -43,11 +53,23 @@ class WhitelistCandidateGenerator:
         scraper_config: dict[str, Any],
         muted: dict[str, list] | None = None,
         session: requests.Session | None = None,
+        interest_scorer=None,
+        interest_settings: dict | None = None,
     ) -> None:
         self.whitelists = whitelists
         self.scraper_config = scraper_config
         self.muted = muted or {"authors": [], "affiliations": [], "topics": []}
         self.session = session
+        # Interest gate state. The scorer maps an embedding vector to a
+        # probability-like score in [0, 1] (or None). It is resolved lazily on
+        # first use — scrape_engine constructs this generator without config
+        # access, so settings come from the learned-ranker runtime snapshot
+        # (refreshed by DefaultFeatureExtractor construction at scrape start).
+        self._interest_lock = threading.Lock()
+        self._interest_scorer = interest_scorer
+        self._interest_settings = interest_settings
+        self._interest_resolved = interest_scorer is not None
+        self._interest_admitted = 0
 
     def generate(self, papers: list[dict[str, Any]]) -> list[ScoredCandidate]:
         candidates = []
@@ -100,6 +122,86 @@ class WhitelistCandidateGenerator:
             return True
         return False
 
+    def _resolve_interest_gate(self) -> None:
+        """Build the interest scorer once per generator (thread-safe, non-fatal)."""
+        with self._interest_lock:
+            if self._interest_resolved:
+                return
+            self._interest_resolved = True
+            try:
+                from app.services import learned_ranker
+                from app.services.interest_model import get_cached_interest_profile
+
+                prefs = learned_ranker.get_runtime_learned_prefs()
+                if self._interest_settings is None:
+                    self._interest_settings = prefs
+                settings = self._interest_settings
+                if not settings.get("enabled", True) or int(settings.get("candidate_top_k", 0)) <= 0:
+                    return
+
+                model = learned_ranker.peek_learned_model()
+                profile = get_cached_interest_profile()
+                if model is None and profile is None:
+                    return
+                blend = float(settings.get("blend", 0.7))
+
+                def scorer(vector) -> float | None:
+                    signal, _source = learned_ranker.interest_signal(vector, profile, model, blend)
+                    if signal is None:
+                        return None
+                    # Map the [-1, 1] signal to [0, 1] so the threshold reads as
+                    # a probability (a pure-LR signal maps back to its probability).
+                    return (signal + 1.0) / 2.0
+
+                self._interest_scorer = scorer
+            except Exception:
+                LOGGER.warning("Interest candidate gate unavailable (non-fatal)", exc_info=True)
+
+    def _interest_candidate(self, entry_data: dict) -> ScoredCandidate | None:
+        """Admit a non-whitelist entry when the interest model scores it highly."""
+        self._resolve_interest_gate()
+        if self._interest_scorer is None:
+            return None
+        settings = self._interest_settings or {}
+        top_k = int(settings.get("candidate_top_k", 10))
+        threshold = float(settings.get("candidate_threshold", 0.6))
+
+        with self._interest_lock:
+            if self._interest_admitted >= top_k:
+                return None
+        if self._is_muted(entry_data):
+            return None
+
+        try:
+            vector = entry_data.get("_embedding")
+            if vector is None:
+                from app.services.embeddings import get_embedding_service
+
+                text = f"{entry_data.get('title', '')} {entry_data.get('abstract', '')}"
+                vector = get_embedding_service().encode([text])[0]
+                # Stash for reuse by feature extraction / _generate_embeddings.
+                entry_data["_embedding"] = vector
+            score = self._interest_scorer(vector)
+        except Exception:
+            LOGGER.warning("Interest candidate scoring failed (non-fatal)", exc_info=True)
+            return None
+
+        if score is None or score < threshold:
+            return None
+
+        with self._interest_lock:
+            if self._interest_admitted >= top_k:
+                return None
+            self._interest_admitted += 1
+
+        return ScoredCandidate(
+            entry_data=entry_data,
+            match_types=[MatchType.INTEREST.value],
+            matched_terms=[],
+            pdf_content=entry_data.get("pdf_content"),
+            raw_features={"interest_candidate_score": round(float(score), 4)},
+        )
+
     def process_single(self, entry_data: dict) -> ScoredCandidate | None:
         """Process a single paper entry through the candidate generation pipeline."""
         fast_matches = self._check_fast_matches(entry_data)
@@ -108,7 +210,9 @@ class WhitelistCandidateGenerator:
         category_matches = {**fast_matches, "Affiliation": affiliation_matches}
 
         if not any(category_matches.values()):
-            return None
+            # No whitelist hit: dense-retrieval second chance via the learned
+            # interest model (bounded + thresholded; None when unavailable).
+            return self._interest_candidate(entry_data)
 
         if self._is_muted(entry_data):
             return None

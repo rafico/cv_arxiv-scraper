@@ -1,0 +1,14 @@
+{# Horizontally scrollable strip of extracted figure previews. Context: `paper`
+   with `figure_indices` (attached by the dashboard route; defaults to empty so
+   other renderers of the details partial are unaffected). Renders nothing when
+   the paper has no cached figures. #}
+{% set figure_indices = paper.figure_indices | default([]) %}
+{% if figure_indices %}
+<div class="paper-figures mb-3 flex gap-2 overflow-x-auto pb-1">
+    {% for index in figure_indices %}
+    <img src="{{ url_for('dashboard.paper_figure', paper_id=paper.id, figure_index=index) }}"
+         alt="Paper figure {{ index }}" loading="lazy"
+         class="h-36 w-auto max-w-none flex-none rounded-lg border border-edge bg-surface object-contain">
+    {% endfor %}
+</div>
+{% endif %}

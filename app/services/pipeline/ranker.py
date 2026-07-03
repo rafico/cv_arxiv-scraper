@@ -33,8 +33,10 @@ class RankedPaper:
 
     @property
     def match_priority(self) -> int:
+        # Match types outside the whitelist trio (e.g. "Interest" dense-retrieval
+        # candidates) sort after Title but before "no match at all".
         return min(
-            (MATCH_PRIORITY[mt] for mt in self.match_types),
+            (MATCH_PRIORITY.get(mt, 4) for mt in self.match_types),
             default=999,
         )
 
@@ -156,6 +158,8 @@ class WeightedSumRanker:
                     explanations.append(f"Title matches: {', '.join(matched_terms)}")
                 else:
                     explanations.append("Title matches your interests")
+            elif mt == "Interest":
+                explanations.append("Matched your learned interests")
 
         if features.venue and features.acceptance_status and features.acceptance_status != "mentioned":
             venue_label = f"{features.venue} {features.venue_year}" if features.venue_year else features.venue
@@ -176,7 +180,10 @@ class WeightedSumRanker:
             explanations.append(f"AI rated highly relevant ({features.llm_relevance:.0f}/10)")
 
         if features.interest_similarity is not None and features.interest_similarity > 0.5:
-            explanations.append("Closely matches papers you saved")
+            if features.interest_source == "learned":
+                explanations.append("Matches your learned interest model")
+            else:
+                explanations.append("Closely matches papers you saved")
 
         if ranked_paper.entry_data.get("resource_links"):
             explanations.append("Code or dataset available")

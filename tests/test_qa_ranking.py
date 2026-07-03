@@ -225,6 +225,9 @@ class ExplainScoreTests(unittest.TestCase):
             "citation_bonus",
             "venue_bonus",
             "interest_bonus",
+            # Honest labeling of the interest component ("learned" vs
+            # "centroid"), added with the learned ranker (Wave 2).
+            "interest_source",
             "recency_multiplier",
             "base_score",
             "feedback_bonus",

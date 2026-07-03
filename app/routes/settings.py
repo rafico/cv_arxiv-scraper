@@ -97,8 +97,10 @@ def _build_llm_view_model(config: dict) -> dict:
 def view_settings():
     from app.models import ScrapeRun
     from app.services.email_digest import (
+        DIGEST_WEEKDAY_KEYS,
         build_digest_preview,
         check_gmail_auth_status,
+        get_digest_config,
         get_digest_history,
         get_digest_status_snapshot,
         get_setup_instructions,
@@ -126,8 +128,24 @@ def view_settings():
     redirect_uri_check = validate_credentials_redirect_uris(callback_uri)
 
     from app.services.cron import get_cron_status
+    from app.services.learned_ranker import model_status as learned_model_status
     from app.services.mendeley import MendeleyClient
     from app.services.zotero import ZoteroClient
+
+    try:
+        learned_status = learned_model_status(current_app._get_current_object())
+    except Exception:  # settings page must render even if the ranker breaks
+        LOGGER.warning("Learned-ranker status unavailable", exc_info=True)
+        learned_status = {
+            "enabled": bool(preferences["learned"]["enabled"]),
+            "available": False,
+            "n_positive": 0,
+            "n_negative": 0,
+            "needed_positive": 5,
+            "trained_at": None,
+            "last_auc": None,
+            "last_f1": None,
+        }
 
     mendeley_status = MendeleyClient().check_connection()
     zotero_client = ZoteroClient()
@@ -145,10 +163,13 @@ def view_settings():
         section=section,
         whitelists=config["whitelists"],
         preferences=preferences,
+        learned_status=learned_status,
         email_config={
             "recipient": email_cfg.get("recipient", ""),
             "subject_prefix": email_cfg.get("subject_prefix", "ArXiv Digest"),
         },
+        digest_config=get_digest_config(current_app._get_current_object()),
+        digest_weekday_keys=DIGEST_WEEKDAY_KEYS,
         gmail_status=gmail_status,
         gmail_setup_steps=gmail_setup_steps,
         redirect_uri_check=redirect_uri_check,
@@ -305,6 +326,45 @@ def save_email_settings():
     return redirect(url_for("settings.view_settings", section="automation"))
 
 
+@settings_bp.route("/settings/digest-options", methods=["POST"])
+def save_digest_options():
+    """Persist the digest schedule/content controls (config `digest:` block)."""
+    validate_csrf_token()
+
+    from app.services.email_digest import DIGEST_WEEKDAY_KEYS
+
+    weekdays = [day for day in DIGEST_WEEKDAY_KEYS if request.form.get(f"digest_weekday_{day}")]
+    if not weekdays:
+        flash("Select at least one weekday for the digest.", "error")
+        return redirect(url_for("settings.view_settings", section="automation"))
+
+    try:
+        min_score = float(request.form.get("digest_min_score", "0").strip() or "0")
+        max_papers = int(request.form.get("digest_max_papers", "15").strip() or "15")
+    except (TypeError, ValueError):
+        flash("Minimum score must be a number and max papers an integer.", "error")
+        return redirect(url_for("settings.view_settings", section="automation"))
+
+    digest_cfg = {
+        "weekdays": weekdays,
+        "min_score": min_score,
+        "max_papers": max_papers,
+    }
+    base_url = request.form.get("digest_base_url", "").strip()
+    if base_url:
+        digest_cfg["base_url"] = base_url.rstrip("/")
+
+    rotate_csrf_token()
+    try:
+        _save_config_key("digest", digest_cfg)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("settings.view_settings", section="automation"))
+
+    flash("Digest options saved.", "success")
+    return redirect(url_for("settings.view_settings", section="automation"))
+
+
 @settings_bp.route("/settings/llm", methods=["POST"])
 def save_llm_settings():
     validate_csrf_token()
@@ -442,7 +502,9 @@ def send_test_digest():
     from app.services.email_digest import send_digest
 
     try:
-        info = send_digest(current_app._get_current_object())
+        # force=True: a manual test send must go out even on a weekday the
+        # scheduled digest is configured to skip.
+        info = send_digest(current_app._get_current_object(), force=True)
         flash(
             f"Test digest sent to {info['recipient']} ({info['papers_count']} papers).",
             "success",
