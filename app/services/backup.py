@@ -133,15 +133,6 @@ def create_backup(
     return buffer.getvalue()
 
 
-def _is_within(base: Path, target: Path) -> bool:
-    """True when ``target`` resolves to a path inside ``base`` (or is ``base``)."""
-    try:
-        target.relative_to(base)
-    except ValueError:
-        return False
-    return True
-
-
 def _safe_extract(tar: tarfile.TarFile, dest_dir: Path, *, max_total_bytes: int) -> None:
     """Extract ``tar`` into ``dest_dir`` with path-traversal and size protection.
 
@@ -165,7 +156,7 @@ def _safe_extract(tar: tarfile.TarFile, dest_dir: Path, *, max_total_bytes: int)
         if member_path.is_absolute() or ".." in member_path.parts:
             raise ValueError(f"Unsafe path in archive: {name!r}")
         resolved = (dest_root / member_path).resolve()
-        if not _is_within(dest_root, resolved):
+        if not resolved.is_relative_to(dest_root):
             raise ValueError(f"Unsafe path in archive: {name!r}")
         # Reject symlinks/hardlinks/devices: only regular files and dirs belong here.
         if not (member.isfile() or member.isdir()):

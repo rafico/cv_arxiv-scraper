@@ -44,33 +44,18 @@ class ZoteroClientTests(unittest.TestCase):
         return ZoteroClient(credentials_path=self.creds_path)
 
     @patch("app.services.zotero.requests.post")
-    def test_add_item_posts_to_api(self, mock_post):
+    def test_sync_posts_to_api(self, mock_post):
         self._write_creds()
         mock_post.return_value = Mock(status_code=200)
         mock_post.return_value.raise_for_status = Mock()
 
         client = self._client()
-        result = client.add_item(_make_paper())
+        result = client.sync_saved_papers([_make_paper()])
 
         self.assertTrue(result["success"])
         mock_post.assert_called_once()
         call_url = mock_post.call_args[0][0]
         self.assertIn("/users/12345/items", call_url)
-
-    @patch("app.services.zotero.requests.post")
-    def test_add_item_reports_failure_when_zotero_rejects(self, mock_post):
-        # Zotero returns HTTP 200 even when it rejects the item; the outcome is in
-        # the body's `failed` map. Treating any 200 as success was silent data loss.
-        self._write_creds()
-        resp = Mock(status_code=200)
-        resp.raise_for_status = Mock()
-        resp.json.return_value = {"successful": {}, "failed": {"0": {"code": 400, "message": "bad item"}}}
-        mock_post.return_value = resp
-
-        result = self._client().add_item(_make_paper())
-
-        self.assertFalse(result["success"])
-        self.assertIn("bad item", result["message"])
 
     @patch("app.services.zotero.requests.post")
     def test_sync_counts_only_accepted_items(self, mock_post):
@@ -86,13 +71,13 @@ class ZoteroClientTests(unittest.TestCase):
         self.assertEqual(result["synced_count"], 0)
 
     @patch("app.services.zotero.requests.post")
-    def test_add_item_maps_paper_fields_to_zotero_schema(self, mock_post):
+    def test_sync_maps_paper_fields_to_zotero_schema(self, mock_post):
         self._write_creds()
         mock_post.return_value = Mock(status_code=200)
         mock_post.return_value.raise_for_status = Mock()
 
         client = self._client()
-        client.add_item(_make_paper())
+        client.sync_saved_papers([_make_paper()])
 
         call_kwargs = mock_post.call_args
         items = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
@@ -179,13 +164,13 @@ class ZoteroClientTests(unittest.TestCase):
         self.assertEqual(result["item_keys"], {0: "AAA", 1: "BBB"})
 
     @patch("app.services.zotero.requests.post")
-    def test_add_item_with_collection_key(self, mock_post):
+    def test_sync_with_collection_key(self, mock_post):
         self._write_creds()
         mock_post.return_value = Mock(status_code=200)
         mock_post.return_value.raise_for_status = Mock()
 
         client = self._client()
-        client.add_item(_make_paper(), collection_key="COL123")
+        client.sync_saved_papers([_make_paper()], collection_key="COL123")
 
         items = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
         self.assertEqual(items[0]["collections"], ["COL123"])

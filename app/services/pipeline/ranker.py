@@ -4,15 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Protocol
+from typing import Any
 
 from app.services.matching import MATCH_PRIORITY
 from app.services.pipeline.candidate_generation import ScoredCandidate
-from app.services.pipeline.features import (
-    DefaultFeatureExtractor,
-    FeatureExtractor,
-    FeatureVector,
-)
+from app.services.pipeline.features import DefaultFeatureExtractor, FeatureVector
 from app.services.ranking import compute_paper_score
 
 
@@ -79,12 +75,6 @@ class RankedPaper:
         }
 
 
-class Ranker(Protocol):
-    """Protocol for ranking strategies."""
-
-    def rank(self, candidates: list[ScoredCandidate]) -> list[RankedPaper]: ...
-
-
 class WeightedSumRanker:
     """Ranks candidates using a weighted sum of features.
 
@@ -92,14 +82,9 @@ class WeightedSumRanker:
     in a single canonical location.
     """
 
-    def __init__(
-        self,
-        config: dict | None = None,
-        feature_extractor: FeatureExtractor | None = None,
-        interest_profile=None,
-    ) -> None:
+    def __init__(self, config: dict | None = None, interest_profile=None) -> None:
         self.config = config
-        self.extractor = feature_extractor or DefaultFeatureExtractor(config, interest_profile=interest_profile)
+        self.extractor = DefaultFeatureExtractor(config, interest_profile=interest_profile)
 
     def rank(self, candidates: list[ScoredCandidate]) -> list[RankedPaper]:
         ranked = []
@@ -135,57 +120,3 @@ class WeightedSumRanker:
             reverse=True,
         )
         return ranked
-
-    def generate_explanation(self, ranked_paper: RankedPaper) -> list[str]:
-        """Generate human-readable explanation strings for a ranked paper."""
-        explanations: list[str] = []
-        features = ranked_paper.features
-        matched_terms = ranked_paper.matched_terms[:3]
-
-        for mt in ranked_paper.match_types:
-            if mt == "Author":
-                if matched_terms:
-                    explanations.append(f"Matched author: {matched_terms[0]}")
-                else:
-                    explanations.append("Matched author in your watchlist")
-            elif mt == "Affiliation":
-                if matched_terms:
-                    explanations.append(f"From tracked institution: {matched_terms[0]}")
-                else:
-                    explanations.append("From a tracked institution")
-            elif mt == "Title":
-                if matched_terms:
-                    explanations.append(f"Title matches: {', '.join(matched_terms)}")
-                else:
-                    explanations.append("Title matches your interests")
-            elif mt == "Interest":
-                explanations.append("Matched your learned interests")
-
-        if features.venue and features.acceptance_status and features.acceptance_status != "mentioned":
-            venue_label = f"{features.venue} {features.venue_year}" if features.venue_year else features.venue
-            if features.acceptance_status in ("oral", "spotlight", "highlight"):
-                explanations.append(f"Accepted at {venue_label} ({features.acceptance_status})")
-            elif features.acceptance_status == "workshop":
-                explanations.append(f"{venue_label} workshop paper")
-            else:
-                explanations.append(f"Accepted at {venue_label}")
-
-        if features.citation_count and features.citation_count > 10:
-            explanations.append(f"Highly cited ({features.citation_count} citations)")
-
-        if features.recency > 0.9:
-            explanations.append("Published very recently")
-
-        if features.llm_relevance is not None and features.llm_relevance >= 7:
-            explanations.append(f"AI rated highly relevant ({features.llm_relevance:.0f}/10)")
-
-        if features.interest_similarity is not None and features.interest_similarity > 0.5:
-            if features.interest_source == "learned":
-                explanations.append("Matches your learned interest model")
-            else:
-                explanations.append("Closely matches papers you saved")
-
-        if ranked_paper.entry_data.get("resource_links"):
-            explanations.append("Code or dataset available")
-
-        return explanations

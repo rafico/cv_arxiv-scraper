@@ -11,11 +11,9 @@ from app import _resolve_config_path
 from app.ingest import run_scrape
 from app.rank import get_preferences
 from app.search_ import now_utc
-from app.services.jobs import SCRAPE_JOB_MANAGER as LEGACY_JOB_MANAGER
 from app.services.preferences import get_preferences as legacy_get_preferences
 from app.services.scrape_engine import run_scrape as legacy_run_scrape
 from app.services.text import now_utc as legacy_now_utc
-from app.web import SCRAPE_JOB_MANAGER
 
 
 class SemanticPackageTests(unittest.TestCase):
@@ -23,7 +21,6 @@ class SemanticPackageTests(unittest.TestCase):
         self.assertIs(run_scrape, legacy_run_scrape)
         self.assertIs(get_preferences, legacy_get_preferences)
         self.assertIs(now_utc, legacy_now_utc)
-        self.assertIs(SCRAPE_JOB_MANAGER, LEGACY_JOB_MANAGER)
 
     def test_submodule_aliases_share_underlying_modules(self):
         self.assertIs(

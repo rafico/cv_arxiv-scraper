@@ -218,12 +218,6 @@ class TestVenueFeatures:
             acceptance_status="oral",
         )
 
-    def test_venue_explanation_line(self):
-        candidate = _make_candidate(["Title"], ["Vision"], date(2026, 4, 1), comment="Accepted to ECCV 2026")
-        ranker = WeightedSumRanker()
-        ranked = ranker.rank([candidate])[0]
-        assert "Accepted at ECCV 2026" in ranker.generate_explanation(ranked)
-
     def test_no_comment_leaves_venue_unset(self):
         candidate = _make_candidate(["Title"], ["Vision"], date(2026, 4, 1))
         ranked = WeightedSumRanker().rank([candidate])[0]
@@ -332,26 +326,3 @@ class TestRankerSorting:
         assert "publication_dt" in result
         assert result["match_type"] == "Author + Title"
         assert result["matches"] == ["Ng", "Nerf"]
-
-
-class TestRankerExplanation:
-    def test_author_explanation(self):
-        candidate = _make_candidate(["Author"], ["Andrew Y. Ng"], date(2026, 4, 1))
-        ranker = WeightedSumRanker()
-        ranked = ranker.rank([candidate])
-        explanations = ranker.generate_explanation(ranked[0])
-        assert any("Matched author" in e for e in explanations)
-
-    def test_citation_explanation(self):
-        candidate = _make_candidate(["Title"], ["SAR"], date(2026, 4, 1), citation_count=100)
-        ranker = WeightedSumRanker()
-        ranked = ranker.rank([candidate])
-        explanations = ranker.generate_explanation(ranked[0])
-        assert any("cited" in e.lower() for e in explanations)
-
-    def test_recency_explanation(self):
-        candidate = _make_candidate(["Title"], ["MOT"], date.today())
-        ranker = WeightedSumRanker()
-        ranked = ranker.rank([candidate])
-        explanations = ranker.generate_explanation(ranked[0])
-        assert any("recently" in e.lower() for e in explanations)
