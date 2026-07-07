@@ -38,7 +38,7 @@ from here — add logic here, not there.
   (save/skip/priority/shared actions — **toggling**: re-applying an action clears
   it), `onboarding.py` (cold-start: ingests pasted arXiv IDs as implicit saves to
   seed the profile; active-learning `select_uncertain_papers` surfaces boundary
-  papers), `metrics.py`, `recommendations.py`,
+  papers), `metrics.py`,
   `preferences.py` (reads/writes `config.yaml` via `save_config` — atomic with an
   in-place fallback for bind-mounted destinations).
 
@@ -48,7 +48,7 @@ from here — add logic here, not there.
   hybrid/RRF), `rag.py` (chat-with-saved-papers: retrieves over the **saved**
   corpus via hybrid search, optionally synthesizes via the LLM client; degrades to
   retrieval-only when `llm.enabled` is false), `related.py`, `corpus_analysis.py`,
-  `saved_search.py`, `pdf_extraction.py` (`extract_and_store_sections`),
+  `saved_search.py`, `pdf_extraction.py`,
   `summary.py`, `text.py`.
 
 **Outputs / integrations**

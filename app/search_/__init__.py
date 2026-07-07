@@ -4,7 +4,6 @@ from app.services.corpus_analysis import analyze_topic_clusters, detect_emerging
 from app.services.embed_backfill import backfill_embeddings
 from app.services.embeddings import EmbeddingService, get_embedding_service, reset_embedding_service
 from app.services.export import generate_html_report
-from app.services.pdf_extraction import extract_and_store_sections
 from app.services.related import build_vector, cosine_similarity, find_duplicates, top_related_papers
 from app.services.saved_search import execute_saved_search, validate_saved_search
 from app.services.search import RRF_K, search_bm25, search_hybrid, search_semantic
@@ -23,7 +22,6 @@ __all__ = [
     "cosine_similarity",
     "detect_emerging_topics",
     "execute_saved_search",
-    "extract_and_store_sections",
     "extract_topic_tags",
     "find_duplicates",
     "find_neighbor_papers",

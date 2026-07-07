@@ -205,31 +205,6 @@ class ZoteroClient:
         """
         return ZoteroClient._batch_result_map(resp, "successful")
 
-    def add_item(self, paper: Paper, collection_key: str | None = None) -> dict:
-        """Add a paper to the user's Zotero library.
-
-        Returns dict with ``success``, ``message``.
-        """
-        item = self._paper_to_zotero_item(paper, collection_key)
-
-        try:
-            resp = requests.post(
-                f"{self._user_url()}/items",
-                headers=self._get_headers(),
-                json=[item],
-                timeout=30,
-            )
-            resp.raise_for_status()
-        except requests.RequestException as exc:
-            return {"success": False, "message": f"Failed to add item: {exc}"}
-
-        failed = self._failed_items(resp)
-        if failed:
-            reason: object = next(iter(failed.values()), {})
-            message = reason.get("message") if isinstance(reason, dict) else None
-            return {"success": False, "message": f"Zotero rejected the item: {message or 'unknown error'}"}
-        return {"success": True, "message": "Item added to Zotero."}
-
     def sync_saved_papers(
         self,
         papers: list[Paper],

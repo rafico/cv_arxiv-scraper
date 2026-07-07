@@ -5,7 +5,7 @@ from __future__ import annotations
 import email.utils
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Protocol
@@ -110,22 +110,7 @@ class PaperCandidate:
     resource_links: list[dict[str, str]] = field(default_factory=list)
 
     def to_entry_dict(self) -> dict[str, Any]:
-        return {
-            "arxiv_id": self.arxiv_id,
-            "link": self.link,
-            "title": self.title,
-            "author": self.author,
-            "authors_list": list(self.authors_list),
-            "abstract": self.abstract,
-            "published": self.published,
-            "publication_dt": self.publication_dt,
-            "publication_date": self.publication_date,
-            "categories": list(self.categories),
-            "comment": self.comment,
-            "doi": self.doi,
-            "api_affiliations": self.api_affiliations,
-            "resource_links": [dict(resource) for resource in self.resource_links],
-        }
+        return asdict(self)
 
     @classmethod
     def from_entry_dict(cls, entry: Mapping[str, Any]) -> PaperCandidate:

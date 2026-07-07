@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
-from typing import Any, Protocol
+from dataclasses import asdict, dataclass
+from typing import Any
 
 from app.services.pipeline.candidate_generation import ScoredCandidate
 from app.services.ranking import (
@@ -46,33 +46,7 @@ class FeatureVector:
     interest_source: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "author_match_score": self.author_match_score,
-            "affiliation_match_score": self.affiliation_match_score,
-            "title_match_score": self.title_match_score,
-            "term_count": self.term_count,
-            "term_score": self.term_score,
-            "resource_count": self.resource_count,
-            "resource_score": self.resource_score,
-            "recency": self.recency,
-            "llm_relevance": self.llm_relevance,
-            "llm_bonus": self.llm_bonus,
-            "citation_count": self.citation_count,
-            "citation_bonus": self.citation_bonus,
-            "venue": self.venue,
-            "venue_year": self.venue_year,
-            "acceptance_status": self.acceptance_status,
-            "venue_bonus": self.venue_bonus,
-            "interest_similarity": self.interest_similarity,
-            "interest_bonus": self.interest_bonus,
-            "interest_source": self.interest_source,
-        }
-
-
-class FeatureExtractor(Protocol):
-    """Protocol for extracting scoring features from a candidate."""
-
-    def extract(self, candidate: ScoredCandidate) -> FeatureVector: ...
+        return asdict(self)
 
 
 _UNRESOLVED = object()

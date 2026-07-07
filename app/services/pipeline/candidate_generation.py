@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
 import requests
 
@@ -28,12 +28,6 @@ class ScoredCandidate:
     matched_terms: list[str]
     pdf_content: bytes | None = None
     raw_features: dict[str, Any] = field(default_factory=dict)
-
-
-class CandidateGenerator(Protocol):
-    """Protocol for candidate generation strategies."""
-
-    def generate(self, papers: list[dict[str, Any]]) -> list[ScoredCandidate]: ...
 
 
 class WhitelistCandidateGenerator:
