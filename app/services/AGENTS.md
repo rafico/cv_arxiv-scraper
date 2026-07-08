@@ -30,7 +30,7 @@ from here — add logic here, not there.
 - `openalex.py`, `citations.py`.
 
 **Ranking / matching** — see [pipeline/](pipeline)
-- `pipeline/` — `FeatureExtractor`, candidate generation, `ranker`.
+- `pipeline/` — feature extraction, candidate generation, `ranker`.
 - `matching.py` (author/whitelist matching), `ranking.py`, `venues.py`
   (`parse_venue` detects conference acceptance from arXiv comments),
   `interest_model.py` (learned interest centroids from feedback + the FAISS
