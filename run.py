@@ -127,7 +127,9 @@ def main(argv=None, *, app_factory=create_app, timer_factory=Timer, browser_open
 
     app = app_factory()
 
-    if not args.no_browser:
+    # The Flask debug reloader re-executes run.py in a child process (and again
+    # on every code change); only the original parent should open the browser.
+    if not args.no_browser and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         _schedule_browser(args.host, port, timer_factory=timer_factory, browser_opener=browser_opener)
 
     if args.debug:
