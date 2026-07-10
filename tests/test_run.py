@@ -57,6 +57,22 @@ class RunEntryPointTests(unittest.TestCase):
 
         timer_factory.assert_not_called()
 
+    def test_reloader_child_process_skips_auto_open_timer(self):
+        # Flask's debug reloader re-runs run.py with WERKZEUG_RUN_MAIN=true;
+        # opening the browser there would spawn a tab on start and every reload.
+        fake_app = Mock()
+        timer_factory = Mock()
+
+        with patch.dict("os.environ", {"WERKZEUG_RUN_MAIN": "true"}):
+            run.main(
+                ["--debug", "--port", "5124"],
+                app_factory=lambda: fake_app,
+                timer_factory=timer_factory,
+                browser_opener=Mock(),
+            )
+
+        timer_factory.assert_not_called()
+
     def test_find_free_port_skips_bound_ports(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(("127.0.0.1", 0))
