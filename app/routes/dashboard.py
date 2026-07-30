@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.services.feedback import get_feedback_snapshot
 from app.services.implementation_readiness import implementation_readiness
+from app.services.interest_model import MIN_POSITIVE_FEEDBACK, POSITIVE_ACTIONS
 from app.services.preferences import first_author_name, get_preferences
 from app.services.ranking import (
     combined_rank_score,
@@ -262,9 +263,14 @@ def _build_filter_options(query: Query) -> dict:
     }
 
 
-def _build_onboarding_steps(config: dict, *, saved_count: int, has_successful_scrape: bool) -> list[dict]:
+def _build_onboarding_steps(config: dict, *, positive_count: int, has_successful_scrape: bool) -> list[dict]:
     interest_total = _interest_counts(config)["total"]
-    return [
+    # The learned ranker, the centroid interest profile and whitelist-free
+    # dense-retrieval admission all stay inert below MIN_POSITIVE_FEEDBACK
+    # positives, so the step is only "done" at the threshold that actually
+    # switches them on — not at the first save.
+    remaining = max(0, MIN_POSITIVE_FEEDBACK - positive_count)
+    steps = [
         {
             "label": "Add interests",
             "description": "Track the authors, labs, and topics you care about.",
@@ -279,11 +285,29 @@ def _build_onboarding_steps(config: dict, *, saved_count: int, has_successful_sc
         },
         {
             "label": "Save or skip papers",
-            "description": "Save what matters, skip the rest. This trains your ranking.",
-            "complete": saved_count > 0 or PaperFeedback.query.count() > 0,
+            "description": (
+                f"Saved {positive_count}/{MIN_POSITIVE_FEEDBACK}. "
+                f"Save {remaining} more to switch on learned ranking and "
+                "recommendations beyond your whitelists."
+                if remaining
+                else "Learned ranking is active. Keep saving and skipping to sharpen it."
+            ),
+            "complete": remaining == 0,
             "href": "/",
         },
     ]
+    if not (config.get("email", {}) or {}).get("recipient"):
+        # The digest carries the one-tap feedback links, so an unconfigured
+        # digest is a hole in the training loop, not just a missing email.
+        steps.append(
+            {
+                "label": "Set a digest recipient",
+                "description": "Email digests train your ranking from one-tap 👍/👎 links.",
+                "complete": False,
+                "href": "/settings?section=automation",
+            }
+        )
+    return steps
 
 
 def _build_dashboard_overview(config: dict) -> dict:
@@ -314,9 +338,14 @@ def _build_dashboard_overview(config: dict) -> dict:
         }
 
     saved_count = PaperFeedback.query.filter_by(action=FeedbackAction.SAVE.value).count()
+    # Count the actions the centroid profile treats as positive (the stricter of
+    # the two POSITIVE_ACTIONS sets), so hitting the threshold activates both the
+    # centroid and the learned model rather than only one of them.
+    positive_count = PaperFeedback.query.filter(PaperFeedback.action.in_(POSITIVE_ACTIONS)).count()
 
     return {
         "saved_count": saved_count,
+        "positive_count": positive_count,
         "interest_counts": _interest_counts(config),
         "latest_scrape": latest_scrape_view,
         "latest_digest": latest_digest_view,
@@ -325,7 +354,7 @@ def _build_dashboard_overview(config: dict) -> dict:
         "digest_history": DigestRun.query.order_by(DigestRun.started_at.desc()).limit(5).all(),
         "onboarding_steps": _build_onboarding_steps(
             config,
-            saved_count=saved_count,
+            positive_count=positive_count,
             has_successful_scrape=has_successful_scrape,
         ),
     }

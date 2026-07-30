@@ -526,7 +526,11 @@ def _extract_sections(app, results: list[dict]) -> None:
     down the scrape.
     """
     scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {})
-    if not scraper_config.get("extract_sections", False):
+    # On by default: per-paper chat, corpus chat and citation verification all
+    # read PaperSection rows, so an off-by-default flag left them permanently
+    # empty. Set scraper.extract_sections: false to opt out (it costs one arXiv
+    # HTML fetch per paper, deadline-bounded, with a pdfplumber fallback).
+    if not scraper_config.get("extract_sections", True):
         return
 
     from app.models import Paper, PaperSection, db

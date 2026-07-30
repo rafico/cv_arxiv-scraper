@@ -1118,6 +1118,41 @@
                     </div>
                 </div>
 
+                {% if feature_status %}
+                <div class="rounded-2xl border border-edge bg-surface p-5">
+                    <h3 class="text-base font-semibold text-fg">Feature Status</h3>
+                    <p class="mt-1 text-sm text-fg-muted">Whether each feature is actually receiving data. A healthy server can still have an idle feature.</p>
+                    <div class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+                        <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Full Text</div>
+                            <div class="mt-2 text-sm font-semibold {{ 'text-fg' if feature_status.sections_papers else 'text-priority' }}">{{ feature_status.sections_papers }} of {{ feature_status.papers }} papers</div>
+                            <div class="mt-1 text-xs text-fg-muted">{% if feature_status.sections_papers %}Powers per-paper chat, corpus chat and citation verification.{% else %}No sections stored — chat and citation verification have nothing to quote. Check <code>scraper.extract_sections</code>.{% endif %}</div>
+                        </div>
+                        <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Learned Ranking</div>
+                            <div class="mt-2 text-sm font-semibold {{ 'text-fg' if feature_status.interest_signal_ready else 'text-priority' }}">{% if feature_status.interest_signal_ready %}Active{% else %}{{ feature_status.positive_feedback_needed }} more saved paper{{ 's' if feature_status.positive_feedback_needed != 1 }} needed{% endif %}</div>
+                            <div class="mt-1 text-xs text-fg-muted">{{ feature_status.positive_feedback }} positive rating{{ 's' if feature_status.positive_feedback != 1 }} so far. Below the threshold the ranker, the interest profile and off-whitelist recommendations all stay off.</div>
+                        </div>
+                        <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Beyond Whitelists</div>
+                            <div class="mt-2 text-sm font-semibold {{ 'text-fg' if feature_status.dense_retrieval_papers else 'text-priority' }}">{{ feature_status.dense_retrieval_papers }} papers</div>
+                            <div class="mt-1 text-xs text-fg-muted">Found by interest similarity rather than an author/title/affiliation match. Needs learned ranking active.</div>
+                        </div>
+                        <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Enrichment</div>
+                            <div class="mt-2 text-sm font-semibold text-fg">{{ feature_status.citations_papers }} cited · {{ feature_status.openalex_papers }} OpenAlex</div>
+                            <div class="mt-1 text-xs text-fg-muted">Low coverage usually means a missing API key or rate limiting — see Data Sources above.</div>
+                        </div>
+                    </div>
+                    {% if feature_status.last_digest_error %}
+                    <div class="mt-4 rounded-xl border border-edge bg-surface-2 px-4 py-3">
+                        <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Last Digest Failed</div>
+                        <div class="mt-2 text-xs text-rose-600">{{ feature_status.last_digest_error }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
                 <div class="rounded-2xl border border-edge bg-surface p-5">
                     <h3 class="text-base font-semibold text-fg">Recent Automation Runs</h3>
                     <div class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">

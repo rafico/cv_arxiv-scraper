@@ -139,6 +139,8 @@ paper you half-remember even when you don't have its words.
 **💬 Ask your own library questions.**
 Chat with the papers you've saved (**Discover → Chat with your saved papers**): grounded,
 cited answers when an LLM is enabled, and the most relevant saved papers listed when it isn't.
+Per-paper chat, corpus chat, and citation verification all read the full text captured by
+`scraper.extract_sections` (on by default) — with it off, they have nothing to quote.
 
 **🔒 Private and offline-first.**
 Everything runs on localhost with no account. The core — scraping, ranking, semantic search,

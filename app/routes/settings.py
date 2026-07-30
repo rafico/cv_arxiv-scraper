@@ -160,6 +160,10 @@ def view_settings():
             card["status"] = {"available": False, "needed_positive": 5, "last_auc": None}
         profile_cards.append(card)
 
+    from app.services.metrics import feature_liveness
+
+    feature_status = feature_liveness()
+
     mendeley_status = MendeleyClient().check_connection()
     zotero_client = ZoteroClient()
     zotero_status = zotero_client.check_connection()
@@ -177,6 +181,7 @@ def view_settings():
         whitelists=config["whitelists"],
         preferences=preferences,
         learned_status=learned_status,
+        feature_status=feature_status,
         interest_profiles=profile_cards,
         email_config={
             "recipient": email_cfg.get("recipient", ""),

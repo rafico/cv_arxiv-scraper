@@ -34,13 +34,27 @@ class HealthzEndpointTests(FlaskDBTestCase):
 
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
-        self.assertEqual(set(data), {"status", "version", "db_ok", "faiss_ok", "paper_count"})
+        self.assertEqual(set(data), {"status", "version", "db_ok", "faiss_ok", "paper_count", "features"})
         self.assertEqual(data["status"], "ok")
         self.assertEqual(data["version"], __version__)
         self.assertIs(data["db_ok"], True)
         self.assertIsInstance(data["faiss_ok"], bool)
         self.assertIsInstance(data["paper_count"], int)
         self.assertGreaterEqual(data["paper_count"], 0)
+
+    def test_healthz_stays_ok_when_every_feature_is_idle(self):
+        # An empty corpus is a fresh install, not a failure: the feature counters are
+        # diagnostics and must never flip the status the Docker healthcheck gates on.
+        with self.app.test_client() as client:
+            resp = client.get("/healthz")
+
+        self.assertEqual(resp.status_code, 200)
+        features = resp.get_json()["features"]
+        self.assertEqual(resp.get_json()["status"], "ok")
+        self.assertEqual(features["sections_papers"], 0)
+        self.assertEqual(features["positive_feedback"], 0)
+        self.assertIs(features["interest_signal_ready"], False)
+        self.assertIsNone(features["last_digest_status"])
 
     def test_healthz_is_top_level_not_under_api_prefix(self):
         # Must live at /healthz (probes/healthchecks target that), not /api/healthz.

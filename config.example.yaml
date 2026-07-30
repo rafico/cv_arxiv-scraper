@@ -24,6 +24,12 @@ scraper:
   pdf_max_header_lines: 50
   pdf_smart_header: true
   thumbnail_dpi: 150
+  # Full-text section extraction (arXiv HTML first, pdfplumber fallback). Stores
+  # PaperSection rows, which are what "Ask this paper", corpus chat and citation
+  # verification read — leave it on unless you only want titles/abstracts. Costs
+  # roughly one extra HTTP fetch per new paper; the stage is deadline-bounded and
+  # non-fatal, so a slow run skips the remainder instead of failing the scrape.
+  extract_sections: true
 ingest:
   backends:
     - rss

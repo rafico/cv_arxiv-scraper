@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/), and the project aims to
 follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Activation pass: several Wave 1–3 features shipped but stayed inert on a real
+install. Nothing here adds capability — it makes what already exists run.
+
+### Changed
+- **Full-text section extraction is on by default.** `scraper.extract_sections`
+  previously defaulted to `false` and was documented in no config file, so
+  per-paper chat, corpus chat, and citation verification had no `PaperSection`
+  rows to read. It is now on and documented in `config.example.yaml`; set it to
+  `false` to opt out (it costs roughly one extra HTTP fetch per new paper).
+- **The onboarding checklist tracks the real activation threshold.** The "Save or
+  skip papers" step completed after a single save, while the centroid interest
+  profile, the learned ranker, and whitelist-free dense-retrieval admission all
+  stay inert below `MIN_POSITIVE_FEEDBACK` (5). It now shows progress (`n/5`) and
+  completes at the threshold that actually switches ranking on.
+
+### Added
+- **Feature-liveness diagnostics.** `/healthz` gained a `features` block (section
+  coverage, positive-feedback progress, off-whitelist admissions, last digest
+  status, enrichment coverage) and Settings → Automation gained a matching
+  "Feature Status" card. These are diagnostics only: the 200/503 status the
+  Docker healthcheck gates on is unchanged, since an empty corpus is a fresh
+  install rather than a failure.
+- **A "Set a digest recipient" onboarding step** when `email.recipient` is empty —
+  the digest carries the one-tap 👍/👎 links that train the ranker.
+
+### Fixed
+- **A misconfigured digest no longer fails invisibly.** A missing
+  `email.recipient` raised before any `DigestRun` row was created, so nightly
+  cron failures left no trace outside `cron.log` and the Settings digest panel
+  showed "No digest runs yet". The misconfiguration is now recorded as an errored
+  run before the error propagates.
+
 ## [0.4.0] — 2026-07-03
 
 Wave 3 completion: HTML-first full-text extraction and a local MCP server.

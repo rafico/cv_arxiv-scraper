@@ -1067,7 +1067,18 @@ def send_digest(app: Flask, *, dry_run: bool = False, force: bool = False) -> di
 
     recipient = email_cfg["recipient"]
     if not recipient:
-        raise ValueError("No recipient configured. Set 'email.recipient' in config.yaml.")
+        # Record the misconfiguration as an errored run before raising. The nightly
+        # cron trips this on every run, and without a DigestRun row the dashboard and
+        # the Settings digest panel show nothing at all — the only trace ends up in
+        # cron.log, where nobody looks.
+        message = "No recipient configured. Set 'email.recipient' in config.yaml."
+        _finish_digest_run(
+            app,
+            _create_digest_run(app, recipient="", subject="", papers_count=0, preview_only=dry_run),
+            status="error",
+            error_message=message,
+        )
+        raise ValueError(message)
 
     if not force and not weekday_allowed(digest_cfg):
         LOGGER.info("Digest skipped: %s is not in the configured weekdays", utc_today().strftime("%A"))
