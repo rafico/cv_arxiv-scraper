@@ -7,4 +7,4 @@ string assignment) so setuptools can parse it without importing the ``app``
 package (whose runtime deps are absent in an isolated build environment).
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

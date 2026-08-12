@@ -101,6 +101,27 @@ def _collect_feed_urls(app, scraper_config: dict) -> list[str]:
     return feed_urls
 
 
+def default_categories(app, scraper_config: dict) -> list[str]:
+    """arXiv categories inferred from the configured feeds, for historical search.
+
+    Parses the ``rss.arxiv.org/rss/<cat>`` (or atom) tail of every configured
+    feed URL — including enabled FeedSource rows — so a user following e.g.
+    stat.ML gets historical results from their own field, not hardcoded cs.CV.
+    Falls back to ``["cs.CV"]`` when no feed URL names an arXiv category.
+    """
+    import re
+
+    categories: list[str] = []
+    for url in _collect_feed_urls(app, scraper_config):
+        match = re.search(r"arxiv\.org/(?:rss|atom)/([\w.+-]+)", url)
+        if not match:
+            continue
+        for category in match.group(1).split("+"):
+            if category and category not in categories:
+                categories.append(category)
+    return categories or ["cs.CV"]
+
+
 def _emit(callback: EventCallback, event: str, data: dict) -> None:
     if callback:
         callback(event, data)

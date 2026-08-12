@@ -181,21 +181,21 @@ class LLMClient:
         import json
 
         system_prompt = (
-            "You analyze computer-vision research papers. Respond with STRICT JSON only, no prose, "
+            "You analyze research papers. Respond with STRICT JSON only, no prose, "
             "matching exactly this schema: "
             '{"tldr": string, "relevance": number, "tasks": [string], "datasets": [string], '
             '"method_type": string, "backbone": string or null, "why_matched": string}. '
             "tldr: specific 1-2 sentence summary, under 280 characters. "
             "relevance: 1-10 relevance to the reader's interests. "
-            "tasks: vision tasks addressed (e.g. object detection). "
-            "datasets: benchmark/dataset names evaluated on (e.g. COCO, ADE20K); [] if unclear. "
+            "tasks: research tasks/problems addressed (e.g. object detection, program synthesis). "
+            "datasets: benchmark/dataset names evaluated on; [] if unclear. "
             "method_type: one short phrase (e.g. diffusion model, transformer). "
             "backbone: main architecture/backbone, or null. "
             "why_matched: one line (under 120 chars) tying the paper to the reader's interests."
         )
         matched = ", ".join(matched_terms or []) or "none"
         user_prompt = (
-            f"Reader interests: {interests or 'General computer vision'}\n"
+            f"Reader interests: {interests or 'broad relevance to a technical reader'}\n"
             f"Matched interest terms: {matched}\n\n"
             f"Title: {title}\n\nAbstract: {abstract}"
         )
@@ -277,7 +277,8 @@ class LLMClient:
             "Rate this paper's relevance to the provided research interests from 1 to 10. Respond with ONLY a number."
         )
         user_prompt = (
-            f"Research interests: {interests or 'General computer vision'}\n\nTitle: {title}\n\nAbstract: {abstract}"
+            f"Research interests: {interests or 'broad relevance to a technical reader'}\n\n"
+            f"Title: {title}\n\nAbstract: {abstract}"
         )
         try:
             with self._semaphore:

@@ -48,8 +48,8 @@ Pick whichever fits. All three are **localhost-only, single-user, no auth** by d
 **Run it with `uvx` (no install):**
 
 ```bash
-uvx cv-arxiv-scraper serve          # once published to PyPI
-# until then, straight from git:
+uvx cv-arxiv-scraper serve
+# or straight from git:
 uvx --from git+https://github.com/rafico/cv_arxiv-scraper cv-arxiv serve
 ```
 
