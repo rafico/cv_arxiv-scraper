@@ -33,7 +33,7 @@ from here — add logic here, not there.
 - `pipeline/` — feature extraction, candidate generation, `ranker`.
 - `matching.py` (author/whitelist matching), `ranking.py`, `venues.py`
   (`parse_venue` detects conference acceptance from arXiv comments),
-  `interest_model.py` (learned interest centroids from feedback + the FAISS
+  `interest_model.py` (learned interest centroids from feedback + the vector
   index; inert below 5 saved papers), `feedback.py`
   (save/skip/priority/shared actions — **toggling**: re-applying an action clears
   it), `onboarding.py` (cold-start: ingests pasted arXiv IDs as implicit saves to
@@ -43,7 +43,7 @@ from here — add logic here, not there.
   in-place fallback for bind-mounted destinations).
 
 **Search / embeddings / corpus**
-- `embeddings.py` (`EmbeddingService`, FAISS index; singleton via
+- `embeddings.py` (`EmbeddingService`, exact NumPy vector index; singleton via
   `get_embedding_service`), `embed_backfill.py`, `search.py` (BM25 + semantic +
   hybrid/RRF), `rag.py` (chat-with-saved-papers: retrieves over the **saved**
   corpus via hybrid search, optionally synthesizes via the LLM client; degrades to
@@ -55,7 +55,7 @@ from here — add logic here, not there.
 - `email_digest.py` (Gmail OAuth + digest send; `DEFAULT_CREDENTIALS_PATH`),
   `export.py` (HTML report), `bibtex.py`, `zotero.py`, `mendeley.py`,
   `thumbnail_generator.py`, `backup.py` (one-click backup/restore: consistent
-  SQLite snapshot + FAISS index + config tarball. Restore is **staged-then-
+  SQLite snapshot + vector index + config tarball. Restore is **staged-then-
   committed** — every component is copied onto its target filesystem first so the
   commit is a same-fs rename: cross-device-safe, all-or-nothing with rollback, and
   size-bounded against decompression bombs).
@@ -67,7 +67,7 @@ from here — add logic here, not there.
 
 ## Conventions / gotchas
 
-- FAISS/sentence-transformers and other heavy deps are imported **inside
+- sentence-transformers and other heavy deps are imported **inside
   functions** to keep startup cheap and avoid cycles — match the local style.
 - Network calls go through `http_client.request_with_backoff` with a
   `rate_limit_profile` (e.g. `"bulk"`); don't hand-roll `requests` calls.

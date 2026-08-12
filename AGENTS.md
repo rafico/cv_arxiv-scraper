@@ -11,7 +11,7 @@ ranks them against the user's interests, and serves a Flask dashboard. It also
 sends email digests and exports to reference managers (Zotero, Mendeley).
 
 Stack: **Flask 3 + Flask-SQLAlchemy (SQLite) + vanilla JS/Jinja templates +
-Tailwind**. Embeddings via `sentence-transformers` + `faiss-cpu`. Python 3.10+.
+Tailwind**. Embeddings via `sentence-transformers`; exact NumPy vector search. Python 3.10+.
 
 ## Critical constraints (read before changing behavior)
 
@@ -56,7 +56,7 @@ python -m pytest -m "not slow and not e2e" -q  # fast subset while iterating
 python -m pytest tests/test_run.py -q          # a single module
 ```
 
-The full suite is multi-minute (importing `faiss`/`sentence-transformers` is
+The full suite is multi-minute (importing `sentence-transformers` is
 heavy, and `e2e` needs Playwright browsers). Iterate with `make test-fast`; run
 `make test` before pushing.
 

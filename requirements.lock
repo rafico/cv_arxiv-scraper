@@ -39,8 +39,6 @@ defusedxml==0.7.1
     # via cv-arxiv-scraper (pyproject.toml)
 distro==1.9.0
     # via openai
-faiss-cpu==1.13.2
-    # via cv-arxiv-scraper (pyproject.toml)
 feedparser==6.0.11
     # via cv-arxiv-scraper (pyproject.toml)
 filelock==3.29.0
@@ -123,7 +121,6 @@ networkx==3.6.1
 numpy==2.4.4
     # via
     #   cv-arxiv-scraper (pyproject.toml)
-    #   faiss-cpu
     #   scikit-learn
     #   scipy
     #   transformers
@@ -172,7 +169,6 @@ openai==2.32.0
     # via cv-arxiv-scraper (pyproject.toml)
 packaging==26.1
     # via
-    #   faiss-cpu
     #   gunicorn
     #   huggingface-hub
     #   transformers

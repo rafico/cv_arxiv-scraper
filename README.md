@@ -133,7 +133,7 @@ labs, topics, recency (14-day half-life by default), citations, and your feedbac
 ranking is never a black box.
 
 **🔍 Hybrid keyword + semantic search.**
-Search by exact terms, by meaning (SPECTER2 + FAISS), or both combined — so you can find the
+Search by exact terms, by meaning (SPECTER2 embeddings), or both combined — so you can find the
 paper you half-remember even when you don't have its words.
 
 **💬 Ask your own library questions.**
@@ -259,7 +259,7 @@ Edit Config):
 ```
 
 Point `CV_ARXIV_DATA_DIR` at the directory that holds your `arxiv_papers.db`,
-FAISS index, and `config.yaml` (the same dir `cv-arxiv serve --data-dir` uses).
+vector index, and `config.yaml` (the same dir `cv-arxiv serve --data-dir` uses).
 Restart Claude Desktop and the tools appear:
 
 | Tool | What it does |
@@ -377,7 +377,7 @@ download; override it with `OLLAMA_MODEL=... docker compose --profile local-ai u
 
 - **"Address already in use" / port 5000 busy** — another app holds the port. Run on another
   with `PORT=5001 python run.py --debug`.
-- **First scrape feels slow / hangs for ~30s** — importing `faiss`/`sentence-transformers` is
+- **First scrape feels slow / hangs for ~30s** — importing `sentence-transformers` is
   heavy on first load, and the first scrape fetches PDFs. This is normal; it's faster
   afterward.
 - **A few papers log PDF-extraction warnings** — non-fatal. The paper is still ingested; only
@@ -403,7 +403,7 @@ python -m pytest tests/ -v
 
 ## 🧱 Tech stack
 
-Python 3.10+ · Flask 3 · SQLite · sentence-transformers (SPECTER2) + FAISS · pdfplumber.
+Python 3.10+ · Flask 3 · SQLite · sentence-transformers (SPECTER2, exact NumPy vector search) · pdfplumber.
 Single-worker by design — scrape progress streams over SSE with no Redis or extra services.
 
 ---

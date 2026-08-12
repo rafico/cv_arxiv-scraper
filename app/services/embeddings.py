@@ -1,4 +1,12 @@
-"""SPECTER2 embeddings + FAISS vector index for paper similarity and search."""
+"""SPECTER2 embeddings + an exact inner-product vector index for similarity and search.
+
+The index is a plain float32 matrix persisted as ``papers.npy`` (sections:
+``sections.npy``) beside the unchanged ``id_map.json`` sidecars. It replaced a
+faiss ``IndexFlatIP``: search was always exact, so a NumPy matmul does the same
+work without the heavyweight dependency (or its dual-libgomp SIGSEGV
+mitigations). Legacy ``*.index`` files are migrated on first load when faiss is
+still importable; otherwise ``cv-arxiv-backfill --rebuild-index`` rebuilds.
+"""
 
 from __future__ import annotations
 
@@ -14,17 +22,8 @@ try:
 except ImportError:  # pragma: no cover - non-POSIX platforms
     fcntl = None
 
-# faiss-cpu and torch each bundle their own copy of libgomp (GNU OpenMP). Loading
-# two OpenMP runtimes into one process corrupts the heap (observed as SIGSEGV /
-# "malloc(): unaligned tcache chunk detected" during the scrape embedding stage).
-# Pin OpenMP to a single thread before faiss/torch (imported lazily below) load.
-# Overridable via the env var; the thread count is also applied programmatically
-# in _load_index()/_load_model() as defence in depth.
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-_OMP_THREADS = max(1, int(os.environ.get("OMP_NUM_THREADS", "1") or "1"))
-
-import numpy as np  # noqa: E402
-from flask import current_app, has_app_context  # noqa: E402
+import numpy as np
+from flask import current_app, has_app_context
 
 LOGGER = logging.getLogger(__name__)
 
@@ -110,48 +109,134 @@ def _index_file_lock(index_dir: str | Path) -> _ReentrantFileLock:
         return lock
 
 
+class _FlatIndex:
+    """Exact inner-product search over a float32 matrix.
+
+    The subset of ``faiss.IndexFlatIP`` this app ever used (``add`` / ``search`` /
+    ``reconstruct`` / ``reconstruct_n`` / ``ntotal``), so call sites are unchanged.
+    Exact search over a single-user corpus (well under a million 768-dim rows) is
+    a millisecond matmul — no approximate index structure needed.
+    """
+
+    def __init__(self, matrix: np.ndarray | None = None):
+        self._matrix = matrix if matrix is not None else np.empty((0, DIMENSION), dtype=np.float32)
+
+    @property
+    def ntotal(self) -> int:
+        return int(self._matrix.shape[0])
+
+    @property
+    def matrix(self) -> np.ndarray:
+        return self._matrix
+
+    def add(self, vectors: np.ndarray) -> None:
+        vecs = np.asarray(vectors, dtype=np.float32)
+        if vecs.ndim == 1:
+            vecs = vecs.reshape(1, -1)
+        # ponytail: O(n) copy per batch add; switch to chunked growth if it ever hurts.
+        self._matrix = np.vstack([self._matrix, vecs]) if self.ntotal else vecs.copy()
+
+    def search(self, query: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        """Top-k rows by inner product per query row: (scores, indices), both (q, k)."""
+        query = np.asarray(query, dtype=np.float32)
+        if query.ndim == 1:
+            query = query.reshape(1, -1)
+        if self.ntotal == 0 or k <= 0:
+            empty = np.empty((query.shape[0], 0))
+            return empty.astype(np.float32), empty.astype(np.int64)
+        k = min(k, self.ntotal)
+        scores = query @ self._matrix.T
+        top = np.argpartition(-scores, k - 1, axis=1)[:, :k]
+        order = np.argsort(-np.take_along_axis(scores, top, axis=1), axis=1, kind="stable")
+        indices = np.take_along_axis(top, order, axis=1)
+        return np.take_along_axis(scores, indices, axis=1), indices.astype(np.int64)
+
+    def reconstruct(self, row: int) -> np.ndarray:
+        return self._matrix[row].copy()
+
+    def reconstruct_n(self, start: int, count: int) -> np.ndarray:
+        return self._matrix[start : start + count].copy()
+
+
+def _read_matrix(npy_path: Path, legacy_path: Path) -> np.ndarray | None:
+    """Load the vector matrix from ``.npy``, migrating a legacy faiss file if present.
+
+    Returns None when only a legacy index exists and faiss is not importable —
+    the caller must then run read-empty with save disabled so the legacy file
+    survives for a rebuild.
+    """
+    if npy_path.exists():
+        matrix = np.load(npy_path)
+        return np.asarray(matrix, dtype=np.float32).reshape(-1, DIMENSION)
+
+    try:
+        import faiss
+
+        # The legacy dual-libgomp mitigation, scoped to this one-time migration:
+        # keep faiss' OpenMP pool single-threaded so it can't race torch's.
+        try:
+            faiss.omp_set_num_threads(1)
+        except Exception:  # pragma: no cover - older faiss builds
+            pass
+    except ImportError:
+        LOGGER.error(
+            "Legacy faiss index at %s but faiss is not installed; starting empty. "
+            "Either `pip install faiss-cpu` once to auto-migrate, or rebuild with "
+            "`cv-arxiv-backfill --rebuild-index`.",
+            legacy_path,
+        )
+        return None
+
+    legacy = faiss.read_index(str(legacy_path))
+    matrix = legacy.reconstruct_n(0, legacy.ntotal) if legacy.ntotal else np.empty((0, DIMENSION))
+    matrix = np.asarray(matrix, dtype=np.float32).reshape(-1, DIMENSION)
+    _save_matrix_atomic(matrix, npy_path)  # legacy file left untouched for rollback
+    LOGGER.info("Migrated legacy faiss index %s -> %s (%d vectors)", legacy_path.name, npy_path.name, len(matrix))
+    return matrix
+
+
+def _save_matrix_atomic(matrix: np.ndarray, npy_path: Path) -> None:
+    tmp_path = str(npy_path) + ".tmp"
+    with open(tmp_path, "wb") as f:
+        np.save(f, np.ascontiguousarray(matrix, dtype=np.float32))
+    os.replace(tmp_path, str(npy_path))
+
+
 class EmbeddingService:
-    """Manages SPECTER2 embeddings and a FAISS sidecar index."""
+    """Manages SPECTER2 embeddings and the on-disk vector index."""
 
     def __init__(self, index_dir: str | Path):
         self._index_dir = Path(index_dir)
         self._index_dir.mkdir(parents=True, exist_ok=True)
 
-        self._index_path = self._index_dir / "papers.index"
+        self._index_path = self._index_dir / "papers.npy"
+        self._legacy_index_path = self._index_dir / "papers.index"
         self._id_map_path = self._index_dir / "id_map.json"
 
         self._model = None
-        self._index = None
-        # Maps FAISS row position -> paper PK
+        self._index: _FlatIndex | None = None
+        # Maps index row position -> paper PK
         self._id_map: list[int] = []
-        # Reverse: paper PK -> FAISS row position
+        # Reverse: paper PK -> index row position
         self._pk_to_row: dict[int, int] = {}
         self._lock = threading.Lock()
         # Separate from _lock so a (slow, one-time) model load doesn't serialize
-        # with FAISS index search/add.
+        # with index search/add.
         self._model_lock = threading.Lock()
 
         self._load_index()
 
     def _load_index(self) -> None:
-        import faiss
-
-        # Keep faiss' OpenMP pool single-threaded to avoid the dual-libgomp crash.
-        try:
-            faiss.omp_set_num_threads(_OMP_THREADS)
-        except Exception:  # pragma: no cover - older faiss builds
-            pass
-
         # Persisting is safe unless we detect a corrupt/partial on-disk pair below, in
         # which case save() must NOT overwrite the surviving file with an empty/drifted
         # index — that would turn a recoverable partial state into total data loss.
         self._persistable = True
 
-        index_exists = self._index_path.exists()
+        index_exists = self._index_path.exists() or self._legacy_index_path.exists()
         map_exists = self._id_map_path.exists()
 
         if not index_exists and not map_exists:
-            self._index = faiss.IndexFlatIP(DIMENSION)
+            self._index = _FlatIndex()
             self._id_map = []
             self._pk_to_row = {}
             return
@@ -162,12 +247,12 @@ class EmbeddingService:
             # in a degraded read-empty mode and DISABLE save — the survivor is left
             # intact for a proper rebuild (cv-arxiv-backfill --rebuild-index).
             LOGGER.error(
-                "FAISS index in a partial state (papers.index=%s, id_map.json=%s); starting "
+                "Vector index in a partial state (index=%s, id_map.json=%s); starting "
                 "empty and disabling save to avoid clobbering the survivor. Rebuild to recover.",
                 index_exists,
                 map_exists,
             )
-            self._index = faiss.IndexFlatIP(DIMENSION)
+            self._index = _FlatIndex()
             self._id_map = []
             self._pk_to_row = {}
             self._persistable = False
@@ -176,7 +261,14 @@ class EmbeddingService:
         # Both present: load, then reconcile any length drift (a torn write leaves the
         # index and id_map disagreeing) down to their consistent prefix so the pair can
         # never silently mis-map rows or persist a drifted state on the next save().
-        self._index = faiss.read_index(str(self._index_path))
+        matrix = _read_matrix(self._index_path, self._legacy_index_path)
+        if matrix is None:
+            self._index = _FlatIndex()
+            self._id_map = []
+            self._pk_to_row = {}
+            self._persistable = False
+            return
+        self._index = _FlatIndex(matrix)
         with open(self._id_map_path) as f:
             self._id_map = json.load(f)
 
@@ -185,7 +277,7 @@ class EmbeddingService:
         if n != m:
             keep = min(n, m)
             LOGGER.error(
-                "FAISS index/id_map drift (index=%d, map=%d); reconciling to %d consistent rows",
+                "Vector index/id_map drift (index=%d, map=%d); reconciling to %d consistent rows",
                 n,
                 m,
                 keep,
@@ -195,17 +287,12 @@ class EmbeddingService:
             self._id_map = self._id_map[:keep]
 
         self._pk_to_row = {pk: row for row, pk in enumerate(self._id_map)}
-        LOGGER.info("Loaded FAISS index with %d vectors", self._index.ntotal)
+        LOGGER.info("Loaded vector index with %d vectors", self._index.ntotal)
 
     @staticmethod
-    def _prefix_index(index, keep: int):
+    def _prefix_index(index: _FlatIndex, keep: int) -> _FlatIndex:
         """Return a new flat index holding only the first ``keep`` vectors of ``index``."""
-        import faiss
-
-        new_index = faiss.IndexFlatIP(DIMENSION)
-        if keep > 0:
-            new_index.add(index.reconstruct_n(0, keep))
-        return new_index
+        return _FlatIndex(index.reconstruct_n(0, keep) if keep > 0 else None)
 
     def _load_model(self):
         # Double-checked locking: without the lock, two concurrent cold-start
@@ -215,13 +302,6 @@ class EmbeddingService:
         with self._model_lock:
             if self._model is not None:
                 return
-            try:
-                import torch
-
-                # Match torch' OpenMP pool to faiss' so the two libgomp copies don't race.
-                torch.set_num_threads(_OMP_THREADS)
-            except Exception:  # pragma: no cover - torch optional/absent
-                pass
             from sentence_transformers import SentenceTransformer
 
             last_exc: Exception | None = None
@@ -244,7 +324,7 @@ class EmbeddingService:
         return np.asarray(embeddings, dtype=np.float32)
 
     def add_papers(self, paper_ids: list[int], texts: list[str], vectors: list | None = None) -> int:
-        """Add papers to the FAISS index. Returns count added.
+        """Add papers to the vector index. Returns count added.
 
         `vectors` may carry precomputed (L2-normalized) embeddings aligned with
         `paper_ids`; entries that are None are encoded from the matching text.
@@ -258,7 +338,7 @@ class EmbeddingService:
         # _pk_to_row is only updated after the add loop below, so a paper_ids list
         # containing the same id twice (e.g. a paper cross-listed across two RSS
         # feeds, not deduped between feeds) would otherwise add the vector twice —
-        # orphaning a FAISS row and inflating the count.
+        # orphaning an index row and inflating the count.
         new_ids = []
         new_texts = []
         new_vectors = []
@@ -289,7 +369,7 @@ class EmbeddingService:
         return len(new_ids)
 
     def index_size(self) -> int:
-        """Number of vectors in the FAISS index. Cheap — does not load the model."""
+        """Number of vectors in the index. Cheap — does not load the model."""
         with self._lock:
             return int(self._index.ntotal)
 
@@ -385,7 +465,7 @@ class EmbeddingService:
         return found_ids, np.asarray(vectors, dtype=np.float32)
 
     def _ensure_section_index(self) -> None:
-        """Load or create the section-level FAISS index (double-checked locking).
+        """Load or create the section-level vector index (double-checked locking).
 
         The (possibly slow) disk read happens OUTSIDE ``self._lock`` so a one-time
         cold-start section load can't freeze concurrent paper searches/adds that share
@@ -398,47 +478,52 @@ class EmbeddingService:
         if hasattr(self, "_section_index"):
             return
 
-        import faiss
-
-        section_index_path = self._index_dir / "sections.index"
+        section_index_path = self._index_dir / "sections.npy"
+        legacy_section_path = self._index_dir / "sections.index"
         section_map_path = self._index_dir / "section_id_map.json"
-        index_exists = section_index_path.exists()
+        index_exists = section_index_path.exists() or legacy_section_path.exists()
         map_exists = section_map_path.exists()
         sections_persistable = True
 
         if not index_exists and not map_exists:
-            section_index = faiss.IndexFlatIP(DIMENSION)
+            section_index = _FlatIndex()
             section_id_map: list[dict] = []
         elif index_exists != map_exists:
             # One sidecar survived a crash between save_sections()'s two renames. The
             # missing half can't be reconstructed; run read-empty and DISABLE save so
             # the survivor is left intact for a rebuild instead of being overwritten.
             LOGGER.error(
-                "Section FAISS index partial (sections.index=%s, section_id_map.json=%s); "
+                "Section index partial (sections index=%s, section_id_map.json=%s); "
                 "starting empty and disabling section save to avoid clobbering the survivor.",
                 index_exists,
                 map_exists,
             )
-            section_index = faiss.IndexFlatIP(DIMENSION)
+            section_index = _FlatIndex()
             section_id_map = []
             sections_persistable = False
         else:
-            section_index = faiss.read_index(str(section_index_path))
-            with open(section_map_path) as f:
-                section_id_map = json.load(f)
-            n = section_index.ntotal
-            m = len(section_id_map)
-            if n != m:
-                keep = min(n, m)
-                LOGGER.error(
-                    "Section index/id_map drift (index=%d, map=%d); reconciling to %d consistent rows",
-                    n,
-                    m,
-                    keep,
-                )
-                if n > keep:
-                    section_index = self._prefix_index(section_index, keep)
-                section_id_map = section_id_map[:keep]
+            matrix = _read_matrix(section_index_path, legacy_section_path)
+            if matrix is None:
+                section_index = _FlatIndex()
+                section_id_map = []
+                sections_persistable = False
+            else:
+                section_index = _FlatIndex(matrix)
+                with open(section_map_path) as f:
+                    section_id_map = json.load(f)
+                n = section_index.ntotal
+                m = len(section_id_map)
+                if n != m:
+                    keep = min(n, m)
+                    LOGGER.error(
+                        "Section index/id_map drift (index=%d, map=%d); reconciling to %d consistent rows",
+                        n,
+                        m,
+                        keep,
+                    )
+                    if n > keep:
+                        section_index = self._prefix_index(section_index, keep)
+                    section_id_map = section_id_map[:keep]
 
         with self._lock:
             if hasattr(self, "_section_index"):
@@ -528,9 +613,7 @@ class EmbeddingService:
         return results
 
     def save_sections(self) -> None:
-        """Persist section FAISS index to disk."""
-        import faiss
-
+        """Persist the section index to disk."""
         if not hasattr(self, "_section_index"):
             return
 
@@ -541,39 +624,30 @@ class EmbeddingService:
             return
 
         with _index_file_lock(self._index_dir).acquire(), self._lock:
-            section_index_path = self._index_dir / "sections.index"
             section_map_path = self._index_dir / "section_id_map.json"
-
-            tmp_index = str(section_index_path) + ".tmp"
             tmp_map = str(section_map_path) + ".tmp"
 
-            faiss.write_index(self._section_index, tmp_index)
+            _save_matrix_atomic(self._section_index.matrix, self._index_dir / "sections.npy")
             with open(tmp_map, "w") as f:
                 json.dump(self._section_id_map, f)
-
-            os.replace(tmp_index, str(section_index_path))
             os.replace(tmp_map, str(section_map_path))
 
     def save(self) -> None:
-        """Persist FAISS index (and section index if loaded) to disk atomically."""
+        """Persist the vector index (and section index if loaded) to disk atomically."""
         self.save_sections()
-        import faiss
 
         with _index_file_lock(self._index_dir).acquire(), self._lock:
             if not self._persistable:
                 # Loaded from a partial/corrupt on-disk state (see _load_index). Writing
                 # our empty/degraded in-memory index would clobber the surviving file.
-                LOGGER.warning("Skipping FAISS index save: loaded from a partial/corrupt state")
+                LOGGER.warning("Skipping vector index save: loaded from a partial/corrupt state")
                 return
 
-            tmp_index = str(self._index_path) + ".tmp"
             tmp_map = str(self._id_map_path) + ".tmp"
 
-            faiss.write_index(self._index, tmp_index)
+            _save_matrix_atomic(self._index.matrix, self._index_path)
             with open(tmp_map, "w") as f:
                 json.dump(self._id_map, f)
-
-            os.replace(tmp_index, str(self._index_path))
             os.replace(tmp_map, str(self._id_map_path))
 
     def has_paper(self, paper_id: int) -> bool:
@@ -607,7 +681,7 @@ def add_papers_to_index(index_dir: str, paper_ids: list[int], texts: list[str], 
 def add_sections_to_index(index_dir: str, entries: list[tuple[int, str, str]]) -> int:
     """Load the on-disk section index, add section embeddings, and persist. Importable +
     dependency-free (no Flask/DB) so it can run in an isolated subprocess via
-    run_isolated() — mirrors add_papers_to_index for the torch/faiss section path."""
+    run_isolated() — mirrors add_papers_to_index for the torch-heavy section path."""
     with _index_file_lock(index_dir).acquire():
         service = EmbeddingService(index_dir)
         added = service.add_sections(entries)
@@ -655,7 +729,7 @@ def peek_embedding_service() -> EmbeddingService | None:
 
     Lets lightweight callers (learned-ranker artifact resolution) locate the
     index dir from scrape worker threads with no app context, while never
-    triggering a FAISS index load as a side effect.
+    triggering an index load as a side effect.
     """
     return _service_instance
 
