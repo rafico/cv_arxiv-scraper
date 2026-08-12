@@ -127,7 +127,6 @@ def view_settings():
     )
     redirect_uri_check = validate_credentials_redirect_uris(callback_uri)
 
-    from app.services.cron import get_cron_status
     from app.services.learned_ranker import model_status as learned_model_status
     from app.services.mendeley import MendeleyClient
     from app.services.zotero import ZoteroClient
@@ -171,7 +170,18 @@ def view_settings():
     zotero_client = ZoteroClient()
     zotero_status = zotero_client.check_connection()
     zotero_collections = zotero_client.list_collections() if zotero_status["status"] == "connected" else []
-    cron_config = get_cron_status()
+
+    from app.services.scheduler import SCRAPE_SCHEDULER
+
+    raw_scheduler = config.get("scheduler")
+    raw_scheduler = raw_scheduler if isinstance(raw_scheduler, dict) else {}
+    scheduler_config = {
+        "enabled": bool(raw_scheduler.get("enabled")),
+        "daily_at": str(raw_scheduler.get("daily_at", "08:00")),
+        "send_digest": bool(raw_scheduler.get("send_digest")),
+        "running": SCRAPE_SCHEDULER.is_enabled,
+        "next_run_at": SCRAPE_SCHEDULER.next_run_at,
+    }
     config_save_path = Path(current_app.config["CONFIG_PATH"])
     try:
         config_save_path_label = str(config_save_path.relative_to(Path.cwd()))
@@ -214,7 +224,7 @@ def view_settings():
         mendeley_status=mendeley_status,
         zotero_status=zotero_status,
         zotero_collections=zotero_collections,
-        cron_config=cron_config,
+        scheduler_config=scheduler_config,
         using_default_config=bool(current_app.config.get("USING_DEFAULT_CONFIG", False)),
         config_save_path_label=config_save_path_label,
     )
@@ -553,30 +563,44 @@ def digest_preview():
     return response
 
 
-# ── Cron scheduling endpoint ─────────────────────────────────────────
+# ── Scheduler endpoint ───────────────────────────────────────────────
 
 
-@settings_bp.route("/settings/cron", methods=["POST"])
-def manage_cron():
+@settings_bp.route("/settings/scheduler", methods=["POST"])
+def manage_scheduler():
+    """Enable/disable the built-in daily scheduler and persist it to config.yaml."""
     validate_csrf_token()
 
-    from app.services.cron import install_cron_job, remove_cron_job
+    import re
 
-    action = request.form.get("cron_action", "install")
+    from app.services.scheduler import SCRAPE_SCHEDULER
 
-    if action == "remove":
-        result = remove_cron_job()
+    action = request.form.get("scheduler_action", "enable")
+    daily_at = (request.form.get("scheduler_daily_at") or "08:00").strip()
+    if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", daily_at):
+        flash("Schedule time must be HH:MM (24h, UTC).", "error")
+        return redirect(url_for("settings.view_settings", section="automation"))
+    send_digest = request.form.get("scheduler_send_digest") == "on"
+    enabled = action != "disable"
+
+    app_obj = current_app._get_current_object()
+    scheduler_block = {"enabled": enabled, "daily_at": daily_at, "send_digest": send_digest}
+    try:
+        _save_config_key("scheduler", scheduler_block)  # validates + activates in-memory
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("settings.view_settings", section="automation"))
+
+    if enabled:
+        SCRAPE_SCHEDULER.start(app_obj, daily_at=daily_at, send_digest=send_digest)
+        message = f"Scheduler enabled — daily at {daily_at} UTC"
+        if SCRAPE_SCHEDULER.next_run_at:
+            message += f" (next run {SCRAPE_SCHEDULER.next_run_at})"
     else:
-        try:
-            hour = int(request.form.get("cron_hour", 8))
-            minute = int(request.form.get("cron_minute", 0))
-        except (ValueError, TypeError):
-            flash("Hour and minute must be integers.", "error")
-            return redirect(url_for("settings.view_settings", section="automation"))
-        mode = request.form.get("cron_mode", "full")
-        result = install_cron_job(hour, minute, mode)
+        SCRAPE_SCHEDULER.stop()
+        message = "Scheduler disabled."
 
-    flash(result["message"], "success" if result["success"] else "error")
+    flash(message, "success")
     return redirect(url_for("settings.view_settings", section="automation"))
 
 

@@ -1122,10 +1122,10 @@ def send_digest(app: Flask, *, dry_run: bool = False, force: bool = False) -> di
 
     recipient = email_cfg["recipient"]
     if not recipient:
-        # Record the misconfiguration as an errored run before raising. The nightly
-        # cron trips this on every run, and without a DigestRun row the dashboard and
-        # the Settings digest panel show nothing at all — the only trace ends up in
-        # cron.log, where nobody looks.
+        # Record the misconfiguration as an errored run before raising. A scheduled
+        # digest trips this on every run, and without a DigestRun row the dashboard
+        # and the Settings digest panel show nothing at all — the only trace ends up
+        # in the server log, where nobody looks.
         message = "No recipient configured. Set 'email.recipient' in config.yaml."
         _finish_digest_run(
             app,

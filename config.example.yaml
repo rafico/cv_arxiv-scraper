@@ -1,8 +1,14 @@
 email:
   recipient: ""
   subject_prefix: ArXiv Digest
+# Built-in daily automation (runs while the app is up; no crontab needed).
+# Also editable under Settings -> Automation -> Scheduling.
+scheduler:
+  enabled: false
+  daily_at: "08:00"    # 24-hour format, UTC
+  send_digest: false   # email the digest after each scheduled scrape
 digest:
-  # Weekdays the scheduled/cron digest is sent (the manual "Send Test Digest"
+  # Weekdays the scheduled digest is sent (the manual "Send Test Digest"
   # button ignores this). Default: every day.
   weekdays: [mon, tue, wed, thu, fri, sat, sun]
   # Papers scoring below this combined relevance score are left out of the email.
