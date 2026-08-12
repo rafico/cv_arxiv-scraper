@@ -30,6 +30,9 @@ scraper:
   # roughly one extra HTTP fetch per new paper; the stage is deadline-bounded and
   # non-fatal, so a slow run skips the remainder instead of failing the scrape.
   extract_sections: true
+  # Inline figure previews on cards and in the digest. Best-effort, capped per run
+  # and deadline-bounded; set false to skip figure fetching entirely.
+  extract_figures: true
 ingest:
   backends:
     - rss

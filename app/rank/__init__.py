@@ -16,11 +16,6 @@ from app.services.learned_ranker import (
     train_learned_ranker,
 )
 from app.services.matching import MATCH_PRIORITY, check_author_match
-from app.services.metrics import (
-    compute_author_follow_hit_rate,
-    compute_mean_time_to_first_open_hours,
-    compute_precision_at_k,
-)
 from app.services.pipeline import (
     DefaultFeatureExtractor,
     FeatureVector,
@@ -64,11 +59,8 @@ __all__ = [
     "check_author_match",
     "combined_rank_score",
     "evaluate_learned_ranker",
-    "compute_author_follow_hit_rate",
     "compute_feedback_delta",
     "compute_paper_score",
-    "compute_precision_at_k",
-    "compute_mean_time_to_first_open_hours",
     "explain_score",
     "first_author_name",
     "generate_ranking_explanation",

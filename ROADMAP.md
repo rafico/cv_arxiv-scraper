@@ -88,7 +88,7 @@ production ranker recipe and an 800k-rating public dataset), PaperQA2 / `paper-q
     has-code + star velocity + license + repo freshness → ⚙ Runnable badge, dashboard
     "Runnable (has code)" filter, and a small additive ranking bonus (honest in explain).
 14. **Distribution** ✅ — `cv-arxiv serve` (single DATA_DIR), top-level `/healthz`,
-    single-source version (`app/_version.py`, 0.3.0), docker-compose `local-ai` profile
+    single-source version (`app/_version.py`), docker-compose `local-ai` profile
     (Ollama sidecar), CHANGELOG, README quickstart, packaging polish. PyPI publish is the
     one remaining manual release step (README documents the `uvx --from git+…` form until then).
 

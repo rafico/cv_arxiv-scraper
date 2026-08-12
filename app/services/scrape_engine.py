@@ -437,6 +437,10 @@ def _generate_figures(app, results: list[dict], session: requests.Session) -> No
 
     static_folder = app.static_folder if app.static_folder else Path(__file__).parent.parent / "static"
     scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {}) or {}
+    # Same opt-out shape as scraper.extract_sections below.
+    if not scraper_config.get("extract_figures", True):
+        LOGGER.info("Figure extraction disabled (scraper.extract_figures: false)")
+        return
     resolution = int(scraper_config.get("thumbnail_dpi", DEFAULT_THUMBNAIL_DPI))
 
     def worker(res):
