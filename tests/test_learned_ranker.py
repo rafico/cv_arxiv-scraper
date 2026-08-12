@@ -198,10 +198,29 @@ class RecipeTrainingTests(LearnedRankerTestCase):
 
         self.assertIsNotNone(result)
         self.assertGreaterEqual(result["auc"], 0.5)
-        auc_rows = RecommendationMetric.query.filter_by(metric_name="learned_ranker_auc").all()
-        f1_rows = RecommendationMetric.query.filter_by(metric_name="learned_ranker_f1").all()
-        self.assertEqual(len(auc_rows), 1)
-        self.assertEqual(len(f1_rows), 1)
+        for key in ("ndcg10", "recall20", "mrr"):
+            self.assertGreaterEqual(result[key], 0.0)
+            self.assertLessEqual(result[key], 1.0)
+        for metric in ("auc", "f1", "ndcg10", "recall20", "mrr"):
+            rows = RecommendationMetric.query.filter_by(metric_name=f"learned_ranker_{metric}").all()
+            self.assertEqual(len(rows), 1, metric)
+
+    def test_ranking_metric_helpers_on_known_ordering(self):
+        from app.services.learned_ranker import _mrr, _ndcg_at_k, _recall_at_k
+
+        # Scores rank the papers [pos, neg, pos, neg]; ideal would be [pos, pos, ...].
+        labels = np.asarray([1, 0, 1, 0])
+        scores = np.asarray([0.9, 0.8, 0.7, 0.1])
+
+        self.assertAlmostEqual(_mrr(labels, scores), 1.0)
+        self.assertAlmostEqual(_recall_at_k(labels, scores, k=2), 0.5)
+        self.assertAlmostEqual(_recall_at_k(labels, scores, k=4), 1.0)
+        expected_ndcg = (1.0 + 1.0 / np.log2(4)) / (1.0 + 1.0 / np.log2(3))
+        self.assertAlmostEqual(_ndcg_at_k(labels, scores, k=4), expected_ndcg)
+        # Perfect ordering scores 1.0; no positives is undefined.
+        self.assertAlmostEqual(_ndcg_at_k(np.asarray([1, 1, 0]), np.asarray([0.9, 0.8, 0.1]), k=3), 1.0)
+        self.assertIsNone(_ndcg_at_k(np.asarray([0, 0]), np.asarray([0.5, 0.4])))
+        self.assertIsNone(_mrr(np.asarray([0]), np.asarray([0.5])))
 
     def test_numpy_fallback_matches_recipe_behavior(self):
         """The pure-numpy IRLS path (no sklearn) still separates the classes."""
@@ -372,10 +391,50 @@ class DenseRetrievalCandidateTests(LearnedRankerTestCase):
         low[0] = 0.3  # scorer returns 0.3 < 0.6
         self.assertIsNone(generator.process_single(_entry("2606.2", "Unrelated topic", low)))
 
-    def test_respects_top_k_cap_per_generator(self):
+    def test_generator_admits_all_above_threshold_with_scores(self):
+        # The per-run candidate_top_k cap moved to scrape_engine, which keeps the
+        # run-wide best K by score; the generator itself admits every entry above
+        # the threshold and attaches the score for that selection.
         generator = self._generator(top_k=2)
         admitted = [generator.process_single(_entry(f"2606.3{i}", f"Interest paper {i}", _unit(0))) for i in range(4)]
-        self.assertEqual(sum(1 for c in admitted if c is not None), 2)
+        self.assertEqual(sum(1 for c in admitted if c is not None), 4)
+        for candidate in admitted:
+            self.assertIn("interest_candidate_score", candidate.raw_features)
+
+    def test_run_wide_top_k_keeps_best_scores_not_first_seen(self):
+        from app.services import scrape_engine
+
+        top_k = 5
+        set_runtime_learned_prefs(
+            {"enabled": True, "blend": 0.7, "candidate_threshold": 0.6, "candidate_top_k": top_k}
+        )
+        entries = []
+        for i in range(30):
+            vec = np.zeros(DIM, dtype=np.float32)
+            vec[0] = 0.60 + 0.01 * (i + 1)  # strictly increasing interest score
+            entries.append(_entry(f"2607.{i}", f"Interest paper {i}", vec))
+
+        def make_generator(**kwargs):
+            kwargs["interest_scorer"] = lambda vec: float(vec[0])
+            kwargs["interest_settings"] = {
+                "enabled": True,
+                "blend": 0.7,
+                "candidate_threshold": 0.6,
+                "candidate_top_k": top_k,
+            }
+            return WhitelistCandidateGenerator(**kwargs)
+
+        with patch.object(scrape_engine, "WhitelistCandidateGenerator", side_effect=make_generator):
+            results = [
+                result
+                for _, _, result in scrape_engine._process_entries_with_pipeline(
+                    entries, self._WHITELISTS, {"max_workers": 4}, session=None
+                )
+                if result
+            ]
+
+        # Exactly top_k admitted, and they are the best-scored — not the first seen.
+        self.assertEqual({result["title"] for result in results}, {f"Interest paper {i}" for i in range(25, 30)})
 
     def test_whitelist_match_still_wins_over_interest_gate(self):
         generator = self._generator()

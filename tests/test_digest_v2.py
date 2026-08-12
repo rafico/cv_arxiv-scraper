@@ -236,19 +236,67 @@ class DigestControlsTests(FlaskDBTestCase):
         self.assertEqual(cfg["weekdays"], list(DIGEST_WEEKDAY_KEYS))
         self.assertEqual(cfg["max_papers"], 15)
         self.assertEqual(cfg["min_score"], 0.0)
+        self.assertEqual(cfg["exploration_slots"], 2)
         self.assertTrue(cfg["base_url"].startswith("http://127.0.0.1:"))
 
         self.app.config["SCRAPER_CONFIG"]["digest"] = {
             "weekdays": "tuesday",
             "min_score": "nan",
             "max_papers": 5000,
+            "exploration_slots": "many",
             "base_url": "http://127.0.0.1:5000/",
         }
         cfg = get_digest_config(self.app)
         self.assertEqual(cfg["weekdays"], list(DIGEST_WEEKDAY_KEYS))
         self.assertEqual(cfg["min_score"], 0.0)
         self.assertEqual(cfg["max_papers"], 100)
+        self.assertEqual(cfg["exploration_slots"], 2)
         self.assertEqual(cfg["base_url"], "http://127.0.0.1:5000")
+
+        self.app.config["SCRAPER_CONFIG"]["digest"] = {"exploration_slots": 5000}
+        self.assertEqual(get_digest_config(self.app)["exploration_slots"], 10)
+
+
+class ExplorationSlotTests(FlaskDBTestCase):
+    def test_exploration_prefers_papers_the_model_knows_least(self):
+        self.app.config["SCRAPER_CONFIG"]["digest"] = {"max_papers": 2, "exploration_slots": 2}
+        db.session.add_all(
+            [
+                _make_paper(title="Main A", link="https://arxiv.org/abs/2608.1", paper_score=90.0,
+                            interest_similarity=0.9),
+                _make_paper(title="Main B", link="https://arxiv.org/abs/2608.2", paper_score=80.0,
+                            interest_similarity=0.8),
+                _make_paper(title="Known", link="https://arxiv.org/abs/2608.3", paper_score=70.0,
+                            interest_similarity=0.7),
+                _make_paper(title="Unknown", link="https://arxiv.org/abs/2608.4", paper_score=10.0,
+                            interest_similarity=None),
+                _make_paper(title="Far", link="https://arxiv.org/abs/2608.5", paper_score=20.0,
+                            interest_similarity=0.05),
+            ]
+        )
+        db.session.commit()
+
+        preview = build_digest_preview(self.app)
+
+        self.assertEqual([p.title for p in preview["papers"]], ["Main A", "Main B"])
+        # NULL similarity first, then the lowest — never the already-selected mains.
+        self.assertEqual({p.title for p in preview["exploration"]}, {"Unknown", "Far"})
+        self.assertIn("Exploration", preview["html"])
+        self.assertIn("Unknown", preview["html"])
+
+    def test_zero_slots_disables_exploration(self):
+        self.app.config["SCRAPER_CONFIG"]["digest"] = {"exploration_slots": 0}
+        db.session.add_all(
+            [
+                _make_paper(title="Main", link="https://arxiv.org/abs/2608.6", paper_score=90.0),
+                _make_paper(title="Other", link="https://arxiv.org/abs/2608.7", paper_score=1.0),
+            ]
+        )
+        db.session.commit()
+
+        preview = build_digest_preview(self.app)
+        self.assertEqual(preview["exploration"], [])
+        self.assertNotIn("Exploration", preview["html"])
 
 
 class CidAttachmentTests(FlaskDBTestCase):

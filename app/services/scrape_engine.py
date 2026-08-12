@@ -14,6 +14,7 @@ import requests
 from sqlalchemy.exc import IntegrityError
 
 from app.constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_WORKERS
+from app.enums import MatchType
 from app.services.enrichment import (
     enrich_entries_with_api_metadata,
     extract_affiliation_text_batch,
@@ -158,7 +159,12 @@ def _process_entries_with_pipeline(
     """Process entries using the ranking pipeline (candidates -> features -> rank).
 
     Yields (processed, matched, result_dict) tuples for streaming progress;
-    result_dict is None for entries that did not match.
+    result_dict is None for entries that did not match. Whitelist matches stream
+    as they complete; interest-gate (dense-retrieval) candidates are buffered for
+    the whole run and only the ``candidate_top_k`` best by interest score are
+    admitted — a true per-run top-K rather than the first K above threshold in
+    stream order — so their results (and LLM enrichment cost) arrive after the
+    entry loop finishes.
     """
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     preferences = get_preferences(product_config)
@@ -175,6 +181,7 @@ def _process_entries_with_pipeline(
 
     processed = 0
     matched = 0
+    interest_buffer = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(generator.process_single, entry): entry for entry in entries}
@@ -192,6 +199,11 @@ def _process_entries_with_pipeline(
                     entry.get("link"),
                 )
 
+            if candidate is not None and candidate.match_types == [MatchType.INTEREST.value]:
+                # Defer: only the run-wide top-K get admitted (and LLM-enriched).
+                interest_buffer.append(candidate)
+                candidate = None
+
             if candidate is not None:
                 _enrich_candidate_with_llm(candidate, llm_client, interests_text, structured_insights)
                 ranked_list = ranker.rank([candidate])
@@ -203,6 +215,18 @@ def _process_entries_with_pipeline(
                     continue
 
             yield processed, matched, None
+
+    if interest_buffer:
+        from app.services.learned_ranker import get_runtime_learned_prefs
+
+        top_k = int((get_runtime_learned_prefs() or {}).get("candidate_top_k", 10))
+        interest_buffer.sort(key=lambda cand: cand.raw_features.get("interest_candidate_score", 0.0), reverse=True)
+        for candidate in interest_buffer[: max(0, top_k)]:
+            _enrich_candidate_with_llm(candidate, llm_client, interests_text, structured_insights)
+            ranked_list = ranker.rank([candidate])
+            if ranked_list:
+                matched += 1
+                yield processed, matched, ranked_list[0].to_result_dict()
 
 
 def _sort_results(results: list[dict]) -> None:

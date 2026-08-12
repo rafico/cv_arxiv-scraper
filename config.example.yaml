@@ -9,6 +9,9 @@ digest:
   min_score: 0.0
   # Maximum papers per digest email (1-100).
   max_papers: 15
+  # Clearly-labeled exploration papers per digest, sampled from outside your
+  # usual interests; rating them sharpens the learned ranker. 0 disables.
+  exploration_slots: 2
   # Base URL for the one-tap Save/Skip links inside the email. Must be reachable
   # from the device you read email on; defaults to this app's local dev server.
   base_url: http://127.0.0.1:5000

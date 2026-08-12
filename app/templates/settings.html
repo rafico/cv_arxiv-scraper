@@ -450,7 +450,7 @@
                     </div>
                     <p class="text-xs text-fg-subtle mb-2">
                         {% if profile.status.available %}
-                            Model active{% if profile.status.last_auc is not none %} &middot; AUC {{ '%.2f'|format(profile.status.last_auc) }}{% endif %}
+                            Model active{% if profile.status.last_auc is not none %} &middot; AUC {{ '%.2f'|format(profile.status.last_auc) }}{% endif %}{% if profile.status.last_ndcg10 is not none %} &middot; nDCG@10 {{ '%.2f'|format(profile.status.last_ndcg10) }}{% endif %}
                         {% else %}
                             Needs {{ profile.status.needed_positive }} more rated paper{{ 's' if profile.status.needed_positive != 1 }}
                         {% endif %}
@@ -576,7 +576,7 @@
                                 {%- if not preferences.learned.enabled -%}
                                     Off
                                 {%- elif learned_status.available -%}
-                                    Model active{% if learned_status.last_auc is not none %} &middot; AUC {{ '%.2f'|format(learned_status.last_auc) }}{% endif %}
+                                    Model active{% if learned_status.last_auc is not none %} &middot; AUC {{ '%.2f'|format(learned_status.last_auc) }}{% endif %}{% if learned_status.last_ndcg10 is not none %} &middot; nDCG@10 {{ '%.2f'|format(learned_status.last_ndcg10) }}{% endif %}
                                 {%- else -%}
                                     Needs {{ learned_status.needed_positive }} more rated paper{{ 's' if learned_status.needed_positive != 1 }}
                                 {%- endif -%}

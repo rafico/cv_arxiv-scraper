@@ -452,6 +452,12 @@ def get_digest_config(app: Flask) -> dict:
         max_papers = DEFAULT_DIGEST_MAX_PAPERS
     max_papers = max(1, min(100, max_papers))
 
+    try:
+        exploration_slots = int(raw.get("exploration_slots", 2))
+    except (TypeError, ValueError):
+        exploration_slots = 2
+    exploration_slots = max(0, min(10, exploration_slots))
+
     base_url = raw.get("base_url")
     if not isinstance(base_url, str) or not base_url.strip():
         # Mirrors run.py's default bind (127.0.0.1, PORT env or 5000). The app has
@@ -461,6 +467,7 @@ def get_digest_config(app: Flask) -> dict:
         "weekdays": weekdays,
         "min_score": min_score,
         "max_papers": max_papers,
+        "exploration_slots": exploration_slots,
         "base_url": base_url.strip().rstrip("/"),
     }
 
@@ -757,6 +764,18 @@ def build_digest_preview(app: Flask) -> dict:
 
     alerts_since = window["last_run_at"] or (now_utc() - timedelta(hours=window["lookback_hours"]))
     alerts = _collect_saved_search_alerts(app, since=alerts_since, exclude_paper_ids=[p.id for p in papers])
+
+    # Exploration draws from the leftovers only: never the main list, never a
+    # saved-search alert (an explicit notify beats a random exploration slot).
+    exploration: list[Paper] = []
+    if digest_cfg["exploration_slots"] and papers:
+        alert_ids = [p.id for alert in alerts for p in alert["papers"]]
+        exploration = _query_exploration_papers(
+            app,
+            window["lookback_hours"],
+            exclude_ids=[p.id for p in papers] + alert_ids,
+            count=digest_cfg["exploration_slots"],
+        )
     today = utc_today()
 
     catch_up_label = None
@@ -771,11 +790,12 @@ def build_digest_preview(app: Flask) -> dict:
         "token_for": lambda paper_id, action, profile_id=None: make_one_tap_token(
             app, paper_id, action, None, profile_id
         ),
-        "figure_srcs": _preview_figure_srcs(app, papers, digest_cfg["base_url"]),
+        "figure_srcs": _preview_figure_srcs(app, list(papers) + list(exploration), digest_cfg["base_url"]),
         "catch_up_label": catch_up_label,
         "alerts": alerts,
         "sections": sections,
         "default_profile_id": default_profile_id,
+        "exploration": exploration,
     }
     return {
         "recipient": email_cfg["recipient"],
@@ -789,6 +809,7 @@ def build_digest_preview(app: Flask) -> dict:
         "alerts": alerts,
         "sections": sections,
         "default_profile_id": default_profile_id,
+        "exploration": exploration,
     }
 
 
@@ -802,6 +823,27 @@ def get_digest_status_snapshot(app: Flask) -> dict:
         "preview_subject": preview["subject"],
         "latest_run": latest,
     }
+
+
+def _query_exploration_papers(app: Flask, lookback_hours: int, exclude_ids: list[int], count: int) -> list[Paper]:
+    """Sample papers from *outside* the user's usual lane for labeled exploration.
+
+    Scholar Inbox's recipe: a couple of clearly-labeled slots per digest whose
+    ratings teach the model where the user's interests end. Prefers papers the
+    interest model knows least about (NULL similarity first, then lowest), with
+    a random tiebreak so the slots vary between digests.
+    """
+    from sqlalchemy import func
+
+    cutoff = now_utc() - timedelta(hours=lookback_hours)
+    with app.app_context():
+        query = Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
+        if exclude_ids:
+            query = query.filter(Paper.id.notin_(exclude_ids))
+        return query.order_by(
+            func.coalesce(Paper.interest_similarity, -1.0).asc(),
+            func.random(),
+        ).limit(count).all()
 
 
 def _query_todays_papers(
@@ -1003,6 +1045,18 @@ def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None)
             f'font-size:13px;font-weight:600;margin:0 0 16px;">{escape(ctx["catch_up_label"])}</div>'
         )
 
+    exploration_html = ""
+    exploration = ctx.get("exploration") or []
+    if exploration:
+        default_pid = ctx.get("default_profile_id")
+        exploration_cards = "\n".join(_render_paper_html(p, ctx, profile_id=default_pid) for p in exploration)
+        exploration_html = (
+            '<h2 style="font-size:15px;color:#111827;margin:20px 0 2px;">🧭 Exploration</h2>'
+            '<p style="color:#6b7280;font-size:12px;margin:0 0 10px;">'
+            "Outside your usual lane — rating these teaches the ranker where your interests end.</p>"
+            f"{exploration_cards}"
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -1020,6 +1074,7 @@ def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None)
       </p>
       {catch_up_banner}
       {paper_cards}
+      {exploration_html}
       {_render_alerts_html(ctx.get("alerts") or [])}
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0 12px;">
       <p style="color:#9ca3af;font-size:11px;text-align:center;margin:0;">

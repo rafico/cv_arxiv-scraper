@@ -462,6 +462,45 @@ def _f1_score(labels: np.ndarray, scores: np.ndarray, threshold: float = 0.5) ->
     return (2 * tp / denominator) if denominator else 0.0
 
 
+def _ndcg_at_k(labels: np.ndarray, scores: np.ndarray, k: int = 10) -> float | None:
+    """Binary-relevance nDCG@k; None when the holdout has no positives."""
+    import numpy as np
+
+    n_pos = int((labels == 1).sum())
+    if n_pos == 0:
+        return None
+    k = min(k, len(labels))
+    order = np.argsort(-scores, kind="mergesort")
+    gains = labels[order][:k].astype(np.float64)
+    discounts = 1.0 / np.log2(np.arange(2, k + 2, dtype=np.float64))
+    dcg = float((gains * discounts[: len(gains)]).sum())
+    idcg = float(discounts[: min(n_pos, k)].sum())
+    return dcg / idcg
+
+
+def _recall_at_k(labels: np.ndarray, scores: np.ndarray, k: int = 20) -> float | None:
+    """Fraction of holdout positives ranked in the top k; None with no positives."""
+    import numpy as np
+
+    n_pos = int((labels == 1).sum())
+    if n_pos == 0:
+        return None
+    order = np.argsort(-scores, kind="mergesort")
+    hits = int(labels[order][: min(k, len(labels))].sum())
+    return hits / n_pos
+
+
+def _mrr(labels: np.ndarray, scores: np.ndarray) -> float | None:
+    """Reciprocal rank of the best-scored positive; None with no positives."""
+    import numpy as np
+
+    if int((labels == 1).sum()) == 0:
+        return None
+    order = np.argsort(-scores, kind="mergesort")
+    first = int(np.argmax(labels[order] == 1))
+    return 1.0 / (first + 1)
+
+
 # ── training data assembly ──────────────────────────────────────────────
 
 
@@ -866,6 +905,9 @@ def model_status(app=None, profile=None) -> dict:
         "trained_at": None,
         "last_auc": None,
         "last_f1": None,
+        "last_ndcg10": None,
+        "last_recall20": None,
+        "last_mrr": None,
     }
     app = _resolve_app(app)
     if app is None:
@@ -888,7 +930,13 @@ def model_status(app=None, profile=None) -> dict:
 
             from app.models import RecommendationMetric
 
-            for base, key in (("learned_ranker_auc", "last_auc"), ("learned_ranker_f1", "last_f1")):
+            for base, key in (
+                ("learned_ranker_auc", "last_auc"),
+                ("learned_ranker_f1", "last_f1"),
+                ("learned_ranker_ndcg10", "last_ndcg10"),
+                ("learned_ranker_recall20", "last_recall20"),
+                ("learned_ranker_mrr", "last_mrr"),
+            ):
                 row = (
                     RecommendationMetric.query.filter_by(metric_name=_metric_name(base, ref))
                     .order_by(RecommendationMetric.measured_at.desc(), RecommendationMetric.id.desc())
@@ -902,12 +950,13 @@ def model_status(app=None, profile=None) -> dict:
 
 
 def evaluate_learned_ranker(app=None, profile=None) -> dict | None:
-    """Offline eval: AUC + F1 on a time-ordered holdout of the user's feedback.
+    """Offline eval on a time-ordered holdout of the user's feedback.
 
     Trains the recipe on the earliest 80% of labeled feedback and scores the
-    most recent 20%. Writes ``learned_ranker_auc`` / ``learned_ranker_f1``
-    rows to RecommendationMetric (log only — no UI yet). Returns the metrics
-    dict, or None when there is not enough two-class data to evaluate.
+    most recent 20%: AUC + F1 (classification) and nDCG@10 / recall@20 / MRR
+    (ranking). Writes ``learned_ranker_*`` rows to RecommendationMetric,
+    surfaced in the Settings ranker card. Returns the metrics dict, or None
+    when there is not enough two-class data to evaluate.
     """
     import numpy as np
 
@@ -958,7 +1007,14 @@ def evaluate_learned_ranker(app=None, profile=None) -> dict | None:
         auc = _auc_score(labels, scores)
         if auc is None:
             return None
-        f1 = _f1_score(labels, scores)
+        # Both classes present (AUC ran), so the ranking metrics are non-None.
+        metrics = {
+            "auc": float(auc),
+            "f1": float(_f1_score(labels, scores)),
+            "ndcg10": float(_ndcg_at_k(labels, scores, k=10)),
+            "recall20": float(_recall_at_k(labels, scores, k=20)),
+            "mrr": float(_mrr(labels, scores)),
+        }
 
         from app.models import RecommendationMetric, db
 
@@ -968,19 +1024,25 @@ def evaluate_learned_ranker(app=None, profile=None) -> dict | None:
             "n_test": int(len(found_ids)),
             "profile": getattr(ref, "slug", "default"),
         }
-        db.session.add(
-            RecommendationMetric(
-                metric_name=_metric_name("learned_ranker_auc", ref), metric_value=float(auc), config_snapshot=snapshot
+        for key, value in metrics.items():
+            db.session.add(
+                RecommendationMetric(
+                    metric_name=_metric_name(f"learned_ranker_{key}", ref),
+                    metric_value=value,
+                    config_snapshot=snapshot,
+                )
             )
-        )
-        db.session.add(
-            RecommendationMetric(
-                metric_name=_metric_name("learned_ranker_f1", ref), metric_value=float(f1), config_snapshot=snapshot
-            )
-        )
         db.session.commit()
-        LOGGER.info("Learned-ranker holdout eval: AUC=%.3f F1=%.3f (n_test=%d)", auc, f1, len(found_ids))
-        return {"auc": float(auc), "f1": float(f1), "n_test": int(len(found_ids))}
+        LOGGER.info(
+            "Learned-ranker holdout eval: AUC=%.3f F1=%.3f nDCG@10=%.3f recall@20=%.3f MRR=%.3f (n_test=%d)",
+            metrics["auc"],
+            metrics["f1"],
+            metrics["ndcg10"],
+            metrics["recall20"],
+            metrics["mrr"],
+            len(found_ids),
+        )
+        return {**metrics, "n_test": int(len(found_ids))}
 
 
 # ── retrain-on-feedback hook ─────────────────────────────────────────────

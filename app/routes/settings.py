@@ -145,6 +145,9 @@ def view_settings():
             "trained_at": None,
             "last_auc": None,
             "last_f1": None,
+            "last_ndcg10": None,
+            "last_recall20": None,
+            "last_mrr": None,
         }
 
     from app.services import profiles as profiles_service
@@ -157,7 +160,7 @@ def view_settings():
             card["status"] = learned_model_status(app_obj, profile=profiles_service.profile_ref(profile))
         except Exception:  # settings page must render even if a profile's ranker breaks
             LOGGER.warning("Per-profile learned status unavailable", exc_info=True)
-            card["status"] = {"available": False, "needed_positive": 5, "last_auc": None}
+            card["status"] = {"available": False, "needed_positive": 5, "last_auc": None, "last_ndcg10": None}
         profile_cards.append(card)
 
     from app.services.metrics import feature_liveness
