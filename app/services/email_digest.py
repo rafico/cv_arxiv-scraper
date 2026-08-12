@@ -458,6 +458,12 @@ def get_digest_config(app: Flask) -> dict:
         exploration_slots = 2
     exploration_slots = max(0, min(10, exploration_slots))
 
+    # Weekday for the "what happened in your field" synthesis brief; off unless
+    # a valid day is configured.
+    synthesis_weekday = str(raw.get("synthesis_weekday", "") or "").strip().lower()[:3]
+    if synthesis_weekday not in DIGEST_WEEKDAY_KEYS:
+        synthesis_weekday = None
+
     base_url = raw.get("base_url")
     if not isinstance(base_url, str) or not base_url.strip():
         # Mirrors run.py's default bind (127.0.0.1, PORT env or 5000). The app has
@@ -468,6 +474,7 @@ def get_digest_config(app: Flask) -> dict:
         "min_score": min_score,
         "max_papers": max_papers,
         "exploration_slots": exploration_slots,
+        "synthesis_weekday": synthesis_weekday,
         "base_url": base_url.strip().rstrip("/"),
     }
 
@@ -778,6 +785,20 @@ def build_digest_preview(app: Flask) -> dict:
         )
     today = utc_today()
 
+    # Weekly field-synthesis brief on the configured weekday only (LLM optional;
+    # degrades to topic labels + counts without one).
+    synthesis = None
+    if digest_cfg["synthesis_weekday"] == DIGEST_WEEKDAY_KEYS[today.weekday()]:
+        try:
+            from app.services.corpus_analysis import synthesize_recent_topics
+            from app.services.rag import build_llm_client
+
+            synthesis = synthesize_recent_topics(llm_client=build_llm_client(app))
+            if not synthesis.get("topics"):
+                synthesis = None
+        except Exception:  # noqa: BLE001 — the digest must send without the brief
+            LOGGER.warning("Field synthesis unavailable for this digest", exc_info=True)
+
     catch_up_label = None
     if window["catch_up"]:
         catch_up_label = f"Catch-up digest — last {window['days']} days"
@@ -796,6 +817,7 @@ def build_digest_preview(app: Flask) -> dict:
         "sections": sections,
         "default_profile_id": default_profile_id,
         "exploration": exploration,
+        "synthesis": synthesis,
     }
     return {
         "recipient": email_cfg["recipient"],
@@ -810,6 +832,7 @@ def build_digest_preview(app: Flask) -> dict:
         "sections": sections,
         "default_profile_id": default_profile_id,
         "exploration": exploration,
+        "synthesis": synthesis,
     }
 
 
@@ -1045,6 +1068,25 @@ def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None)
             f'font-size:13px;font-weight:600;margin:0 0 16px;">{escape(ctx["catch_up_label"])}</div>'
         )
 
+    synthesis_html = ""
+    synthesis = ctx.get("synthesis")
+    if synthesis and synthesis.get("topics"):
+        if synthesis.get("narrative"):
+            body = f'<p style="color:#374151;font-size:13px;margin:0;">{escape(synthesis["narrative"])}</p>'
+        else:
+            rows = "".join(
+                f'<li>{escape(topic["label"])} &mdash; {int(topic["recent_count"])} new'
+                f' (+{topic["delta_share"]:.0%} share)</li>'
+                for topic in synthesis["topics"]
+            )
+            body = f'<ul style="color:#374151;font-size:13px;margin:0;padding-left:18px;">{rows}</ul>'
+        synthesis_html = (
+            '<div style="background:#eef2ff;border-radius:10px;padding:12px 14px;margin:0 0 16px;">'
+            '<div style="font-size:13px;font-weight:700;color:#3730a3;margin:0 0 6px;">'
+            "📈 This week in your field</div>"
+            f"{body}</div>"
+        )
+
     exploration_html = ""
     exploration = ctx.get("exploration") or []
     if exploration:
@@ -1073,6 +1115,7 @@ def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None)
         {len(papers)} paper{"s" if len(papers) != 1 else ""} matched
       </p>
       {catch_up_banner}
+      {synthesis_html}
       {paper_cards}
       {exploration_html}
       {_render_alerts_html(ctx.get("alerts") or [])}

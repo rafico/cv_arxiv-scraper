@@ -212,6 +212,83 @@
     load();
 })();
 </script>
+{% if current_filters.collection %}
+<div id="collection-suggest" class="mt-4">
+    <div class="side-heading">Expand this collection</div>
+    <p class="px-3 text-xs text-fg-subtle">Papers similar to what's already in it.</p>
+    <div class="mt-2 px-2">
+        <button id="collection-suggest-btn" type="button"
+                class="w-full px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Suggest similar
+        </button>
+    </div>
+    <div id="collection-suggest-list" class="mt-2 px-2 space-y-2"></div>
+</div>
+<script>
+(function () {
+    const collectionId = {{ current_filters.collection | int }};
+    const button = document.getElementById("collection-suggest-btn");
+    const list = document.getElementById("collection-suggest-list");
+    if (!button || !list) return;
+
+    async function addToCollection(paperId, card) {
+        try {
+            const res = await fetch("/api/collections/" + collectionId + "/papers", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ paper_id: paperId }),
+            });
+            if (res.ok) card.remove();
+        } catch (e) { /* non-fatal */ }
+    }
+
+    function render(results) {
+        list.innerHTML = "";
+        if (!results.length) {
+            const empty = document.createElement("p");
+            empty.className = "text-[11px] text-fg-subtle px-1";
+            empty.textContent = "No similar papers found yet — index more papers first.";
+            list.append(empty);
+            return;
+        }
+        results.forEach(function (p) {
+            const card = document.createElement("div");
+            card.className = "rounded-lg border border-edge bg-surface p-2";
+            const title = document.createElement("a");
+            title.className = "text-xs font-medium text-fg line-clamp-2 hover:text-accent";
+            title.textContent = p.title;
+            title.href = "/?view=all&q=" + encodeURIComponent(p.title);
+            const meta = document.createElement("div");
+            meta.className = "mt-0.5 text-[11px] text-fg-muted line-clamp-1";
+            meta.textContent = (p.authors || "") + " · " + Math.round((p.similarity_score || 0) * 100) + "% similar";
+            const row = document.createElement("div");
+            row.className = "mt-2 flex gap-2";
+            const add = document.createElement("button");
+            add.className = "px-2 py-1 text-[11px] rounded-lg bg-accent text-accent-fg";
+            add.textContent = "Add";
+            add.onclick = function () { addToCollection(p.id, card); };
+            row.append(add);
+            card.append(title, meta, row);
+            list.append(card);
+        });
+    }
+
+    button.onclick = async function () {
+        button.disabled = true;
+        button.textContent = "Searching…";
+        try {
+            const res = await fetch("/api/corpus/neighbors?collection_id=" + collectionId + "&limit=6");
+            if (res.ok) {
+                const data = await res.json();
+                render(data.results || []);
+            }
+        } catch (e) { /* non-fatal */ }
+        button.disabled = false;
+        button.textContent = "Suggest similar";
+    };
+})();
+</script>
+{% endif %}
 {% endblock %}
 
 {% block content %}

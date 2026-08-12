@@ -284,6 +284,58 @@ class ExplorationSlotTests(FlaskDBTestCase):
         self.assertIn("Exploration", preview["html"])
         self.assertIn("Unknown", preview["html"])
 
+    def _synthesis_payload(self, narrative=None):
+        return {
+            "window_days": 7,
+            "topics": [{"label": "diffusion", "recent_count": 4, "delta_share": 0.12, "sample_titles": ["T1"]}],
+            "narrative": narrative,
+            "citations": [],
+        }
+
+    def test_synthesis_renders_on_configured_weekday(self):
+        from app.services.email_digest import DIGEST_WEEKDAY_KEYS, utc_today
+
+        today_key = DIGEST_WEEKDAY_KEYS[utc_today().weekday()]
+        self.app.config["SCRAPER_CONFIG"]["digest"] = {"synthesis_weekday": today_key, "exploration_slots": 0}
+        db.session.add(_make_paper())
+        db.session.commit()
+
+        payload = self._synthesis_payload(narrative="Diffusion had a big week.")
+        with (
+            patch("app.services.corpus_analysis.synthesize_recent_topics", return_value=payload),
+            patch("app.services.rag.build_llm_client", return_value=None),
+        ):
+            preview = build_digest_preview(self.app)
+
+        self.assertIn("This week in your field", preview["html"])
+        self.assertIn("Diffusion had a big week.", preview["html"])
+
+    def test_synthesis_degrades_to_topic_list_without_narrative(self):
+        from app.services.email_digest import DIGEST_WEEKDAY_KEYS, utc_today
+
+        today_key = DIGEST_WEEKDAY_KEYS[utc_today().weekday()]
+        self.app.config["SCRAPER_CONFIG"]["digest"] = {"synthesis_weekday": today_key, "exploration_slots": 0}
+        db.session.add(_make_paper())
+        db.session.commit()
+
+        with (
+            patch("app.services.corpus_analysis.synthesize_recent_topics", return_value=self._synthesis_payload()),
+            patch("app.services.rag.build_llm_client", return_value=None),
+        ):
+            preview = build_digest_preview(self.app)
+
+        self.assertIn("This week in your field", preview["html"])
+        self.assertIn("diffusion", preview["html"])
+        self.assertIn("4 new", preview["html"])
+
+    def test_synthesis_absent_on_other_weekdays_and_by_default(self):
+        db.session.add(_make_paper())
+        db.session.commit()
+
+        preview = build_digest_preview(self.app)  # no synthesis_weekday configured
+        self.assertIsNone(preview["synthesis"])
+        self.assertNotIn("This week in your field", preview["html"])
+
     def test_zero_slots_disables_exploration(self):
         self.app.config["SCRAPER_CONFIG"]["digest"] = {"exploration_slots": 0}
         db.session.add_all(

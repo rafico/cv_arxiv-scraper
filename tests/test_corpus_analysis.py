@@ -259,3 +259,57 @@ class CorpusAnalysisTests(FlaskDBTestCase):
         self.assertEqual(neighbor["id"], untracked.id)
         self.assertEqual(neighbor["matched_seed_ids"], [seed_a.id, seed_b.id])
         self.assertEqual(neighbor["similarity_score"], 0.91)
+
+
+class SynthesizeRecentTopicsTests(FlaskDBTestCase):
+    _EMERGING = {
+        "topics": [
+            {
+                "label": "diffusion models",
+                "recent_count": 4,
+                "delta_share": 0.12,
+                "recent_papers": [{"title": "Fast Diffusion"}, {"title": "Tiny Diffusion"}],
+            }
+        ]
+    }
+
+    def test_narrative_from_llm_is_citation_verified(self):
+        from unittest.mock import MagicMock, patch
+
+        from app.services.corpus_analysis import synthesize_recent_topics
+
+        client = MagicMock()
+        client.complete_text.return_value = "Diffusion models surged, led by Fast Diffusion."
+
+        with patch("app.services.corpus_analysis.detect_emerging_topics", return_value=self._EMERGING):
+            result = synthesize_recent_topics(llm_client=client)
+
+        self.assertEqual(result["narrative"], "Diffusion models surged, led by Fast Diffusion.")
+        self.assertEqual(result["topics"][0]["label"], "diffusion models")
+        self.assertEqual(result["topics"][0]["sample_titles"], ["Fast Diffusion", "Tiny Diffusion"])
+        # The prompt carried the topic evidence.
+        user_prompt = client.complete_text.call_args.kwargs["user_prompt"]
+        self.assertIn("diffusion models", user_prompt)
+        self.assertIn("Fast Diffusion", user_prompt)
+
+    def test_degrades_without_llm_and_survives_llm_failure(self):
+        from unittest.mock import MagicMock, patch
+
+        from app.services.corpus_analysis import synthesize_recent_topics
+
+        with patch("app.services.corpus_analysis.detect_emerging_topics", return_value=self._EMERGING):
+            no_llm = synthesize_recent_topics(llm_client=None)
+            broken = MagicMock()
+            broken.complete_text.side_effect = RuntimeError("provider down")
+            failed = synthesize_recent_topics(llm_client=broken)
+
+        for result in (no_llm, failed):
+            self.assertIsNone(result["narrative"])
+            self.assertEqual(len(result["topics"]), 1)
+
+    def test_empty_corpus_yields_no_topics(self):
+        from app.services.corpus_analysis import synthesize_recent_topics
+
+        result = synthesize_recent_topics()
+        self.assertEqual(result["topics"], [])
+        self.assertIsNone(result["narrative"])

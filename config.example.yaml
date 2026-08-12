@@ -18,6 +18,10 @@ digest:
   # Clearly-labeled exploration papers per digest, sampled from outside your
   # usual interests; rating them sharpens the learned ranker. 0 disables.
   exploration_slots: 2
+  # Weekday (mon..sun) for the "this week in your field" synthesis brief at the
+  # top of that day's digest. Uses your LLM when configured, otherwise shows
+  # emerging-topic labels and counts. Empty/absent disables it.
+  # synthesis_weekday: mon
   # Base URL for the one-tap Save/Skip links inside the email. Must be reachable
   # from the device you read email on; defaults to this app's local dev server.
   base_url: http://127.0.0.1:5000

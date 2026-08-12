@@ -97,6 +97,22 @@ class ApiCsrfTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Author A", self.app.config["SCRAPER_CONFIG"]["whitelists"]["authors"])
 
+    def test_follow_endpoint_creates_digest_alert_search_once(self):
+        from app.models import SavedSearch
+
+        paper = Paper.query.first()
+        for _ in range(2):  # second follow must not duplicate the alert
+            self.client.post(
+                f"/api/papers/{paper.id}/follow",
+                json={},
+                headers={"X-CSRF-Token": self._csrf_token()},
+            )
+
+        alerts = SavedSearch.query.filter_by(name="Author: Author A").all()
+        self.assertEqual(len(alerts), 1)
+        self.assertTrue(alerts[0].notify_on_match)
+        self.assertEqual(alerts[0].author_filters, ["Author A"])
+
     def test_mute_endpoint_adds_topic_to_preferences(self):
         paper = Paper.query.first()
         response = self.client.post(
