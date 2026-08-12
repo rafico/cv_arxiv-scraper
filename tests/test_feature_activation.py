@@ -51,9 +51,7 @@ class OnboardingActivationThresholdTests(FlaskDBTestCase):
         self.assertFalse(_save_step(self._steps(1))["complete"])
 
     def test_digest_step_appears_only_without_a_recipient(self):
-        without = _build_onboarding_steps(
-            {"whitelists": {}}, positive_count=0, has_successful_scrape=True
-        )
+        without = _build_onboarding_steps({"whitelists": {}}, positive_count=0, has_successful_scrape=True)
         self.assertIn("Set a digest recipient", [step["label"] for step in without])
 
         with_recipient = _build_onboarding_steps(

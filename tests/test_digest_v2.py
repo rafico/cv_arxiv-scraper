@@ -262,16 +262,21 @@ class ExplorationSlotTests(FlaskDBTestCase):
         self.app.config["SCRAPER_CONFIG"]["digest"] = {"max_papers": 2, "exploration_slots": 2}
         db.session.add_all(
             [
-                _make_paper(title="Main A", link="https://arxiv.org/abs/2608.1", paper_score=90.0,
-                            interest_similarity=0.9),
-                _make_paper(title="Main B", link="https://arxiv.org/abs/2608.2", paper_score=80.0,
-                            interest_similarity=0.8),
-                _make_paper(title="Known", link="https://arxiv.org/abs/2608.3", paper_score=70.0,
-                            interest_similarity=0.7),
-                _make_paper(title="Unknown", link="https://arxiv.org/abs/2608.4", paper_score=10.0,
-                            interest_similarity=None),
-                _make_paper(title="Far", link="https://arxiv.org/abs/2608.5", paper_score=20.0,
-                            interest_similarity=0.05),
+                _make_paper(
+                    title="Main A", link="https://arxiv.org/abs/2608.1", paper_score=90.0, interest_similarity=0.9
+                ),
+                _make_paper(
+                    title="Main B", link="https://arxiv.org/abs/2608.2", paper_score=80.0, interest_similarity=0.8
+                ),
+                _make_paper(
+                    title="Known", link="https://arxiv.org/abs/2608.3", paper_score=70.0, interest_similarity=0.7
+                ),
+                _make_paper(
+                    title="Unknown", link="https://arxiv.org/abs/2608.4", paper_score=10.0, interest_similarity=None
+                ),
+                _make_paper(
+                    title="Far", link="https://arxiv.org/abs/2608.5", paper_score=20.0, interest_similarity=0.05
+                ),
             ]
         )
         db.session.commit()

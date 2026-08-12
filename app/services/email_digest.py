@@ -863,10 +863,14 @@ def _query_exploration_papers(app: Flask, lookback_hours: int, exclude_ids: list
         query = Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
         if exclude_ids:
             query = query.filter(Paper.id.notin_(exclude_ids))
-        return query.order_by(
-            func.coalesce(Paper.interest_similarity, -1.0).asc(),
-            func.random(),
-        ).limit(count).all()
+        return (
+            query.order_by(
+                func.coalesce(Paper.interest_similarity, -1.0).asc(),
+                func.random(),
+            )
+            .limit(count)
+            .all()
+        )
 
 
 def _query_todays_papers(
@@ -1075,8 +1079,8 @@ def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None)
             body = f'<p style="color:#374151;font-size:13px;margin:0;">{escape(synthesis["narrative"])}</p>'
         else:
             rows = "".join(
-                f'<li>{escape(topic["label"])} &mdash; {int(topic["recent_count"])} new'
-                f' (+{topic["delta_share"]:.0%} share)</li>'
+                f"<li>{escape(topic['label'])} &mdash; {int(topic['recent_count'])} new"
+                f" (+{topic['delta_share']:.0%} share)</li>"
                 for topic in synthesis["topics"]
             )
             body = f'<ul style="color:#374151;font-size:13px;margin:0;padding-left:18px;">{rows}</ul>'

@@ -234,8 +234,13 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--json", type=Path, help="write the full report to this path")
     parser.add_argument("--self-test", action="store_true", help="run on synthetic data, no dataset needed")
-    for name, default in (("user", "user_id"), ("rating", "rating"), ("time", "timestamp"),
-                          ("title", "title"), ("abstract", "abstract")):
+    for name, default in (
+        ("user", "user_id"),
+        ("rating", "rating"),
+        ("time", "timestamp"),
+        ("title", "title"),
+        ("abstract", "abstract"),
+    ):
         parser.add_argument(f"--col-{name}", default=default, dest=f"col_{name}")
     args = parser.parse_args()
 

@@ -405,9 +405,7 @@ class DenseRetrievalCandidateTests(LearnedRankerTestCase):
         from app.services import scrape_engine
 
         top_k = 5
-        set_runtime_learned_prefs(
-            {"enabled": True, "blend": 0.7, "candidate_threshold": 0.6, "candidate_top_k": top_k}
-        )
+        set_runtime_learned_prefs({"enabled": True, "blend": 0.7, "candidate_threshold": 0.6, "candidate_top_k": top_k})
         entries = []
         for i in range(30):
             vec = np.zeros(DIM, dtype=np.float32)
