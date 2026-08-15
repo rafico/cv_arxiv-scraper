@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Citation Graph - ArXiv CV Scraper{% endblock %}
+{% block page_title %}Citation Graph{% endblock %}
+
+{% block content %}
+<div class="flex flex-col h-[calc(100vh-8rem)]">
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+        <select id="graph-collection"
+                class="rounded-lg border border-edge bg-surface-2 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent">
+            <option value="">All papers</option>
+        </select>
+        <label class="flex items-center gap-1.5 text-sm text-fg-muted">
+            <span>Years</span>
+            <input type="number" id="graph-year-min" placeholder="from" class="w-20 rounded-lg border border-edge bg-surface-2 px-2 py-1.5 text-sm outline-none">
+            <span>–</span>
+            <input type="number" id="graph-year-max" placeholder="to" class="w-20 rounded-lg border border-edge bg-surface-2 px-2 py-1.5 text-sm outline-none">
+        </label>
+        <label class="flex items-center gap-1.5 text-sm text-fg-muted cursor-pointer">
+            <input type="checkbox" id="graph-hide-isolated" class="accent-[var(--accent)]">
+            Hide isolated papers
+        </label>
+        <span id="graph-stats" class="ml-auto text-xs text-fg-subtle"></span>
+    </div>
+    <div id="graph" class="flex-1 min-h-0 rounded-xl border border-edge bg-surface"></div>
+    <p id="graph-empty" class="hidden mt-3 text-sm text-fg-muted">
+        No citation edges yet. Edges appear once papers are enriched with OpenAlex references —
+        run <code class="text-xs bg-surface-2 px-1 py-0.5 rounded">cv-arxiv-backfill citation-edges</code> to build them for existing papers.
+    </p>
+</div>
+
+<script src="{{ url_for('static', filename='vendor/vis-network.min.js') }}"></script>
+<script>
+(function () {
+    const container = document.getElementById("graph");
+    const collectionSelect = document.getElementById("graph-collection");
+    const yearMin = document.getElementById("graph-year-min");
+    const yearMax = document.getElementById("graph-year-max");
+    const hideIsolated = document.getElementById("graph-hide-isolated");
+    const stats = document.getElementById("graph-stats");
+    const emptyNote = document.getElementById("graph-empty");
+
+    let raw = { nodes: [], edges: [] };
+    let network = null;
+
+    function token(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    // Color nodes light→dark by year between surface-2 and accent, so the
+    // scale follows the active theme's tokens (dark mode included).
+    function mix(hexA, hexB, t) {
+        const a = hexA.match(/\w\w/g).map(function (h) { return parseInt(h, 16); });
+        const b = hexB.match(/\w\w/g).map(function (h) { return parseInt(h, 16); });
+        const c = a.map(function (v, i) { return Math.round(v + (b[i] - v) * t); });
+        return "#" + c.map(function (v) { return v.toString(16).padStart(2, "0"); }).join("");
+    }
+
+    function render() {
+        const lo = parseInt(yearMin.value, 10) || -Infinity;
+        const hi = parseInt(yearMax.value, 10) || Infinity;
+        let nodes = raw.nodes.filter(function (n) {
+            return n.year === null || (n.year >= lo && n.year <= hi);
+        });
+        const kept = new Set(nodes.map(function (n) { return n.id; }));
+        const edges = raw.edges.filter(function (e) { return kept.has(e.source) && kept.has(e.target); });
+        if (hideIsolated.checked) {
+            const connected = new Set();
+            edges.forEach(function (e) { connected.add(e.source); connected.add(e.target); });
+            nodes = nodes.filter(function (n) { return connected.has(n.id); });
+        }
+
+        const years = raw.nodes.map(function (n) { return n.year; }).filter(function (y) { return y !== null; });
+        const yLo = Math.min.apply(null, years), yHi = Math.max.apply(null, years);
+        const cOld = token("--surface-2") || "#f1f5f9";
+        const cNew = token("--accent") || "#4f46e5";
+        const edgeColor = token("--edge-strong") || "#cbd5e1";
+        const fg = token("--fg") || "#0f172a";
+
+        const visNodes = nodes.map(function (n) {
+            const t = (years.length && yHi > yLo && n.year !== null) ? (n.year - yLo) / (yHi - yLo) : 0.6;
+            return {
+                id: n.id,
+                label: n.title.length > 40 ? n.title.slice(0, 38) + "…" : n.title,
+                title: n.title + (n.year ? " (" + n.year + ")" : "") + " — " + n.citations + " citations",
+                value: Math.sqrt(n.pagerank || 0) * 100 + 1,
+                color: { background: mix(cOld.slice(1), cNew.slice(1), t), border: edgeColor },
+                font: { color: fg, size: 11 },
+            };
+        });
+        const visEdges = edges.map(function (e) {
+            return { from: e.source, to: e.target, arrows: "to", color: { color: edgeColor, opacity: 0.6 } };
+        });
+
+        stats.textContent = nodes.length + " papers, " + edges.length + " citations";
+        emptyNote.classList.toggle("hidden", raw.edges.length > 0);
+
+        const data = {
+            nodes: new vis.DataSet(visNodes),
+            edges: new vis.DataSet(visEdges),
+        };
+        if (network) { network.setData(data); return; }
+        network = new vis.Network(container, data, {
+            nodes: { shape: "dot", scaling: { min: 6, max: 34 }, borderWidth: 1 },
+            edges: { smooth: false, width: 1 },
+            physics: {
+                solver: "forceAtlas2Based",
+                forceAtlas2Based: { gravitationalConstant: -40, springLength: 90 },
+                stabilization: { iterations: 150 },
+            },
+            interaction: { hover: true, tooltipDelay: 120 },
+        });
+        network.on("doubleClick", function (params) {
+            if (!params.nodes.length) return;
+            const node = raw.nodes.find(function (n) { return n.id === params.nodes[0]; });
+            if (node) window.location = "/?timeframe=all&q=" + encodeURIComponent(node.title);
+        });
+    }
+
+    async function load() {
+        const collection = collectionSelect.value;
+        const url = "/api/graph" + (collection ? "?collection=" + collection : "");
+        const res = await fetch(url);
+        if (!res.ok) { stats.textContent = "Failed to load graph"; return; }
+        raw = await res.json();
+        render();
+    }
+
+    async function loadCollections() {
+        try {
+            const res = await fetch("/api/collections");
+            if (!res.ok) return;
+            (await res.json()).forEach(function (c) {
+                const opt = document.createElement("option");
+                opt.value = c.id;
+                opt.textContent = c.name;
+                collectionSelect.appendChild(opt);
+            });
+        } catch (e) { /* non-fatal */ }
+    }
+
+    collectionSelect.addEventListener("change", load);
+    [yearMin, yearMax].forEach(function (el) { el.addEventListener("change", render); });
+    hideIsolated.addEventListener("change", render);
+
+    loadCollections();
+    load();
+})();
+</script>
+{% endblock %}

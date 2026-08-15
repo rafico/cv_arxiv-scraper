@@ -176,36 +176,54 @@ def search_authors():
     return jsonify([{"name": name, "paper_count": count} for name, count in results])
 
 
-@api_bp.route("/papers/<int:paper_id>/graph", methods=["GET"])
-def paper_graph(paper_id: int):
-    from app.services.related import build_vector, cosine_similarity
+GRAPH_DEFAULT_LIMIT = 500
+GRAPH_MAX_LIMIT = 2000
 
-    paper = db.session.get(Paper, paper_id) or abort(404)
 
-    # Build graph from top-N similar papers.
-    pool = Paper.query.filter(Paper.id != paper_id).order_by(Paper.paper_score.desc()).limit(100).all()
-    center_text = " ".join([paper.title or "", paper.summary_text or "", paper.abstract_text or ""])
-    center_vec = build_vector(center_text)
+@api_bp.route("/graph", methods=["GET"])
+def citation_graph():
+    """Citation graph over the corpus (or one collection): nodes + "cites" edges + PageRank."""
+    from app.models import PaperRelation
+    from app.services.citation_graph import CITES, pagerank
 
-    nodes = [{"id": paper.id, "title": paper.title, "score": float(paper.paper_score or 0), "center": True}]
-    edges = []
+    try:
+        limit = _parse_int_query_arg("limit", default=GRAPH_DEFAULT_LIMIT, minimum=1, maximum=GRAPH_MAX_LIMIT)
+        collection_id = _parse_int_query_arg("collection", default=None, minimum=1)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    for other in pool:
-        other_text = " ".join([other.title or "", other.summary_text or "", other.abstract_text or ""])
-        other_vec = build_vector(other_text)
-        sim = cosine_similarity(center_vec, other_vec)
-        if sim >= 0.15:
-            nodes.append(
-                {"id": other.id, "title": other.title, "score": float(other.paper_score or 0), "center": False}
-            )
-            edges.append({"source": paper.id, "target": other.id, "similarity": round(sim, 3)})
+    query = Paper.query.filter(Paper.is_hidden.is_(False))
+    if collection_id is not None:
+        db.session.get(Collection, collection_id) or abort(404)
+        query = query.join(
+            PaperCollection,
+            db.and_(PaperCollection.paper_id == Paper.id, PaperCollection.collection_id == collection_id),
+        )
+    # Most-cited first so a capped corpus view keeps the interesting nodes.
+    papers = query.order_by(Paper.citation_count.desc().nulls_last(), Paper.id).limit(limit).all()
 
-    # Sort edges by similarity and keep top 20.
-    edges.sort(key=lambda e: e["similarity"], reverse=True)
-    edges = edges[:20]
-    connected_ids = {paper.id}
-    for e in edges:
-        connected_ids.add(e["target"])
-    nodes = [n for n in nodes if n["id"] in connected_ids]
+    id_set = {p.id for p in papers}
+    # Filter edges in Python rather than two big IN clauses — the "cites" table
+    # is small (edges only exist between locally-tracked papers), and 2000-id
+    # IN lists flirt with SQLite's variable limit.
+    edges = [
+        (citing, cited)
+        for citing, cited in db.session.query(PaperRelation.paper_id, PaperRelation.related_paper_id).filter(
+            PaperRelation.relation_type == CITES
+        )
+        if citing in id_set and cited in id_set
+    ]
+    ranks = pagerank([p.id for p in papers], edges)
 
-    return jsonify({"nodes": nodes, "edges": edges})
+    nodes = [
+        {
+            "id": p.id,
+            "title": p.title,
+            "year": p.publication_dt.year if p.publication_dt else None,
+            "citations": p.citation_count or 0,
+            "pagerank": round(ranks.get(p.id, 0.0), 6),
+            "tags": p.user_tags or [],
+        }
+        for p in papers
+    ]
+    return jsonify({"nodes": nodes, "edges": [{"source": a, "target": b} for a, b in edges]})
