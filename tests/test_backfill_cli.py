@@ -12,6 +12,7 @@ from app.services.embeddings import EmbeddingService, reset_embedding_service
 from app.services.ranking import compute_paper_score
 from backfill_cli import (
     backfill_abstracts,
+    backfill_citation_edges,
     backfill_citations,
     backfill_github,
     backfill_openalex,
@@ -145,6 +146,39 @@ class BackfillCliTests(FlaskDBTestCase):
                 config=self.app.config["SCRAPER_CONFIG"],
             ),
         )
+
+    @patch("app.services.openalex.fetch_openalex_batch")
+    def test_backfill_citation_edges_updates_refs_and_builds_edges(self, mock_fetch):
+        from app.models import EnrichmentCache, PaperRelation
+
+        citing = _paper("2601.00010")
+        cited = _paper("2601.00011")
+        cited.openalex_id = "W11"
+        cited.referenced_works_count = 0
+        db.session.add_all([citing, cited])
+        db.session.commit()
+        # Stale cache row from before referenced_works existed — must be evicted.
+        db.session.add(EnrichmentCache(paper_id=citing.id, source="openalex", data={"openalex_id": "W10"}))
+        db.session.commit()
+        mock_fetch.return_value = {
+            "2601.00010": {
+                "openalex_id": "W10",
+                "referenced_works_count": 2,
+                "referenced_works": ["W11", "W999"],
+            }
+        }
+
+        updated = backfill_citation_edges(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
+
+        stored = Paper.query.filter_by(arxiv_id="2601.00010").one()
+        self.assertEqual(updated, 1)
+        self.assertEqual(stored.openalex_id, "W10")
+        self.assertEqual(stored.referenced_works, ["W11", "W999"])
+        self.assertEqual(EnrichmentCache.query.count(), 0)  # stale row evicted
+        edge = PaperRelation.query.filter_by(relation_type="cites").one()
+        self.assertEqual((edge.paper_id, edge.related_paper_id), (citing.id, cited.id))
+        # cited paper already has count=0: nothing to fetch for it.
+        self.assertEqual(mock_fetch.call_args[0][0], ["2601.00010"])
 
     @patch("app.services.thumbnail_generator.generate_thumbnail", return_value=True)
     def test_backfill_thumbnails_only_generates_missing_files(self, mock_generate):

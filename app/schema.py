@@ -102,6 +102,7 @@ PAPER_COLUMN_DEFS = {
     "openalex_topics": "TEXT NOT NULL DEFAULT '[]'",
     "oa_status": "TEXT",
     "referenced_works_count": "INTEGER",
+    "referenced_works": "TEXT NOT NULL DEFAULT '[]'",
     "openalex_cited_by_count": "INTEGER",
     "mendeley_doc_id": "TEXT",
     "zotero_item_key": "TEXT",

@@ -291,6 +291,20 @@ def _filter_existing_entries(app, entries: list[dict]) -> tuple[list[dict], int]
     return remaining, pre_filtered
 
 
+def _sync_citation_edges(app) -> None:
+    """Refresh PaperRelation "cites" edges after new papers land. Non-fatal:
+    a failure here must not abort the remaining post-processing steps."""
+    from app.services.citation_graph import sync_citation_edges
+
+    try:
+        with app.app_context():
+            inserted = sync_citation_edges()
+        if inserted:
+            LOGGER.info("Citation graph: %d new edges", inserted)
+    except Exception as exc:
+        LOGGER.warning("Citation edge sync failed: %s", exc)
+
+
 def _save_results(app, results: list[dict]) -> tuple[int, int]:
     from app.models import Paper, db
     from app.services.related import find_duplicates
@@ -359,6 +373,7 @@ def _save_results(app, results: list[dict]) -> tuple[int, int]:
                 openalex_topics=result.get("openalex_topics", []),
                 oa_status=result.get("oa_status"),
                 referenced_works_count=result.get("referenced_works_count"),
+                referenced_works=result.get("referenced_works", []),
                 openalex_cited_by_count=result.get("openalex_cited_by_count"),
             )
             papers_to_insert.append(paper)
@@ -946,6 +961,7 @@ def _enrich_results_with_openalex(
             res["oa_status"] = data.get("oa_status")
             res["openalex_cited_by_count"] = data.get("openalex_cited_by_count")
             res["referenced_works_count"] = data.get("referenced_works_count")
+            res["referenced_works"] = data.get("referenced_works", [])
             if res.get("citation_count") is None and res["openalex_cited_by_count"] is not None:
                 res["citation_count"] = res["openalex_cited_by_count"]
                 _mark_citation_source(res, "openalex", now)
@@ -1295,6 +1311,7 @@ def _finalize_results(
 
     _sort_results(results)
     new_count, skipped = _save_results(app, results)
+    _sync_citation_edges(app)
     _enrich_results_with_huggingface(app, results, session, config)
     _enrich_results_with_github(app, results, session, config)
 

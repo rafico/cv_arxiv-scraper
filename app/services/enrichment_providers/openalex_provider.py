@@ -61,6 +61,9 @@ def parse_openalex_work(work: dict) -> dict[str, Any]:
         "oa_status": oa_info.get("oa_status"),
         "openalex_cited_by_count": work.get("cited_by_count"),
         "referenced_works_count": len(work.get("referenced_works") or []),
+        # Bare W… ids (same shape as openalex_id above) — the local citation
+        # graph resolves these against Paper.openalex_id.
+        "referenced_works": [rw.rsplit("/", 1)[-1] for rw in work.get("referenced_works") or []],
     }
 
 

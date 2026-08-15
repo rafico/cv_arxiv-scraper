@@ -239,6 +239,7 @@ def backfill_openalex(
                     paper.oa_status = data.get("oa_status")
                     paper.openalex_cited_by_count = data.get("openalex_cited_by_count")
                     paper.referenced_works_count = data.get("referenced_works_count")
+                    paper.referenced_works = data.get("referenced_works", [])
                     if paper.citation_count is None and paper.openalex_cited_by_count is not None:
                         paper.citation_count = paper.openalex_cited_by_count
                         paper.citation_source = "openalex"
@@ -258,6 +259,93 @@ def backfill_openalex(
                 )
                 if delay_seconds > 0:
                     time.sleep(delay_seconds)
+    finally:
+        session.close()
+
+    return total_updated
+
+
+def backfill_citation_edges(
+    app,
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    emit: Emit = print,
+) -> int:
+    """Fetch OpenAlex referenced_works for papers missing them, then rebuild
+    the local PaperRelation "cites" edges.
+
+    Targets papers never fetched (referenced_works_count IS NULL) or fetched
+    before the referenced_works column existed (count > 0 but empty list).
+    """
+    from app.enrich.openalex import fetch_openalex_batch
+    from app.models import EnrichmentCache
+    from app.services.citation_graph import sync_citation_edges
+
+    total_updated = 0
+    last_seen_id = 0
+    session = create_session(pool_size=1, scraper_config=app.config.get("SCRAPER_CONFIG"), rate_limit_profile="bulk")
+    email = ((app.config.get("SCRAPER_CONFIG") or {}).get("openalex") or {}).get("email") or None
+
+    try:
+        with app.app_context():
+            # Cached OpenAlex payloads predate the referenced_works field; evict
+            # stale rows so the provider refetches instead of replaying them.
+            # (Quoted-key LIKE won't match the referenced_works_count key.)
+            stale = EnrichmentCache.query.filter(
+                EnrichmentCache.source == "openalex",
+                ~db.cast(EnrichmentCache.data, db.Text).like('%"referenced_works"%'),
+            ).delete(synchronize_session=False)
+            db.session.commit()
+            if stale:
+                emit(f"Evicted {stale} stale OpenAlex cache rows (predate referenced_works)")
+
+            while True:
+                papers = (
+                    Paper.query.filter(
+                        Paper.id > last_seen_id,
+                        Paper.arxiv_id.is_not(None),
+                        db.or_(
+                            Paper.referenced_works_count.is_(None),
+                            db.and_(
+                                Paper.referenced_works_count > 0,
+                                db.cast(Paper.referenced_works, db.Text) == "[]",
+                            ),
+                        ),
+                    )
+                    .order_by(Paper.id)
+                    .limit(batch_size)
+                    .all()
+                )
+                if not papers:
+                    break
+
+                last_seen_id = papers[-1].id
+                arxiv_ids = [paper.arxiv_id for paper in papers if paper.arxiv_id]
+                openalex_data = fetch_openalex_batch(arxiv_ids, session=session, email=email)
+                updated_now = 0
+
+                for paper in papers:
+                    data = openalex_data.get(paper.arxiv_id or "")
+                    if not data:
+                        continue
+                    paper.referenced_works = data.get("referenced_works", [])
+                    paper.referenced_works_count = data.get("referenced_works_count")
+                    if paper.openalex_id is None:
+                        paper.openalex_id = data.get("openalex_id")
+                    updated_now += 1
+
+                db.session.commit()
+                total_updated += updated_now
+                emit(
+                    f"Citation-edges batch through paper {last_seen_id}: "
+                    f"updated {updated_now}/{len(papers)} papers (total {total_updated})"
+                )
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
+
+            edges = sync_citation_edges()
+            emit(f"Citation edges backfill complete: {total_updated} papers updated, {edges} new edges")
     finally:
         session.close()
 
@@ -795,7 +883,17 @@ def build_parser() -> argparse.ArgumentParser:
     insights = subparsers.add_parser("insights", help="Run structured LLM extraction for papers without insights")
     insights.add_argument("--limit", type=_positive_int, default=200, help="Max papers to analyze (one LLM call each)")
 
-    for command in ("citations", "openalex", "comments", "github", "huggingface", "thumbnails", "sections", "all"):
+    for command in (
+        "citations",
+        "citation-edges",
+        "openalex",
+        "comments",
+        "github",
+        "huggingface",
+        "thumbnails",
+        "sections",
+        "all",
+    ):
         subparser = subparsers.add_parser(command, help=f"Run {command} backfill")
         subparser.add_argument("--batch-size", type=_positive_int, default=DEFAULT_BATCH_SIZE)
         subparser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
@@ -830,6 +928,8 @@ def main(argv: list[str] | None = None) -> int:
             backfill_abstracts(app, batch_size=args.batch_size)
         elif args.command == "citations":
             backfill_citations(app, batch_size=args.batch_size, delay_seconds=args.delay)
+        elif args.command == "citation-edges":
+            backfill_citation_edges(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "openalex":
             backfill_openalex(app, batch_size=args.batch_size, delay_seconds=args.delay)
         elif args.command == "interest":
