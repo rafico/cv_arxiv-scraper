@@ -88,6 +88,33 @@ def delete_collection(collection_id: int):
     return jsonify({"deleted": True})
 
 
+@api_bp.route("/collections/<int:collection_id>/export", methods=["GET"])
+def export_collection_bundle(collection_id: int):
+    from app.services.collection_share import export_collection
+
+    db.session.get(Collection, collection_id) or abort(404)
+    response = jsonify(export_collection(collection_id))
+    response.headers["Content-Disposition"] = f'attachment; filename="collection-{collection_id}.json"'
+    return response
+
+
+_MAX_BUNDLE_UPLOAD_BYTES = 64 * 1024 * 1024
+
+
+@api_bp.route("/collections/import", methods=["POST"])
+def import_collection_bundle():
+    from app.services.collection_share import import_collection
+
+    validate_csrf_token()
+    request.max_content_length = _MAX_BUNDLE_UPLOAD_BYTES
+    manifest = request.get_json(silent=True)
+    try:
+        collection, stats = import_collection(manifest)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"id": collection.id, "name": collection.name, **stats}), 201
+
+
 @api_bp.route("/collections/<int:collection_id>/papers", methods=["POST"])
 def add_paper_to_collection(collection_id: int):
     validate_csrf_token()

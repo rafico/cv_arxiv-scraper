@@ -223,10 +223,15 @@
         </button>
     </div>
     <div id="collection-suggest-list" class="mt-2 px-2 space-y-2"></div>
-    <div class="mt-2 px-2">
+    <div class="mt-2 px-2 flex gap-2">
         <a href="{{ url_for('api.export_bibtex', collection=current_filters.collection) }}"
-           class="block w-full px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+           class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
             Export .bib
+        </a>
+        <a href="{{ url_for('api.export_collection_bundle', collection_id=current_filters.collection) }}"
+           title="Portable JSON bundle (papers, notes, tags) — import it on another instance from Settings → Backup"
+           class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Share
         </a>
     </div>
 </div>
