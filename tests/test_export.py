@@ -127,3 +127,28 @@ class ExportTests(FlaskDBTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Announcement Lagged Bibtex Paper", response.get_data(as_text=True))
+
+    def test_bibtex_export_collection_filters_to_members(self):
+        from app.models import Collection, PaperCollection
+
+        collection = Collection(name="Graph papers")
+        db.session.add(collection)
+        db.session.flush()
+        member = Paper.query.filter_by(arxiv_id="2601.0001").one()
+        db.session.add(PaperCollection(paper_id=member.id, collection_id=collection.id))
+        db.session.commit()
+
+        client = self.app.test_client()
+        response = client.get(f"/api/export/bibtex?collection={collection.id}")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("Visible Recent Paper", body)
+        self.assertNotIn("Older Paper", body)  # non-member, despite timeframe=all default
+        self.assertIn(f"arxiv_collection_{collection.id}.bib", response.headers["Content-Disposition"])
+
+    def test_bibtex_export_unknown_collection_404s(self):
+        client = self.app.test_client()
+        response = client.get("/api/export/bibtex?collection=9999")
+
+        self.assertEqual(response.status_code, 404)

@@ -223,6 +223,12 @@
         </button>
     </div>
     <div id="collection-suggest-list" class="mt-2 px-2 space-y-2"></div>
+    <div class="mt-2 px-2">
+        <a href="{{ url_for('api.export_bibtex', collection=current_filters.collection) }}"
+           class="block w-full px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Export .bib
+        </a>
+    </div>
 </div>
 <script>
 (function () {
