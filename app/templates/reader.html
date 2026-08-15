@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}{{ paper.title }} - Reader{% endblock %}
+{% block page_title %}Reader{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="mb-3 flex items-start gap-3">
+        <div class="min-w-0">
+            <h1 class="text-base font-semibold text-fg leading-snug">{{ paper.title }}</h1>
+            <p class="text-xs text-fg-muted truncate">{{ paper.authors }}</p>
+        </div>
+        <a href="{{ paper.link }}" target="_blank" rel="noopener"
+           class="ml-auto shrink-0 px-3 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            arXiv ↗
+        </a>
+    </div>
+    <div id="pdf-viewer" data-pdf-url="{{ url_for('dashboard.paper_pdf', paper_id=paper.id) }}"
+         class="space-y-3 pb-10">
+        <p id="pdf-status" class="text-sm text-fg-muted py-8 text-center">Loading PDF…</p>
+    </div>
+</div>
+
+<script type="module">
+    import * as pdfjsLib from "{{ url_for('static', filename='vendor/pdfjs/pdf.min.mjs') }}";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "{{ url_for('static', filename='vendor/pdfjs/pdf.worker.min.mjs') }}";
+
+    const viewer = document.getElementById("pdf-viewer");
+    const status = document.getElementById("pdf-status");
+
+    async function render() {
+        let pdf;
+        try {
+            pdf = await pdfjsLib.getDocument(viewer.dataset.pdfUrl).promise;
+        } catch (e) {
+            status.textContent = "Could not load the PDF (" + (e && e.message ? e.message : "error") + ").";
+            return;
+        }
+        status.remove();
+        const width = viewer.clientWidth;
+        const dpr = window.devicePixelRatio || 1;
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const scale = width / page.getViewport({ scale: 1 }).width;
+            const viewport = page.getViewport({ scale: scale });
+            const wrap = document.createElement("div");
+            wrap.className = "pdf-page relative rounded-lg border border-edge overflow-hidden bg-white";
+            wrap.dataset.page = i;
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.floor(viewport.width * dpr);
+            canvas.height = Math.floor(viewport.height * dpr);
+            canvas.style.width = "100%";
+            canvas.style.display = "block";
+            wrap.appendChild(canvas);
+            viewer.appendChild(wrap);
+            await page.render({
+                canvasContext: canvas.getContext("2d"),
+                viewport: viewport,
+                transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+            }).promise;
+        }
+    }
+
+    render();
+</script>
+{% endblock %}
