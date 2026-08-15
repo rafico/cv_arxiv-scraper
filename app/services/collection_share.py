@@ -89,7 +89,11 @@ def _validate(manifest: object) -> dict:
     if not isinstance(manifest, dict) or manifest.get("bundle_version") != BUNDLE_VERSION:
         raise ValueError("Not a collection bundle (missing or unsupported bundle_version)")
     collection = manifest.get("collection")
-    if not isinstance(collection, dict) or not isinstance(collection.get("name"), str) or not collection["name"].strip():
+    if (
+        not isinstance(collection, dict)
+        or not isinstance(collection.get("name"), str)
+        or not collection["name"].strip()
+    ):
         raise ValueError("Bundle has no collection name")
     papers = manifest.get("papers")
     if not isinstance(papers, list):
@@ -216,7 +220,8 @@ def import_collection(manifest: object):
             or kind not in ("highlight", "comment")
             or not isinstance(rects, list)
             or not all(
-                isinstance(r, dict) and all(isinstance(r.get(k), int | float) and 0 <= r[k] <= 1 for k in ("x", "y", "w", "h"))
+                isinstance(r, dict)
+                and all(isinstance(r.get(k), int | float) and 0 <= r[k] <= 1 for k in ("x", "y", "w", "h"))
                 for r in rects
             )
         ):

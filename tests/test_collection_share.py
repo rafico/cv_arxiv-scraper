@@ -106,9 +106,7 @@ class CollectionShareTests(FlaskDBTestCase):
             with self.assertRaises(ValueError):
                 import_collection(bad)
         with self.assertRaises(ValueError):
-            import_collection(
-                {"bundle_version": 1, "collection": {"name": "x"}, "papers": [{"title": "no link"}]}
-            )
+            import_collection({"bundle_version": 1, "collection": {"name": "x"}, "papers": [{"title": "no link"}]})
 
     def test_api_roundtrip_and_csrf(self):
         collection = self._seed_collection()

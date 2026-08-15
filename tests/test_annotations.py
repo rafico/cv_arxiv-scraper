@@ -37,9 +37,7 @@ class AnnotationApiTests(FlaskDBTestCase):
     def _create(self, **overrides) -> dict:
         payload = {"kind": "highlight", "page": 1, "rects": [RECT], "color": "#ffd54a"}
         payload.update(overrides)
-        response = self.client.post(
-            f"/api/papers/{self.paper.id}/annotations", json=payload, headers=self._csrf()
-        )
+        response = self.client.post(f"/api/papers/{self.paper.id}/annotations", json=payload, headers=self._csrf())
         return response
 
     def test_crud_roundtrip(self):
