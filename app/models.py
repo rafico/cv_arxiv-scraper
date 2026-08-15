@@ -259,6 +259,26 @@ class PaperRelation(db.Model):
     similarity_score = db.Column(db.Float, nullable=True)
 
 
+class PaperAnnotation(db.Model):
+    """A highlight or comment pinned onto a paper's PDF in the reader.
+
+    Position is stored as page-fraction coordinates (0-1) in ``rects`` (a JSON
+    list of {x, y, w, h}) so annotations re-scale correctly at any render
+    width; a pure comment pin stores a single zero-size rect at its drop point.
+    """
+
+    __tablename__ = "paper_annotations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    paper_id = db.Column(db.Integer, db.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    page = db.Column(db.Integer, nullable=False)
+    kind = db.Column(db.String(16), nullable=False)  # "highlight" | "comment"
+    rects = db.Column(JSONList, nullable=False, default=list)
+    color = db.Column(db.String(16), nullable=True)
+    note = db.Column(db.Text, nullable=False, default="")
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+
 class SavedSearch(db.Model):
     __tablename__ = "saved_searches"
 

@@ -188,6 +188,7 @@ def ensure_schema() -> None:
         EnrichmentCache,
         FeedSource,
         InterestProfile,
+        PaperAnnotation,
         PaperCollection,
         PaperFeedback,
         PaperRelation,
@@ -210,6 +211,7 @@ def ensure_schema() -> None:
     Collection.__table__.create(bind=db.engine, checkfirst=True)
     PaperCollection.__table__.create(bind=db.engine, checkfirst=True)
     PaperRelation.__table__.create(bind=db.engine, checkfirst=True)
+    PaperAnnotation.__table__.create(bind=db.engine, checkfirst=True)
     SavedSearch.__table__.create(bind=db.engine, checkfirst=True)
     PaperSection.__table__.create(bind=db.engine, checkfirst=True)
     RankingConfig.__table__.create(bind=db.engine, checkfirst=True)

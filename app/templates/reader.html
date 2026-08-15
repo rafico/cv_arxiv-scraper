@@ -10,12 +10,20 @@
             <h1 class="text-base font-semibold text-fg leading-snug">{{ paper.title }}</h1>
             <p class="text-xs text-fg-muted truncate">{{ paper.authors }}</p>
         </div>
-        <a href="{{ paper.link }}" target="_blank" rel="noopener"
-           class="ml-auto shrink-0 px-3 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
-            arXiv ↗
-        </a>
+        <div class="ml-auto shrink-0 flex items-center gap-2">
+            <div id="annotate-modes" class="flex rounded-lg border border-edge overflow-hidden text-xs">
+                <button type="button" data-mode="select" class="annotate-mode px-3 py-1.5 bg-surface-2 text-fg">Select</button>
+                <button type="button" data-mode="highlight" class="annotate-mode px-3 py-1.5 text-fg-muted hover:bg-surface-2">Highlight</button>
+                <button type="button" data-mode="comment" class="annotate-mode px-3 py-1.5 text-fg-muted hover:bg-surface-2">Comment</button>
+            </div>
+            <a href="{{ paper.link }}" target="_blank" rel="noopener"
+               class="px-3 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+                arXiv ↗
+            </a>
+        </div>
     </div>
     <div id="pdf-viewer" data-pdf-url="{{ url_for('dashboard.paper_pdf', paper_id=paper.id) }}"
+         data-paper-id="{{ paper.id }}" data-csrf="{{ csrf_token }}"
          class="space-y-3 pb-10">
         <p id="pdf-status" class="text-sm text-fg-muted py-8 text-center">Loading PDF…</p>
     </div>
@@ -58,7 +66,134 @@
                 viewport: viewport,
                 transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
             }).promise;
+            attachOverlay(wrap, i);
         }
+        await loadAnnotations();
+    }
+
+    // ── Annotations (highlight + comment, page-fraction coordinates) ──
+    const paperId = viewer.dataset.paperId;
+    const csrf = viewer.dataset.csrf;
+    let mode = "select";
+
+    document.querySelectorAll(".annotate-mode").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            mode = btn.dataset.mode;
+            document.querySelectorAll(".annotate-mode").forEach(function (b) {
+                b.classList.toggle("bg-surface-2", b === btn);
+                b.classList.toggle("text-fg", b === btn);
+                b.classList.toggle("text-fg-muted", b !== btn);
+            });
+        });
+    });
+
+    function api(path, options) {
+        options = options || {};
+        options.headers = Object.assign({ "Content-Type": "application/json", "X-CSRF-Token": csrf }, options.headers);
+        return fetch(path, options);
+    }
+
+    function overlayFor(pageNum) {
+        const wrap = viewer.querySelector('.pdf-page[data-page="' + pageNum + '"]');
+        return wrap ? wrap.querySelector(".annotate-overlay") : null;
+    }
+
+    function drawAnnotation(a) {
+        const overlay = overlayFor(a.page);
+        if (!overlay) return;
+        const r = a.rects[0];
+        const el = document.createElement("div");
+        el.className = "absolute cursor-pointer";
+        el.title = a.note || (a.kind === "highlight" ? "Click to delete highlight" : "Comment");
+        if (a.kind === "highlight") {
+            el.style.cssText = "left:" + r.x * 100 + "%;top:" + r.y * 100 + "%;width:" + r.w * 100 + "%;height:" + r.h * 100 + "%;" +
+                "background:" + (a.color || "#ffd54a") + ";opacity:0.35;";
+        } else {
+            el.textContent = "💬";
+            el.style.cssText = "left:" + r.x * 100 + "%;top:" + r.y * 100 + "%;transform:translate(-50%,-50%);font-size:16px;";
+        }
+        el.addEventListener("click", async function (e) {
+            e.stopPropagation();
+            if (a.kind === "comment") {
+                const note = prompt("Comment (clear to delete):", a.note || "");
+                if (note === null) return;
+                if (note.trim() === "") {
+                    await api("/api/annotations/" + a.id, { method: "DELETE" });
+                    el.remove();
+                } else {
+                    await api("/api/annotations/" + a.id, { method: "PATCH", body: JSON.stringify({ note: note }) });
+                    a.note = el.title = note;
+                }
+            } else if (confirm("Delete this highlight?")) {
+                await api("/api/annotations/" + a.id, { method: "DELETE" });
+                el.remove();
+            }
+        });
+        overlay.appendChild(el);
+    }
+
+    async function saveAnnotation(payload) {
+        const res = await api("/api/papers/" + paperId + "/annotations", { method: "POST", body: JSON.stringify(payload) });
+        if (res.ok) drawAnnotation(await res.json());
+    }
+
+    function attachOverlay(wrap, pageNum) {
+        const overlay = document.createElement("div");
+        overlay.className = "annotate-overlay absolute inset-0";
+        wrap.appendChild(overlay);
+        let start = null;
+        let rubberBand = null;
+
+        function frac(e) {
+            const box = overlay.getBoundingClientRect();
+            return {
+                x: Math.min(Math.max((e.clientX - box.left) / box.width, 0), 1),
+                y: Math.min(Math.max((e.clientY - box.top) / box.height, 0), 1),
+            };
+        }
+
+        overlay.addEventListener("mousedown", function (e) {
+            if (mode !== "highlight") return;
+            start = frac(e);
+            rubberBand = document.createElement("div");
+            rubberBand.className = "absolute pointer-events-none";
+            rubberBand.style.cssText = "background:#ffd54a;opacity:0.35;";
+            overlay.appendChild(rubberBand);
+            e.preventDefault();
+        });
+        overlay.addEventListener("mousemove", function (e) {
+            if (!start || !rubberBand) return;
+            const p = frac(e);
+            rubberBand.style.left = Math.min(start.x, p.x) * 100 + "%";
+            rubberBand.style.top = Math.min(start.y, p.y) * 100 + "%";
+            rubberBand.style.width = Math.abs(p.x - start.x) * 100 + "%";
+            rubberBand.style.height = Math.abs(p.y - start.y) * 100 + "%";
+        });
+        overlay.addEventListener("mouseup", function (e) {
+            if (mode === "highlight" && start) {
+                const p = frac(e);
+                const rect = {
+                    x: Math.min(start.x, p.x), y: Math.min(start.y, p.y),
+                    w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y),
+                };
+                if (rubberBand) { rubberBand.remove(); rubberBand = null; }
+                start = null;
+                if (rect.w > 0.005 && rect.h > 0.002) {
+                    saveAnnotation({ kind: "highlight", page: pageNum, rects: [rect], color: "#ffd54a" });
+                }
+            } else if (mode === "comment") {
+                const p = frac(e);
+                const note = prompt("Comment:");
+                if (note && note.trim()) {
+                    saveAnnotation({ kind: "comment", page: pageNum, rects: [{ x: p.x, y: p.y, w: 0, h: 0 }], note: note.trim() });
+                }
+            }
+        });
+    }
+
+    async function loadAnnotations() {
+        const res = await fetch("/api/papers/" + paperId + "/annotations");
+        if (res.ok) (await res.json()).forEach(drawAnnotation);
     }
 
     render();
