@@ -14,6 +14,26 @@
             <h3 class="text-sm font-bold text-fg mb-2">Bulk export</h3>
             <p class="text-sm text-fg-muted">Use the toolbar <strong>BibTeX</strong> button to download all visible papers as a <code>.bib</code> file. Also available in bulk-select mode.</p>
         </div>
+        <div class="rounded-xl bg-surface-2 p-5 border border-edge">
+            <h3 class="text-sm font-bold text-fg mb-2">Per collection</h3>
+            <p class="text-sm text-fg-muted">Open a collection and click <strong>Export .bib</strong> in the sidebar to download exactly that collection&rsquo;s papers &mdash; a ready-made bibliography for the paper you&rsquo;re writing. Also via <code>GET /api/export/bibtex?collection=&lt;id&gt;</code>.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Collection Bundles -->
+<section id="collection-bundles" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Collection Bundles</h2>
+    <p class="text-sm text-fg-muted mb-4">Share one collection with a colleague (or another instance) without moving your whole library. A bundle is a single plain-JSON file: paper metadata, your notes, tags, reader annotations, and citation-reference ids &mdash; no PDFs, since those are re-fetched from arXiv on demand.</p>
+    <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-fg mb-2">Share</h3>
+            <p class="text-sm text-fg-muted">Open the collection and click <strong>Share</strong> in the sidebar to download <code>collection-&lt;id&gt;.json</code>.</p>
+        </div>
+        <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
+            <h3 class="text-sm font-bold text-fg mb-2">Import</h3>
+            <p class="text-sm text-fg-muted">In <a href="{{ url_for('settings.view_settings', section='backup') }}" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Backup</a>, choose the file under <strong>Import collection</strong>. Papers you already track are linked, not duplicated, and your existing notes and tags are never overwritten &mdash; imports only fill blanks. Citation-graph edges rebuild automatically.</p>
+        </div>
     </div>
 </section>
 

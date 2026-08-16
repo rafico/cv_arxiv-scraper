@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/), and the project aims to
 follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-08-16
+
+Research-library features adopted from studying
+[Graphbib](https://github.com/Lior-Falach/Graphbib), adapted to this app's
+global paper table and offline-first constraints.
+
+### Added
+- **Citation graph** (`/graph`): your library as a force-directed network of
+  real citation edges, with node color by year, size by in-corpus PageRank
+  (NumPy power iteration — no new deps), collection/year filters, and
+  double-click-to-open. Edges come from OpenAlex `referenced_works` **and**
+  Semantic Scholar `references` — S2 covers fresh preprints months before
+  OpenAlex parses them, which is most of a daily-scraper corpus. Synced
+  automatically after each scrape; `cv-arxiv-backfill citation-edges`
+  backfills older papers. Vendored vis-network 9.1.9 (first vendored JS —
+  the app stays CDN-free).
+- **In-app PDF reader** (`Read` on any paper): vendored pdf.js 4.10.38,
+  PDFs downloaded on first open and cached in `instance/pdfs/`. Drag to
+  **highlight**, click to pin **comments**; annotations are stored as
+  page-fraction coordinates so they survive any window size.
+- **Collection bundles**: export one collection as a plain-JSON file (papers,
+  notes, tags, annotations, reference ids — no PDFs, they re-fetch) and
+  import it elsewhere as a new collection. Imports link papers you already
+  track instead of duplicating, and never overwrite local notes/tags.
+- **Per-collection BibTeX** (`Export .bib` in the collection sidebar, or
+  `GET /api/export/bibtex?collection=<id>`).
+
+### Removed
+- The unused `GET /api/papers/<id>/graph` TF-IDF similarity stub (no UI ever
+  called it); `GET /api/graph` supersedes it with real citation edges.
+
 ## [0.5.0] — 2026-08-12
 
 Wave 4: prove the ranker, simplify the foundation, widen the audience, deepen
