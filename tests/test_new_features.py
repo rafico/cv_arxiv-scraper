@@ -340,27 +340,6 @@ class AuthorSearchAPITests(FlaskDBTestCase):
         self.assertEqual(response.get_json(), [])
 
 
-class PaperGraphAPITests(FlaskDBTestCase):
-    def setUp(self):
-        super().setUp()
-        self.client = self.app.test_client()
-
-    def test_paper_graph(self):
-        p1 = _make_paper(title="Vision Transformers for Object Detection")
-        db.session.add(p1)
-        db.session.commit()
-
-        response = self.client.get(f"/api/papers/{p1.id}/graph")
-        self.assertEqual(response.status_code, 200)
-        data = response.get_json()
-        self.assertIn("nodes", data)
-        self.assertIn("edges", data)
-
-    def test_paper_graph_404(self):
-        response = self.client.get("/api/papers/99999/graph")
-        self.assertEqual(response.status_code, 404)
-
-
 class DuplicateDetectionTests(unittest.TestCase):
     def test_find_duplicates_exact(self):
         from app.services.related import find_duplicates

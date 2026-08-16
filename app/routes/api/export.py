@@ -36,17 +36,26 @@ def export_bibtex():
     from app.services.text import now_utc
 
     view = request.args.get("view", "inbox")
+    collection_id = request.args.get("collection", type=int)
 
-    # Saved exports default to the full archive, mirroring the dashboard — otherwise
-    # an unparametrized "saved" bibtex export silently drops older saved papers.
-    default_timeframe = "all" if view == "saved" else "daily"
+    # Saved and collection exports default to the full archive, mirroring the
+    # dashboard — otherwise an unparametrized export silently drops older papers.
+    default_timeframe = "all" if view == "saved" or collection_id else "daily"
     timeframe = request.args.get("timeframe", default_timeframe)
     if timeframe not in TIMEFRAME_DAYS:
         timeframe = default_timeframe
 
     query = Paper.query.filter(Paper.is_hidden.is_(False))
 
-    if view == "saved":
+    if collection_id:
+        from app.models import Collection, PaperCollection
+
+        db.session.get(Collection, collection_id) or abort(404)
+        query = query.join(
+            PaperCollection,
+            db.and_(PaperCollection.paper_id == Paper.id, PaperCollection.collection_id == collection_id),
+        )
+    elif view == "saved":
         from app.models import PaperFeedback
 
         query = query.join(
@@ -63,7 +72,10 @@ def export_bibtex():
 
     bib = papers_to_bibtex(papers)
     response = Response(bib, mimetype="application/x-bibtex")
-    response.headers["Content-Disposition"] = f'attachment; filename="arxiv_papers_{timeframe}.bib"'
+    # Filename uses the numeric id, not the collection name — names are
+    # user-controlled and would flow into the Content-Disposition header.
+    stem = f"arxiv_collection_{collection_id}" if collection_id else f"arxiv_papers_{timeframe}"
+    response.headers["Content-Disposition"] = f'attachment; filename="{stem}.bib"'
     return response
 
 

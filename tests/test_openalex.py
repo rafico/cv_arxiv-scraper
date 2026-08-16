@@ -25,6 +25,7 @@ class TestParseOpenalexWork:
         assert result["oa_status"] == "gold"
         assert result["openalex_cited_by_count"] == 42
         assert result["referenced_works_count"] == 2
+        assert result["referenced_works"] == ["W1", "W2"]
         assert len(result["openalex_topics"]) == 2
         assert result["openalex_topics"][0]["name"] == "Computer Vision"
 
@@ -35,6 +36,7 @@ class TestParseOpenalexWork:
         assert result["oa_status"] is None
         assert result["openalex_cited_by_count"] == 0
         assert result["referenced_works_count"] == 0
+        assert result["referenced_works"] == []
 
     def test_missing_open_access(self):
         work = {"id": "https://openalex.org/W1", "topics": []}

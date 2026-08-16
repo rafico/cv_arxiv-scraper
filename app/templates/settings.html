@@ -389,8 +389,38 @@
                 </form>
                 <p id="restore-status" class="mt-3 text-xs text-fg-muted"></p>
             </div>
+
+            <div class="rounded-2xl border border-edge bg-surface p-5">
+                <h3 class="text-sm font-semibold text-fg mb-1">Import collection</h3>
+                <p class="text-xs text-fg-muted mb-4">Imports a shared collection bundle (<code>.json</code>) as a new collection. Existing papers are linked, not duplicated; local notes and tags are never overwritten.</p>
+                <input type="file" id="collection-bundle-file" accept=".json,application/json"
+                       class="block w-full text-sm text-fg-muted file:mr-3 file:rounded-lg file:border-0 file:bg-surface-2 file:px-4 file:py-2 file:text-sm file:font-medium file:text-fg hover:file:bg-edge">
+                <button type="button" id="collection-bundle-import" class="btn-ghost mt-4 text-sm">Import bundle</button>
+                <p id="collection-bundle-status" class="mt-3 text-xs text-fg-muted"></p>
+            </div>
         </div>
         <script>
+        (function () {
+            const fileInput = document.getElementById("collection-bundle-file");
+            const importBtn = document.getElementById("collection-bundle-import");
+            const bundleStatus = document.getElementById("collection-bundle-status");
+            if (importBtn) importBtn.addEventListener("click", async function () {
+                const file = fileInput.files && fileInput.files[0];
+                if (!file) { bundleStatus.textContent = "Choose a .json bundle first."; return; }
+                bundleStatus.textContent = "Importing…";
+                try {
+                    const res = await fetch("/api/collections/import", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", "X-CSRF-Token": "{{ csrf_token }}" },
+                        body: await file.text(),
+                    });
+                    const data = await res.json();
+                    bundleStatus.textContent = res.ok
+                        ? 'Imported as "' + data.name + '": ' + data.created + " new papers, " + data.linked + " linked."
+                        : "Error: " + (data.error || "import failed");
+                } catch (e) { bundleStatus.textContent = "Error: request failed"; }
+            });
+        })();
         (function () {
             const form = document.getElementById("restore-backup-form");
             const status = document.getElementById("restore-status");

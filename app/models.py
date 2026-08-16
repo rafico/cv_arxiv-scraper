@@ -121,6 +121,9 @@ class Paper(db.Model):
     openalex_topics = db.Column(JSONList, nullable=False, default=list)
     oa_status = db.Column(db.String(32), nullable=True)
     referenced_works_count = db.Column(db.Integer, nullable=True)
+    # Bare OpenAlex W… ids this paper references; resolved locally into
+    # PaperRelation "cites" edges by app/services/citation_graph.py.
+    referenced_works = db.Column(JSONList, nullable=False, default=list)
     openalex_cited_by_count = db.Column(db.Integer, nullable=True)
 
     mendeley_doc_id = db.Column(db.Text, nullable=True)

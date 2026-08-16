@@ -7,11 +7,15 @@ time-ordered 80/20 split, and reports AUC / nDCG@10 / recall@20 / MRR — the
 same metrics the in-app holdout eval writes to RecommendationMetric.
 
 Dataset: the public ~800k-rating corpus released with the Scholar Inbox paper
-(arXiv:2504.08385). It is never bundled here — download it separately and pass
-``--data``. Expected columns (rename via the ``--col-*`` flags): ``user_id``,
-``rating`` (positive when >= --positive-threshold), ``timestamp`` (ISO 8601 or
-epoch seconds; optional), ``title``, ``abstract``. CSV is read with the stdlib;
-``.parquet`` needs pandas+pyarrow installed.
+(arXiv:2504.08385), at github.com/avg-dev/scholar_inbox_datasets. It is never
+bundled here — download it separately and pass ``--data``. Expected columns
+(rename via the ``--col-*`` flags): ``user_id``, ``rating`` (positive when
+>= --positive-threshold), ``timestamp`` (ISO 8601 or epoch seconds; optional),
+``title``, ``abstract``. NOTE: the released ``rated_papers.csv`` carries only
+``arxiv_id`` — join titles/abstracts yourself first (the arXiv export API at
+100 ids per ``id_list`` request works; Semantic Scholar's unauthenticated
+batch endpoint rate-limits too hard for ~15k papers). CSV is read with the
+stdlib; ``.parquet`` needs pandas+pyarrow installed.
 
 Embeddings are computed with the app's embedding model (SPECTER2 with
 fallbacks) and cached per abstract hash in ``--cache``, so re-runs are cheap.

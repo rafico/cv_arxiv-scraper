@@ -99,6 +99,13 @@
     </div>
 </section>
 
+<!-- Citation Graph -->
+<section id="citation-graph" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Citation Graph</h2>
+    <p class="text-sm text-fg-muted mb-3">The <strong>Graph</strong> page (sidebar) draws your library as a force-directed network: an arrow from one paper to another means the first cites the second, using reference lists from OpenAlex. Node color runs light&rarr;dark by publication year, node size reflects <strong>PageRank</strong> within your corpus &mdash; the papers your library keeps citing float to the top visually. Filter by collection or year range, hide papers with no local citations, and double-click a node to open that paper on the dashboard.</p>
+    <p class="text-sm text-fg-muted">Edges only connect papers you actually track and are refreshed automatically after every scrape. For papers added before this feature existed, run <code>cv-arxiv-backfill citation-edges</code> once to fetch their reference lists.</p>
+</section>
+
 <!-- Ask This Paper -->
 <section id="paper-chat" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Ask This Paper</h2>

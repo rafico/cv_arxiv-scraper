@@ -43,7 +43,9 @@ class SemanticScholarProvider(EnrichmentProvider):
         if not missing_ids:
             return cached
 
-        params = {"fields": "citationCount,influentialCitationCount,paperId"}
+        # references.paperId feeds the local citation graph: S2 parses reference
+        # lists for fresh arXiv preprints within days, where OpenAlex lags months.
+        params = {"fields": "citationCount,influentialCitationCount,paperId,references.paperId"}
         # Extra kwargs are only passed when they carry a value: injected request_fn
         # doubles (tests) keep the narrow legacy signature and must not receive them.
         extra_kwargs: dict[str, Any] = {}
@@ -90,6 +92,9 @@ class SemanticScholarProvider(EnrichmentProvider):
                         "citation_count": item.get("citationCount"),
                         "influential_citation_count": item.get("influentialCitationCount"),
                         "semantic_scholar_id": item.get("paperId"),
+                        "references": [
+                            ref["paperId"] for ref in item.get("references") or [] if ref and ref.get("paperId")
+                        ],
                     }
             except Exception as exc:
                 # One failed chunk must not abandon the rest of the batch.

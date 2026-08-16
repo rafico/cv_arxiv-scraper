@@ -142,11 +142,51 @@ one), conference planner (no poster-metadata source), OpenAlex full-text RAG
 (metered + new parsing surface), embedding-model A/B (SPECTER2 holds; the
 benchmark script is the harness when wanted), bandits (standing decision).
 
+## Graphbib adoption (2026-08-15/16, branch `feat/graphbib-adoption`, v0.6.0)
+
+Features ported from [Graphbib](https://github.com/Lior-Falach/Graphbib) after a
+gap analysis (three capabilities were genuinely absent; the rest we had):
+
+19. **Citation edges + graph page** ✅ — reference ids persist on each paper
+    (`Paper.referenced_works`), resolve locally into `PaperRelation` "cites"
+    rows (a table that existed unused since Wave 1 — zero schema DDL), and
+    render at `/graph` via vendored vis-network with NumPy PageRank sizing.
+    Edge sources: OpenAlex `referenced_works` + Semantic Scholar `references`.
+    The S2 source is load-bearing, not optional: on the real 1460-paper corpus
+    (all 2026 preprints) OpenAlex had parsed references for **zero** papers,
+    while S2 covered 574 immediately (32 in-corpus edges on first sync; grows
+    as the corpus ages).
+20. **Collection bundles** ✅ — plain-JSON export/import of one collection
+    (no PDFs, no zip surface); fill-only merge on import, edges rebuild from
+    shipped reference ids.
+21. **Per-collection BibTeX** ✅ — collection filter on the existing export.
+
+Graphbib's **PDF reader + annotations** was built, then cut before release
+(2026-08-16): without annotations the reader adds nothing over the browser's
+native PDF viewer behind the existing PDF button, and annotation itself is
+better served by the Mendeley/Zotero sync — a second, disconnected annotation
+store fragments notes. If in-app annotation ever returns, it should sync
+*into* the reference manager, not beside it.
+
+Deliberate ceiling (marked `ponytail:` in code): full-corpus edge recompute
+per scrape.
+
 ### Wave 4 leftovers (small)
 
 - Figure-extraction negative sentinel exists (`{id}_nofig`); delete the file to
   force a re-attempt after arXiv backfills an HTML rendition.
-- Run the Scholar Inbox benchmark on the real dataset and record numbers here.
+- ~~Run the Scholar Inbox benchmark on the real dataset and record numbers
+  here.~~ Done 2026-08-16. Setup: the public release
+  (github.com/avg-dev/scholar_inbox_datasets, `rated_papers.csv`, 774k
+  ratings) ships only `arxiv_id`s, so titles/abstracts were joined from the
+  arXiv export API; evaluated the first 200 lexicographically-sorted users
+  with ≥20 ratings (137 had evaluable two-class holdouts), seed 0.
+  **Results** (mean / median): AUC **0.758 / 0.778**, nDCG@10
+  **0.862 / 0.931**, recall@20 **0.937 / 1.000**, MRR **0.869 / 1.000**.
+  Reading: the production recipe ranks well (a relevant paper reaches the
+  top-10 for the typical user) with headroom on raw AUC vs. the paper's
+  reported ~0.89 — theirs trains on each user's full history; ours is a
+  cold 80/20 split per user.
 - One-time manual step: register the PyPI trusted publisher, then tag v0.5.0.
 
 ## Deliberately not doing
