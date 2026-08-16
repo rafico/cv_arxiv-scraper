@@ -4,6 +4,90 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/), and the project aims to
 follow [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-08-12
+
+Wave 4: prove the ranker, simplify the foundation, widen the audience, deepen
+the research workflows.
+
+### Added
+- **Ranking metrics you can trust**: the learned-ranker holdout eval now also
+  reports nDCG@10, recall@20 and MRR (per profile, shown in Settings), and
+  `scripts/benchmark_scholar_inbox.py` benchmarks the exact production recipe
+  on the public Scholar Inbox 800k-rating dataset (`--self-test` runs without
+  the dataset).
+- **Digest exploration slots** (`digest.exploration_slots`, default 2): clearly
+  labeled papers from outside your usual lane; one-tap ratings teach the model
+  where your interests end. Saved-search alerts take precedence.
+- **Weekly field synthesis** (`digest.synthesis_weekday`, off by default): a
+  "this week in your field" brief atop the digest — LLM-narrated with citation
+  verification when configured, emerging-topic labels and counts otherwise.
+- **Collection expansion**: a "Suggest similar" widget in every collection view
+  wires the previously UI-less `/api/corpus/neighbors` endpoint to one-click
+  adds.
+- **Follow → digest alerts**: following an author now also creates a
+  `notify_on_match` saved search, and the save-search prompt asks about digest
+  alerts (the flag existed but no UI set it).
+- **PyPI publishing**: tag-triggered trusted-publishing workflow
+  (`.github/workflows/publish.yml`).
+- `scraper.extract_figures` opt-out flag; figure extraction memoizes conclusive
+  no-figure papers (`thumbnails/{id}_nofig`) instead of refetching them forever.
+
+### Changed
+- **faiss-cpu removed.** The vector index is a plain NumPy matrix
+  (`papers.npy` / `sections.npy`) — search was always exact, so behavior is
+  unchanged while the heaviest wheel and the dual-libgomp SIGSEGV mitigations
+  disappear. Legacy `*.index` files migrate automatically on first load (the
+  old file is left for rollback); without faiss installed the app runs
+  read-empty and `cv-arxiv-backfill --rebuild-index` rebuilds.
+- **Dense-retrieval admission is now a true per-run top-K** by interest score;
+  previously the first K above threshold in stream order won and LLM enrichment
+  ran before the cap.
+- **The built-in scheduler replaces crontab management** (`app/services/cron.py`
+  deleted — it hardcoded a `~/venv` interpreter). New `scheduler.send_digest`
+  option emails the digest after each scheduled scrape; the Settings automation
+  card edits `scheduler.*` in config.yaml and shows the next run.
+- **Prompts and defaults generalized beyond cs.CV**: neutral analyst prompts,
+  and historical search derives default categories from your configured feeds.
+
+### Removed
+- API-dead recommendation metrics (`compute_precision_at_k`,
+  `measure_recommendation_quality`, …) that scored against all feedback
+  (train==test) and had no callers; the holdout eval supersedes them.
+
+### Also in 0.5.0 — activation pass (2026-07-30)
+
+Several Wave 1–3 features shipped but stayed inert on a real install. Nothing
+here adds capability — it makes what already exists run.
+
+### Changed
+- **Full-text section extraction is on by default.** `scraper.extract_sections`
+  previously defaulted to `false` and was documented in no config file, so
+  per-paper chat, corpus chat, and citation verification had no `PaperSection`
+  rows to read. It is now on and documented in `config.example.yaml`; set it to
+  `false` to opt out (it costs roughly one extra HTTP fetch per new paper).
+- **The onboarding checklist tracks the real activation threshold.** The "Save or
+  skip papers" step completed after a single save, while the centroid interest
+  profile, the learned ranker, and whitelist-free dense-retrieval admission all
+  stay inert below `MIN_POSITIVE_FEEDBACK` (5). It now shows progress (`n/5`) and
+  completes at the threshold that actually switches ranking on.
+
+### Added
+- **Feature-liveness diagnostics.** `/healthz` gained a `features` block (section
+  coverage, positive-feedback progress, off-whitelist admissions, last digest
+  status, enrichment coverage) and Settings → Automation gained a matching
+  "Feature Status" card. These are diagnostics only: the 200/503 status the
+  Docker healthcheck gates on is unchanged, since an empty corpus is a fresh
+  install rather than a failure.
+- **A "Set a digest recipient" onboarding step** when `email.recipient` is empty —
+  the digest carries the one-tap 👍/👎 links that train the ranker.
+
+### Fixed
+- **A misconfigured digest no longer fails invisibly.** A missing
+  `email.recipient` raised before any `DigestRun` row was created, so nightly
+  cron failures left no trace outside `cron.log` and the Settings digest panel
+  showed "No digest runs yet". The misconfiguration is now recorded as an errored
+  run before the error propagates.
+
 ## [0.4.0] — 2026-07-03
 
 Wave 3 completion: HTML-first full-text extraction and a local MCP server.

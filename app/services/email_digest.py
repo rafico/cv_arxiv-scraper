@@ -452,6 +452,18 @@ def get_digest_config(app: Flask) -> dict:
         max_papers = DEFAULT_DIGEST_MAX_PAPERS
     max_papers = max(1, min(100, max_papers))
 
+    try:
+        exploration_slots = int(raw.get("exploration_slots", 2))
+    except (TypeError, ValueError):
+        exploration_slots = 2
+    exploration_slots = max(0, min(10, exploration_slots))
+
+    # Weekday for the "what happened in your field" synthesis brief; off unless
+    # a valid day is configured.
+    synthesis_weekday = str(raw.get("synthesis_weekday", "") or "").strip().lower()[:3]
+    if synthesis_weekday not in DIGEST_WEEKDAY_KEYS:
+        synthesis_weekday = None
+
     base_url = raw.get("base_url")
     if not isinstance(base_url, str) or not base_url.strip():
         # Mirrors run.py's default bind (127.0.0.1, PORT env or 5000). The app has
@@ -461,6 +473,8 @@ def get_digest_config(app: Flask) -> dict:
         "weekdays": weekdays,
         "min_score": min_score,
         "max_papers": max_papers,
+        "exploration_slots": exploration_slots,
+        "synthesis_weekday": synthesis_weekday,
         "base_url": base_url.strip().rstrip("/"),
     }
 
@@ -757,7 +771,33 @@ def build_digest_preview(app: Flask) -> dict:
 
     alerts_since = window["last_run_at"] or (now_utc() - timedelta(hours=window["lookback_hours"]))
     alerts = _collect_saved_search_alerts(app, since=alerts_since, exclude_paper_ids=[p.id for p in papers])
+
+    # Exploration draws from the leftovers only: never the main list, never a
+    # saved-search alert (an explicit notify beats a random exploration slot).
+    exploration: list[Paper] = []
+    if digest_cfg["exploration_slots"] and papers:
+        alert_ids = [p.id for alert in alerts for p in alert["papers"]]
+        exploration = _query_exploration_papers(
+            app,
+            window["lookback_hours"],
+            exclude_ids=[p.id for p in papers] + alert_ids,
+            count=digest_cfg["exploration_slots"],
+        )
     today = utc_today()
+
+    # Weekly field-synthesis brief on the configured weekday only (LLM optional;
+    # degrades to topic labels + counts without one).
+    synthesis = None
+    if digest_cfg["synthesis_weekday"] == DIGEST_WEEKDAY_KEYS[today.weekday()]:
+        try:
+            from app.services.corpus_analysis import synthesize_recent_topics
+            from app.services.rag import build_llm_client
+
+            synthesis = synthesize_recent_topics(llm_client=build_llm_client(app))
+            if not synthesis.get("topics"):
+                synthesis = None
+        except Exception:  # noqa: BLE001 — the digest must send without the brief
+            LOGGER.warning("Field synthesis unavailable for this digest", exc_info=True)
 
     catch_up_label = None
     if window["catch_up"]:
@@ -771,11 +811,13 @@ def build_digest_preview(app: Flask) -> dict:
         "token_for": lambda paper_id, action, profile_id=None: make_one_tap_token(
             app, paper_id, action, None, profile_id
         ),
-        "figure_srcs": _preview_figure_srcs(app, papers, digest_cfg["base_url"]),
+        "figure_srcs": _preview_figure_srcs(app, list(papers) + list(exploration), digest_cfg["base_url"]),
         "catch_up_label": catch_up_label,
         "alerts": alerts,
         "sections": sections,
         "default_profile_id": default_profile_id,
+        "exploration": exploration,
+        "synthesis": synthesis,
     }
     return {
         "recipient": email_cfg["recipient"],
@@ -789,6 +831,8 @@ def build_digest_preview(app: Flask) -> dict:
         "alerts": alerts,
         "sections": sections,
         "default_profile_id": default_profile_id,
+        "exploration": exploration,
+        "synthesis": synthesis,
     }
 
 
@@ -802,6 +846,31 @@ def get_digest_status_snapshot(app: Flask) -> dict:
         "preview_subject": preview["subject"],
         "latest_run": latest,
     }
+
+
+def _query_exploration_papers(app: Flask, lookback_hours: int, exclude_ids: list[int], count: int) -> list[Paper]:
+    """Sample papers from *outside* the user's usual lane for labeled exploration.
+
+    Scholar Inbox's recipe: a couple of clearly-labeled slots per digest whose
+    ratings teach the model where the user's interests end. Prefers papers the
+    interest model knows least about (NULL similarity first, then lowest), with
+    a random tiebreak so the slots vary between digests.
+    """
+    from sqlalchemy import func
+
+    cutoff = now_utc() - timedelta(hours=lookback_hours)
+    with app.app_context():
+        query = Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
+        if exclude_ids:
+            query = query.filter(Paper.id.notin_(exclude_ids))
+        return (
+            query.order_by(
+                func.coalesce(Paper.interest_similarity, -1.0).asc(),
+                func.random(),
+            )
+            .limit(count)
+            .all()
+        )
 
 
 def _query_todays_papers(
@@ -1003,6 +1072,37 @@ def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None)
             f'font-size:13px;font-weight:600;margin:0 0 16px;">{escape(ctx["catch_up_label"])}</div>'
         )
 
+    synthesis_html = ""
+    synthesis = ctx.get("synthesis")
+    if synthesis and synthesis.get("topics"):
+        if synthesis.get("narrative"):
+            body = f'<p style="color:#374151;font-size:13px;margin:0;">{escape(synthesis["narrative"])}</p>'
+        else:
+            rows = "".join(
+                f"<li>{escape(topic['label'])} &mdash; {int(topic['recent_count'])} new"
+                f" (+{topic['delta_share']:.0%} share)</li>"
+                for topic in synthesis["topics"]
+            )
+            body = f'<ul style="color:#374151;font-size:13px;margin:0;padding-left:18px;">{rows}</ul>'
+        synthesis_html = (
+            '<div style="background:#eef2ff;border-radius:10px;padding:12px 14px;margin:0 0 16px;">'
+            '<div style="font-size:13px;font-weight:700;color:#3730a3;margin:0 0 6px;">'
+            "📈 This week in your field</div>"
+            f"{body}</div>"
+        )
+
+    exploration_html = ""
+    exploration = ctx.get("exploration") or []
+    if exploration:
+        default_pid = ctx.get("default_profile_id")
+        exploration_cards = "\n".join(_render_paper_html(p, ctx, profile_id=default_pid) for p in exploration)
+        exploration_html = (
+            '<h2 style="font-size:15px;color:#111827;margin:20px 0 2px;">🧭 Exploration</h2>'
+            '<p style="color:#6b7280;font-size:12px;margin:0 0 10px;">'
+            "Outside your usual lane — rating these teaches the ranker where your interests end.</p>"
+            f"{exploration_cards}"
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -1019,7 +1119,9 @@ def _build_email_body(papers: list[Paper], today: date, ctx: dict | None = None)
         {len(papers)} paper{"s" if len(papers) != 1 else ""} matched
       </p>
       {catch_up_banner}
+      {synthesis_html}
       {paper_cards}
+      {exploration_html}
       {_render_alerts_html(ctx.get("alerts") or [])}
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0 12px;">
       <p style="color:#9ca3af;font-size:11px;text-align:center;margin:0;">
@@ -1067,7 +1169,18 @@ def send_digest(app: Flask, *, dry_run: bool = False, force: bool = False) -> di
 
     recipient = email_cfg["recipient"]
     if not recipient:
-        raise ValueError("No recipient configured. Set 'email.recipient' in config.yaml.")
+        # Record the misconfiguration as an errored run before raising. A scheduled
+        # digest trips this on every run, and without a DigestRun row the dashboard
+        # and the Settings digest panel show nothing at all — the only trace ends up
+        # in the server log, where nobody looks.
+        message = "No recipient configured. Set 'email.recipient' in config.yaml."
+        _finish_digest_run(
+            app,
+            _create_digest_run(app, recipient="", subject="", papers_count=0, preview_only=dry_run),
+            status="error",
+            error_message=message,
+        )
+        raise ValueError(message)
 
     if not force and not weekday_allowed(digest_cfg):
         LOGGER.info("Digest skipped: %s is not in the configured weekdays", utc_today().strftime("%A"))

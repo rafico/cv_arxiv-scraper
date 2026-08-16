@@ -36,9 +36,10 @@ class WhitelistCandidateGenerator:
     Entries with no whitelist hit get a second chance through the dense-retrieval
     interest gate: when the learned ranker (or the centroid interest profile as
     cold-start fallback) scores their embedding above a configurable threshold,
-    they are admitted with match type "Interest" — bounded to
-    ``candidate_top_k`` admissions per generator instance (i.e. per scrape) so a
-    bad model can never flood the feed.
+    they are admitted with match type "Interest" and their score in
+    ``raw_features``. The per-scrape ``candidate_top_k`` cap is enforced by the
+    caller (scrape_engine keeps the top-K *by score* across the whole run, not
+    the first K seen in stream order), so a bad model can never flood the feed.
     """
 
     def __init__(
@@ -63,7 +64,6 @@ class WhitelistCandidateGenerator:
         self._interest_scorer = interest_scorer
         self._interest_settings = interest_settings
         self._interest_resolved = interest_scorer is not None
-        self._interest_admitted = 0
 
     def generate(self, papers: list[dict[str, Any]]) -> list[ScoredCandidate]:
         candidates = []
@@ -163,12 +163,8 @@ class WhitelistCandidateGenerator:
         if self._interest_scorer is None:
             return None
         settings = self._interest_settings or {}
-        top_k = int(settings.get("candidate_top_k", 10))
         threshold = float(settings.get("candidate_threshold", 0.6))
 
-        with self._interest_lock:
-            if self._interest_admitted >= top_k:
-                return None
         if self._is_muted(entry_data):
             return None
 
@@ -188,11 +184,6 @@ class WhitelistCandidateGenerator:
 
         if score is None or score < threshold:
             return None
-
-        with self._interest_lock:
-            if self._interest_admitted >= top_k:
-                return None
-            self._interest_admitted += 1
 
         return ScoredCandidate(
             entry_data=entry_data,

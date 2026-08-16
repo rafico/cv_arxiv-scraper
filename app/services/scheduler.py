@@ -21,11 +21,12 @@ class ScrapeScheduler:
         self._enabled = False
         self._app = None
         self._daily_at: str = "08:00"
+        self._send_digest = False
         self._lock = threading.Lock()
         self._leader_lock_fd: int | None = None
         self._leader_lock_path: Path | None = None
 
-    def start(self, app, *, daily_at: str = "08:00") -> None:
+    def start(self, app, *, daily_at: str = "08:00", send_digest: bool = False) -> None:
         with self._lock:
             desired_lock_path = Path(app.instance_path) / _SCHEDULER_LOCK_FILENAME
             if self._leader_lock_path != desired_lock_path:
@@ -38,6 +39,7 @@ class ScrapeScheduler:
 
             self._app = app
             self._daily_at = daily_at
+            self._send_digest = bool(send_digest)
             self._enabled = True
             # _schedule_next cancels any existing timer before scheduling the new one.
             self._schedule_next()
@@ -97,11 +99,12 @@ class ScrapeScheduler:
         self._timer.start()
 
     def _run(self) -> None:
-        # Snapshot enabled/app under the lock so a concurrent stop() (which sets
+        # Snapshot state under the lock so a concurrent stop() (which sets
         # _enabled=False and _app=None) can't tear the check from the use below.
         with self._lock:
             enabled = self._enabled
             app = self._app
+            send_digest_after = self._send_digest
         if not enabled or not app:
             return
         LOGGER.info("Scheduled scrape starting")
@@ -109,16 +112,39 @@ class ScrapeScheduler:
             # Route through the shared job manager's single-flight gate instead of
             # calling execute_scrape directly, so a scheduled scrape and a
             # user-triggered scrape never run concurrently. Two overlapping scrapes
-            # each rewrite the FAISS index on completion via atomic rename, so the
+            # each rewrite the vector index on completion via atomic rename, so the
             # later writer silently drops the earlier run's vectors/sections.
             from app.services.jobs import SCRAPE_JOB_MANAGER
 
-            SCRAPE_JOB_MANAGER.start_or_get_active(app)
+            job = SCRAPE_JOB_MANAGER.start_or_get_active(app)
+            if send_digest_after:
+                with job.condition:
+                    while job.status == "running":
+                        job.condition.wait(timeout=60)
+                self._send_scheduled_digest(app)
         except Exception:
             LOGGER.exception("Scheduled scrape failed")
         finally:
             with self._lock:
                 self._schedule_next()
+
+    @staticmethod
+    def _send_scheduled_digest(app) -> None:
+        """Send the daily digest after a scheduled scrape (weekday gating included).
+
+        ``send_digest`` itself records the DigestRun and honors the configured
+        weekday schedule; a missing recipient just logs — the scheduler must
+        keep rescheduling regardless.
+        """
+        from app.services.email_digest import send_digest
+
+        try:
+            result = send_digest(app)
+            LOGGER.info("Scheduled digest: %s", result)
+        except ValueError as exc:  # no recipient configured
+            LOGGER.warning("Scheduled digest skipped: %s", exc)
+        except Exception:
+            LOGGER.exception("Scheduled digest failed")
 
     @property
     def next_run_at(self) -> str | None:

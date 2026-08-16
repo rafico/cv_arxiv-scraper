@@ -88,7 +88,7 @@ production ranker recipe and an 800k-rating public dataset), PaperQA2 / `paper-q
     has-code + star velocity + license + repo freshness → ⚙ Runnable badge, dashboard
     "Runnable (has code)" filter, and a small additive ranking bonus (honest in explain).
 14. **Distribution** ✅ — `cv-arxiv serve` (single DATA_DIR), top-level `/healthz`,
-    single-source version (`app/_version.py`, 0.3.0), docker-compose `local-ai` profile
+    single-source version (`app/_version.py`), docker-compose `local-ai` profile
     (Ollama sidecar), CHANGELOG, README quickstart, packaging polish. PyPI publish is the
     one remaining manual release step (README documents the `uvx --from git+…` form until then).
 
@@ -107,6 +107,47 @@ production ranker recipe and an 800k-rating public dataset), PaperQA2 / `paper-q
 
 Positioning: *the maintained, local-first successor to arxiv-sanity / self-hostable
 Scholar Inbox* — credible now that free tiers are closing and hosted tools keep dying.
+
+## Wave 4 — Delivered (August 2026)
+
+Four workstreams (re-researched Aug 2026: sqlite-vec still pre-v1 alpha; OpenAlex
+metered with new semantic-search/full-text endpoints; SPECTER2 still competitive):
+
+15. **Prove the ranker** ✅ — the holdout eval now reports nDCG@10 / recall@20 /
+    MRR alongside AUC/F1 (persisted per profile, shown in Settings);
+    `scripts/benchmark_scholar_inbox.py` benchmarks the production recipe on the
+    public Scholar Inbox 800k-rating dataset (`--self-test` needs no data);
+    dense-retrieval admission is a true per-run top-K by interest score (was
+    first-K-in-stream-order); digests carry 2 labeled exploration slots
+    (`digest.exploration_slots`). Closes Wave-2 leftovers 1–3.
+16. **Simplify the foundation** ✅ — `faiss-cpu` replaced by an exact NumPy
+    matrix (`papers.npy`/`sections.npy`; auto-migration from legacy `*.index`,
+    which stays on disk for rollback) — search was always exact `IndexFlatIP`,
+    so this deletes a heavy wheel and the dual-libgomp mitigations. sqlite-vec
+    deliberately skipped (still alpha). `cron.py` deleted; the built-in
+    scheduler gained `send_digest` and a real Settings card.
+17. **Widen the audience** ✅ — neutral LLM prompts (no CV hardcoding),
+    historical-search categories derived from configured feeds, tag-triggered
+    PyPI trusted publishing (`publish.yml`; register the trusted publisher on
+    PyPI, then tag `v0.5.0`). Version: 0.5.0.
+18. **Research workflows** ✅ — "Suggest similar" collection expansion (wires
+    the previously UI-less neighbors API); follow-author now also creates a
+    digest alert search and the save-search prompt exposes `notify_on_match`;
+    weekly "this week in your field" synthesis brief in the digest
+    (`digest.synthesis_weekday`, LLM-narrated with citation verification,
+    degrades to labels+counts).
+
+Deliberately skipped in Wave 4 (with reasons): reading queue (the Saved view is
+one), conference planner (no poster-metadata source), OpenAlex full-text RAG
+(metered + new parsing surface), embedding-model A/B (SPECTER2 holds; the
+benchmark script is the harness when wanted), bandits (standing decision).
+
+### Wave 4 leftovers (small)
+
+- Figure-extraction negative sentinel exists (`{id}_nofig`); delete the file to
+  force a re-attempt after arXiv backfills an HTML rendition.
+- Run the Scholar Inbox benchmark on the real dataset and record numbers here.
+- One-time manual step: register the PyPI trusted publisher, then tag v0.5.0.
 
 ## Deliberately not doing
 

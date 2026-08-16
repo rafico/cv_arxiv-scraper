@@ -1,8 +1,7 @@
-"""Tests for SPECTER2 embeddings + FAISS vector index."""
+"""Tests for SPECTER2 embeddings + the exact inner-product vector index."""
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 from unittest.mock import MagicMock, patch
@@ -42,7 +41,7 @@ def test_load_reconciles_index_map_drift(tmp_path):
 
 
 def test_partial_state_does_not_clobber_surviving_index(tmp_path):
-    # If only papers.index survives (id_map lost), a fresh service must run degraded and
+    # If only papers.npy survives (id_map lost), a fresh service must run degraded and
     # NOT overwrite the good index file on the next save — otherwise a recoverable
     # partial state becomes total vector loss.
     index_dir = tmp_path / "faiss_index"
@@ -50,7 +49,7 @@ def test_partial_state_does_not_clobber_surviving_index(tmp_path):
     svc.add_papers([1, 2, 3], ["a", "b", "c"], vectors=[_unit_vec(), _unit_vec(), _unit_vec()])
     svc.save()
 
-    index_path = index_dir / "papers.index"
+    index_path = index_dir / "papers.npy"
     original = index_path.read_bytes()
     (index_dir / "id_map.json").unlink()  # lose the map only
 
@@ -65,15 +64,73 @@ def test_partial_state_does_not_clobber_surviving_index(tmp_path):
 def test_ensure_section_index_loads_once(tmp_path):
     # The section index uses double-checked locking: once loaded, a second call must
     # take the fast path and not re-read the index off disk (or clobber in-memory state).
-    import faiss
+    from app.services import embeddings
 
     svc = EmbeddingService(str(tmp_path / "faiss_index"))
     svc._ensure_section_index()
     first = svc._section_index
-    with patch.object(faiss, "read_index") as read_index:
+    with patch.object(embeddings, "_read_matrix") as read_matrix:
         svc._ensure_section_index()
-    read_index.assert_not_called()
+    read_matrix.assert_not_called()
     assert svc._section_index is first
+
+
+def test_legacy_faiss_index_migrates_on_load(tmp_path):
+    # A pre-0.5 index dir holds faiss-format papers.index/sections.index files.
+    # First load with faiss importable must convert to .npy with identical vectors
+    # and leave the legacy file untouched for rollback.
+    faiss = pytest.importorskip("faiss")
+
+    index_dir = tmp_path / "faiss_index"
+    index_dir.mkdir()
+    vectors = _fake_encode(["a", "b", "c"])
+    legacy = faiss.IndexFlatIP(768)
+    legacy.add(vectors)
+    faiss.write_index(legacy, str(index_dir / "papers.index"))
+    (index_dir / "id_map.json").write_text("[11, 22, 33]")
+    legacy_bytes = (index_dir / "papers.index").read_bytes()
+
+    svc = EmbeddingService(str(index_dir))
+
+    assert svc.index_count() == 3
+    assert svc.has_paper(22)
+    found, migrated = svc.get_paper_vectors([11, 22, 33])
+    assert found == [11, 22, 33]
+    np.testing.assert_allclose(migrated, vectors, rtol=1e-6)
+    assert (index_dir / "papers.npy").exists()
+    assert (index_dir / "papers.index").read_bytes() == legacy_bytes
+
+    # A reload now takes the .npy path (no faiss involved) and sees the same data.
+    reloaded = EmbeddingService(str(index_dir))
+    assert reloaded.index_count() == 3
+
+
+def test_legacy_index_without_faiss_runs_read_empty_and_protects_files(tmp_path):
+    # Legacy .index present but faiss not importable: run empty with save disabled
+    # so the legacy file (and its id_map) survive for migration or rebuild.
+    index_dir = tmp_path / "faiss_index"
+    index_dir.mkdir()
+    (index_dir / "papers.index").write_bytes(b"legacy-faiss-bytes")
+    (index_dir / "id_map.json").write_text("[1]")
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_faiss(name, *args, **kwargs):
+        if name == "faiss":
+            raise ImportError("No module named 'faiss'")
+        return real_import(name, *args, **kwargs)
+
+    with patch.object(builtins, "__import__", side_effect=no_faiss):
+        svc = EmbeddingService(str(index_dir))
+
+    assert svc.index_count() == 0
+    svc.add_papers([9], ["z"], vectors=[_unit_vec()])
+    svc.save()  # must not write papers.npy or touch the legacy pair
+    assert not (index_dir / "papers.npy").exists()
+    assert (index_dir / "papers.index").read_bytes() == b"legacy-faiss-bytes"
+    assert (index_dir / "id_map.json").read_text() == "[1]"
 
 
 def test_add_sections_to_index_persists_round_trip(tmp_path):
@@ -88,15 +145,6 @@ def test_add_sections_to_index_persists_round_trip(tmp_path):
         reloaded = EmbeddingService(str(index_dir))
         hits = reloaded.search_sections("method", top_k=5)
     assert hits  # non-empty: the persisted sections are searchable
-
-
-def test_importing_embeddings_pins_openmp_to_avoid_dual_libgomp_crash():
-    # faiss-cpu and torch each bundle libgomp; loading both with multithreaded
-    # OpenMP corrupts the heap. Importing the module must pin OMP to a thread count.
-    from app.services import embeddings
-
-    assert os.environ.get("OMP_NUM_THREADS")
-    assert embeddings._OMP_THREADS >= 1
 
 
 @pytest.fixture(autouse=True)
@@ -207,7 +255,7 @@ class TestEmbeddingService:
         service.save()
 
         # Verify files exist
-        assert (index_dir / "papers.index").exists()
+        assert (index_dir / "papers.npy").exists()
         assert (index_dir / "id_map.json").exists()
 
         # Load a new service from same dir

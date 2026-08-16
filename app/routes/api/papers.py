@@ -214,6 +214,16 @@ def follow_recommendation(paper_id: int):
     with config_write_lock():
         full_config, added = append_whitelist_term(current_app.config["SCRAPER_CONFIG"], "authors", term)
         persist_config(full_config)
+
+    # Whitelisting handles *admission*; a notify saved search additionally
+    # surfaces this author's new papers in the digest's alert section even when
+    # they score below the digest threshold.
+    from app.models import SavedSearch
+
+    alert_name = f"Author: {term}"
+    if SavedSearch.query.filter_by(name=alert_name).first() is None:
+        db.session.add(SavedSearch(name=alert_name, author_filters=[term], notify_on_match=True, is_active=True))
+        db.session.commit()
     return jsonify({"term": term, "added": added, "message": f"Following {term}."})
 
 

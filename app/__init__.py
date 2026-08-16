@@ -494,6 +494,7 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         from app.web.scheduler import SCRAPE_SCHEDULER
 
         daily_at = str(scheduler_config.get("daily_at", "08:00"))
-        SCRAPE_SCHEDULER.start(app, daily_at=daily_at)
+        send_digest = _is_truthy_flag(scheduler_config.get("send_digest"))
+        SCRAPE_SCHEDULER.start(app, daily_at=daily_at, send_digest=send_digest)
 
     return app

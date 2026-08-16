@@ -276,6 +276,7 @@
     function promptSaveSearch() {
         const name = prompt("Name for this saved search:");
         if (!name || !name.trim()) return;
+        const notify = confirm("Also alert on new matches in your email digest?\n(OK = yes, Cancel = just save)");
         const filters = {};
         new URLSearchParams(window.location.search).forEach((value, key) => {
             if (value && key !== "page") filters[key] = value;
@@ -283,7 +284,7 @@
         fetch('/api/saved-searches', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
-            body: JSON.stringify({ name: name.trim(), filters }),
+            body: JSON.stringify({ name: name.trim(), filters, notify_on_match: notify }),
         }).then(r => { if (r.ok) window.location.reload(); });
     }
 

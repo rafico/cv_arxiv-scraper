@@ -13,7 +13,7 @@ python -m pytest tests/test_run.py::RunEntryPointTests::test_x -q
 
 Markers (declared in `pyproject.toml`, `--strict-markers` is on): `unit`,
 `integration`, `e2e`, `slow`. The full suite is slow (~minutes) because importing
-`sentence-transformers`/`faiss` is heavy; prefer running the targeted module(s)
+`sentence-transformers` is heavy; prefer running the targeted module(s)
 you touched, then the full suite once before committing.
 
 ## Helpers ([helpers.py](helpers.py))

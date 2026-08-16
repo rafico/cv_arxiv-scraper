@@ -192,6 +192,18 @@ class CollectionsCRUDTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Special Paper In Collection", response.data)
 
+    def test_collection_view_offers_similar_paper_suggestions(self):
+        c = Collection(name="MyCol")
+        db.session.add(c)
+        db.session.commit()
+
+        response = self.client.get(f"/?collection={c.id}&timeframe=all")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'id="collection-suggest-btn"', response.data)
+        # The widget is collection-scoped: absent from the plain inbox.
+        response = self.client.get("/")
+        self.assertNotIn(b'id="collection-suggest-btn"', response.data)
+
 
 if __name__ == "__main__":
     import unittest

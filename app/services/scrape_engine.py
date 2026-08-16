@@ -14,6 +14,7 @@ import requests
 from sqlalchemy.exc import IntegrityError
 
 from app.constants import DEFAULT_LLM_MODEL, DEFAULT_MAX_WORKERS
+from app.enums import MatchType
 from app.services.enrichment import (
     enrich_entries_with_api_metadata,
     extract_affiliation_text_batch,
@@ -100,6 +101,27 @@ def _collect_feed_urls(app, scraper_config: dict) -> list[str]:
     return feed_urls
 
 
+def default_categories(app, scraper_config: dict) -> list[str]:
+    """arXiv categories inferred from the configured feeds, for historical search.
+
+    Parses the ``rss.arxiv.org/rss/<cat>`` (or atom) tail of every configured
+    feed URL — including enabled FeedSource rows — so a user following e.g.
+    stat.ML gets historical results from their own field, not hardcoded cs.CV.
+    Falls back to ``["cs.CV"]`` when no feed URL names an arXiv category.
+    """
+    import re
+
+    categories: list[str] = []
+    for url in _collect_feed_urls(app, scraper_config):
+        match = re.search(r"arxiv\.org/(?:rss|atom)/([\w.+-]+)", url)
+        if not match:
+            continue
+        for category in match.group(1).split("+"):
+            if category and category not in categories:
+                categories.append(category)
+    return categories or ["cs.CV"]
+
+
 def _emit(callback: EventCallback, event: str, data: dict) -> None:
     if callback:
         callback(event, data)
@@ -158,7 +180,12 @@ def _process_entries_with_pipeline(
     """Process entries using the ranking pipeline (candidates -> features -> rank).
 
     Yields (processed, matched, result_dict) tuples for streaming progress;
-    result_dict is None for entries that did not match.
+    result_dict is None for entries that did not match. Whitelist matches stream
+    as they complete; interest-gate (dense-retrieval) candidates are buffered for
+    the whole run and only the ``candidate_top_k`` best by interest score are
+    admitted — a true per-run top-K rather than the first K above threshold in
+    stream order — so their results (and LLM enrichment cost) arrive after the
+    entry loop finishes.
     """
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     preferences = get_preferences(product_config)
@@ -175,6 +202,7 @@ def _process_entries_with_pipeline(
 
     processed = 0
     matched = 0
+    interest_buffer = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(generator.process_single, entry): entry for entry in entries}
@@ -192,6 +220,11 @@ def _process_entries_with_pipeline(
                     entry.get("link"),
                 )
 
+            if candidate is not None and candidate.match_types == [MatchType.INTEREST.value]:
+                # Defer: only the run-wide top-K get admitted (and LLM-enriched).
+                interest_buffer.append(candidate)
+                candidate = None
+
             if candidate is not None:
                 _enrich_candidate_with_llm(candidate, llm_client, interests_text, structured_insights)
                 ranked_list = ranker.rank([candidate])
@@ -203,6 +236,18 @@ def _process_entries_with_pipeline(
                     continue
 
             yield processed, matched, None
+
+    if interest_buffer:
+        from app.services.learned_ranker import get_runtime_learned_prefs
+
+        top_k = int((get_runtime_learned_prefs() or {}).get("candidate_top_k", 10))
+        interest_buffer.sort(key=lambda cand: cand.raw_features.get("interest_candidate_score", 0.0), reverse=True)
+        for candidate in interest_buffer[: max(0, top_k)]:
+            _enrich_candidate_with_llm(candidate, llm_client, interests_text, structured_insights)
+            ranked_list = ranker.rank([candidate])
+            if ranked_list:
+                matched += 1
+                yield processed, matched, ranked_list[0].to_result_dict()
 
 
 def _sort_results(results: list[dict]) -> None:
@@ -437,6 +482,10 @@ def _generate_figures(app, results: list[dict], session: requests.Session) -> No
 
     static_folder = app.static_folder if app.static_folder else Path(__file__).parent.parent / "static"
     scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {}) or {}
+    # Same opt-out shape as scraper.extract_sections below.
+    if not scraper_config.get("extract_figures", True):
+        LOGGER.info("Figure extraction disabled (scraper.extract_figures: false)")
+        return
     resolution = int(scraper_config.get("thumbnail_dpi", DEFAULT_THUMBNAIL_DPI))
 
     def worker(res):
@@ -526,7 +575,11 @@ def _extract_sections(app, results: list[dict]) -> None:
     down the scrape.
     """
     scraper_config = app.config["SCRAPER_CONFIG"].get("scraper", {})
-    if not scraper_config.get("extract_sections", False):
+    # On by default: per-paper chat, corpus chat and citation verification all
+    # read PaperSection rows, so an off-by-default flag left them permanently
+    # empty. Set scraper.extract_sections: false to opt out (it costs one arXiv
+    # HTML fetch per paper, deadline-bounded, with a pdfplumber fallback).
+    if not scraper_config.get("extract_sections", True):
         return
 
     from app.models import Paper, PaperSection, db

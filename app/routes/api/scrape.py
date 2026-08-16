@@ -50,12 +50,12 @@ def scrape_stream():
 def search_historical():
     from datetime import datetime
 
-    from app.services.scrape_engine import execute_historical_scrape
+    from app.services.scrape_engine import default_categories, execute_historical_scrape
 
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
 
-    raw_categories = payload.get("categories", ["cs.CV"])
+    raw_categories = payload.get("categories", [])
     # Require a list of non-empty strings. Validate BEFORE the scrape so a
     # wrong-typed value yields a clean 400 instead of a garbage query (a bare
     # string iterated char-by-char) or a misleading 502 (a non-iterable raising
@@ -66,7 +66,10 @@ def search_historical():
     if len(categories) != len(raw_categories):
         return jsonify({"error": "categories must be a list of non-empty strings"}), 400
     if not categories:
-        categories = ["cs.CV"]
+        # Derived from the user's configured feeds, so historical search follows
+        # whatever field(s) they actually track.
+        app_obj = current_app._get_current_object()
+        categories = default_categories(app_obj, app_obj.config["SCRAPER_CONFIG"].get("scraper", {}) or {})
 
     start_date_str = payload.get("start_date")
     end_date_str = payload.get("end_date")

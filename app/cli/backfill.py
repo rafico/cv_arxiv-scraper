@@ -53,7 +53,7 @@ def _recompute_paper_score(paper: Paper, config: dict | None) -> float:
 
 
 def _paper_index_paths(index_dir: Path) -> tuple[Path, Path]:
-    return index_dir / "papers.index", index_dir / "id_map.json"
+    return index_dir / "papers.npy", index_dir / "id_map.json"
 
 
 def run_embeddings_backfill(app, *, batch_size: int = EMBEDDINGS_BATCH_SIZE, emit: Emit = print) -> int:
@@ -103,12 +103,18 @@ def rebuild_semantic_index(app, *, batch_size: int = EMBEDDINGS_BATCH_SIZE, emit
         # leave the user with no usable index. Clean only stale .tmp leftovers, which
         # os.replace won't overwrite.
         removed = sum(1 for path in (final_index_path, final_id_map_path) if path.exists())
-        for tmp in (index_dir / "papers.index.tmp", index_dir / "id_map.json.tmp"):
+        for tmp in (index_dir / "papers.npy.tmp", index_dir / "id_map.json.tmp"):
             if tmp.exists():
                 tmp.unlink()
 
         os.replace(staging_index_path, final_index_path)
         os.replace(staging_id_map_path, final_id_map_path)
+        # A rebuild supersedes any pre-0.5 faiss file; leaving it would only
+        # shadow-confuse a later downgrade, never this version (npy wins on load).
+        legacy_index = index_dir / "papers.index"
+        if legacy_index.exists():
+            legacy_index.unlink()
+            emit("Removed superseded legacy faiss index (papers.index)")
 
     reset_embedding_service()
     emit(

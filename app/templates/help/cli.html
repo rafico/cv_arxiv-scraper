@@ -90,15 +90,15 @@
 <!-- Scheduled Scrapes -->
 <section id="scheduled-scrapes" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Scheduled Scrapes</h2>
-    <p class="text-sm text-fg-muted mb-4">The app can scrape automatically at a set time each day, without needing cron.</p>
+    <p class="text-sm text-fg-muted mb-4">The app can scrape (and optionally email the digest) automatically at a set time each day, without needing cron. Configure it under <a href="/settings?section=automation" class="font-medium text-blue-600 hover:text-blue-800">Settings &rarr; Automation &rarr; Scheduling</a>, or directly in <code>config.yaml</code>:</p>
     <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
-        <p class="text-sm text-fg-muted">Add a <code>scheduler</code> section to your <code>config.yaml</code>:</p>
-        <pre class="mt-2 bg-surface-2 rounded-lg p-3 text-xs text-fg-muted overflow-x-auto"><code>scheduler:
+        <pre class="bg-surface-2 rounded-lg p-3 text-xs text-fg-muted overflow-x-auto"><code>scheduler:
   enabled: true
-  scrape_time: "08:00"   # 24-hour format, local time</code></pre>
+  daily_at: "08:00"    # 24-hour format, UTC
+  send_digest: true    # email the digest after each scheduled scrape</code></pre>
     </div>
-    <p class="text-sm text-fg-muted mt-4">Alternatively, use cron:</p>
-    <pre class="bg-surface-2 rounded-lg p-3 text-xs text-fg-muted overflow-x-auto mt-2"><code>0 8 * * * cd /path/to/cv_arxiv-scraper && ~/venv/bin/python -m app.cli.scrape</code></pre>
+    <p class="text-sm text-fg-muted mt-4">Prefer external automation (server not always running)? Point cron or a systemd timer at the installed console scripts:</p>
+    <pre class="bg-surface-2 rounded-lg p-3 text-xs text-fg-muted overflow-x-auto mt-2"><code>0 8 * * * cv-arxiv-scrape && cv-arxiv-digest</code></pre>
 </section>
 
 <!-- Feed Sources -->

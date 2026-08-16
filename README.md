@@ -48,8 +48,8 @@ Pick whichever fits. All three are **localhost-only, single-user, no auth** by d
 **Run it with `uvx` (no install):**
 
 ```bash
-uvx cv-arxiv-scraper serve          # once published to PyPI
-# until then, straight from git:
+uvx cv-arxiv-scraper serve
+# or straight from git:
 uvx --from git+https://github.com/rafico/cv_arxiv-scraper cv-arxiv serve
 ```
 
@@ -133,12 +133,14 @@ labs, topics, recency (14-day half-life by default), citations, and your feedbac
 ranking is never a black box.
 
 **🔍 Hybrid keyword + semantic search.**
-Search by exact terms, by meaning (SPECTER2 + FAISS), or both combined — so you can find the
+Search by exact terms, by meaning (SPECTER2 embeddings), or both combined — so you can find the
 paper you half-remember even when you don't have its words.
 
 **💬 Ask your own library questions.**
 Chat with the papers you've saved (**Discover → Chat with your saved papers**): grounded,
 cited answers when an LLM is enabled, and the most relevant saved papers listed when it isn't.
+Per-paper chat, corpus chat, and citation verification all read the full text captured by
+`scraper.extract_sections` (on by default) — with it off, they have nothing to quote.
 
 **🔒 Private and offline-first.**
 Everything runs on localhost with no account. The core — scraping, ranking, semantic search,
@@ -257,7 +259,7 @@ Edit Config):
 ```
 
 Point `CV_ARXIV_DATA_DIR` at the directory that holds your `arxiv_papers.db`,
-FAISS index, and `config.yaml` (the same dir `cv-arxiv serve --data-dir` uses).
+vector index, and `config.yaml` (the same dir `cv-arxiv serve --data-dir` uses).
 Restart Claude Desktop and the tools appear:
 
 | Tool | What it does |
@@ -375,7 +377,7 @@ download; override it with `OLLAMA_MODEL=... docker compose --profile local-ai u
 
 - **"Address already in use" / port 5000 busy** — another app holds the port. Run on another
   with `PORT=5001 python run.py --debug`.
-- **First scrape feels slow / hangs for ~30s** — importing `faiss`/`sentence-transformers` is
+- **First scrape feels slow / hangs for ~30s** — importing `sentence-transformers` is
   heavy on first load, and the first scrape fetches PDFs. This is normal; it's faster
   afterward.
 - **A few papers log PDF-extraction warnings** — non-fatal. The paper is still ingested; only
@@ -401,7 +403,7 @@ python -m pytest tests/ -v
 
 ## 🧱 Tech stack
 
-Python 3.10+ · Flask 3 · SQLite · sentence-transformers (SPECTER2) + FAISS · pdfplumber.
+Python 3.10+ · Flask 3 · SQLite · sentence-transformers (SPECTER2, exact NumPy vector search) · pdfplumber.
 Single-worker by design — scrape progress streams over SSE with no Redis or extra services.
 
 ---

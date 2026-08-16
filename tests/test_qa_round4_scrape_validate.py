@@ -112,6 +112,23 @@ class HistoricalSearchCategoriesValidationTests(FlaskDBTestCase):
         mock_exec.assert_called_once()
         self.assertEqual(mock_exec.call_args.args[1], ["cs.CV"])
 
+    @patch("app.services.scrape_engine.execute_historical_scrape")
+    def test_default_categories_derive_from_configured_feeds(self, mock_exec):
+        # A user following stat.ML must get historical results from their own
+        # field when they omit categories — not hardcoded cs.CV.
+        mock_exec.return_value = {"new_papers": 0, "total_found": 0}
+        self.app.config["SCRAPER_CONFIG"]["scraper"]["feed_url"] = "https://rss.arxiv.org/rss/stat.ML+cs.LG"
+        response = self.client.post(
+            "/api/search/historical",
+            json={
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-31",
+            },
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_exec.call_args.args[1], ["stat.ML", "cs.LG"])
+
 
 if __name__ == "__main__":
     unittest.main()

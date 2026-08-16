@@ -528,3 +528,53 @@ def find_neighbor_papers(
         "tracked_author_count": len(tracked_authors),
         "results": scored_results[:limit],
     }
+
+
+def synthesize_recent_topics(*, window_days: int = 7, llm_client=None) -> dict:
+    """A short "what happened in your field" brief for the weekly digest.
+
+    Reuses :func:`detect_emerging_topics`. With an LLM client, one call turns
+    the top cluster labels + sample titles into a 2-3 sentence narrative, run
+    through the citation verifier (same always-on pattern as chat) so any
+    name-dropped papers get resolved against the corpus. Without an LLM it
+    degrades to the labels/counts/share-deltas already computed. Never raises.
+    """
+    emerging = detect_emerging_topics(recent_days=window_days)
+    topics = [
+        {
+            "label": topic["label"],
+            "recent_count": topic["recent_count"],
+            "delta_share": topic["delta_share"],
+            "sample_titles": [paper["title"] for paper in topic["recent_papers"][:3]],
+        }
+        for topic in (emerging.get("topics") or [])[:5]
+    ]
+    result = {"window_days": window_days, "topics": topics, "narrative": None, "citations": []}
+    if not topics or llm_client is None:
+        return result
+
+    lines = [
+        f"- {topic['label']}: {topic['recent_count']} new papers "
+        f"(+{topic['delta_share']:.0%} share vs the prior month); e.g. " + "; ".join(topic["sample_titles"])
+        for topic in topics
+    ]
+    try:
+        narrative = llm_client.complete_text(
+            system_prompt=(
+                "You brief a researcher on their field's week. Given topic clusters from their "
+                "personal paper feed, write 2-3 specific sentences on what moved this week. "
+                "Mention paper titles only from the provided lists. No preamble, no bullet points."
+            ),
+            user_prompt="This week's emerging topics:\n" + "\n".join(lines),
+            max_tokens=220,
+            temperature=0.3,
+        )
+        if narrative:
+            from app.services.citation_verifier import verify_text
+
+            annotation = verify_text(narrative)
+            result["narrative"] = annotation.get("text") or narrative
+            result["citations"] = list(annotation.get("citations") or [])
+    except Exception:  # noqa: BLE001 — the digest must send with the degraded brief
+        LOGGER.warning("Topic synthesis narrative failed; using labels only", exc_info=True)
+    return result

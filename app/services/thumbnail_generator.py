@@ -316,11 +316,14 @@ def _extract_figures_from_html(
     arxiv_id: str,
     fig_paths: list[Path],
     session: requests.Session | None = None,
-) -> int:
+) -> tuple[int, bool]:
     """Fetch the arXiv HTML rendition and save its first qualifying figures.
 
-    Raises on a missing/failed HTML fetch (404 is normal for older papers) so the
-    caller can fall back to the PDF; per-image download failures are skipped.
+    Returns ``(saved, conclusive)`` — ``conclusive`` means the rendition was
+    examined and genuinely holds no extractable figures (as opposed to transient
+    image-download failures, which must stay retryable). Raises on a
+    missing/failed HTML fetch (404 is normal for older papers) so the caller can
+    fall back to the PDF; per-image download failures are skipped.
     """
     response = request_with_backoff(
         "GET",
@@ -332,6 +335,8 @@ def _extract_figures_from_html(
         max_bytes=_FIGURE_MAX_HTML_BYTES,
     )
     urls = parse_figure_image_urls(response.text, str(response.url))[:_FIGURE_MAX_CANDIDATES]
+    if not urls:
+        return 0, True  # rendition exists and contains no figure images
 
     blobs: list[bytes] = []
     for url in urls:
@@ -349,11 +354,14 @@ def _extract_figures_from_html(
         except Exception as exc:
             LOGGER.debug("Figure image download failed for %s: %s", url, exc)
     if not blobs:
-        return 0
+        return 0, False  # every image download failed — transient, retry later
 
     # Decode in an isolated child: a native Pillow crash on one hostile image must
     # not take down the single worker.
-    return run_isolated(_decode_and_save_figures, blobs, [str(path) for path in fig_paths], timeout=_RENDER_TIMEOUT)
+    saved = run_isolated(_decode_and_save_figures, blobs, [str(path) for path in fig_paths], timeout=_RENDER_TIMEOUT)
+    # All candidates downloaded but none qualified (undecodable / below minimum
+    # size) is a real property of the paper, not a transient failure.
+    return saved, saved == 0 and len(blobs) == len(urls)
 
 
 def extract_pdf_figures(pdf_content: bytes, out_paths: list[str], resolution: int = DEFAULT_THUMBNAIL_DPI) -> int:
@@ -435,14 +443,26 @@ def generate_paper_figures(
     existing = [path for path in fig_paths if path.exists()]
     if existing:
         return len(existing)  # a previous run already extracted figures
+    # Negative-result sentinel: a previous run examined this paper's sources and
+    # found no figures, so don't refetch it on every backfill/scrape. Delete the
+    # file to force a re-attempt (e.g. after arXiv backfills an HTML rendition).
+    sentinel = (thumbnails_dir / f"{arxiv_id}_nofig").resolve()
+    if sentinel.exists():
+        return 0
     fig_paths[0].parent.mkdir(parents=True, exist_ok=True)
 
+    # Written only when a source was genuinely examined and held no figures;
+    # network errors and timeouts leave no sentinel so they stay retryable.
+    html_conclusive = False
     try:
-        saved = _extract_figures_from_html(arxiv_id, fig_paths, session=session)
+        saved, html_conclusive = _extract_figures_from_html(arxiv_id, fig_paths, session=session)
         if saved:
             LOGGER.info("Extracted %d figure(s) for %s from arXiv HTML", saved, arxiv_id)
             return saved
     except Exception as exc:
+        response = getattr(exc, "response", None)
+        # No HTML rendition at all (normal for older papers) is a stable fact.
+        html_conclusive = getattr(response, "status_code", None) == 404
         LOGGER.debug("arXiv HTML figure extraction unavailable for %s: %s", arxiv_id, exc)
 
     try:
@@ -450,12 +470,18 @@ def generate_paper_figures(
         if content is None and pdf_link:
             content = _download_pdf(pdf_link, session=session)
         if content is None:
+            # No PDF bytes and no link: nothing to examine, and nothing will
+            # change until the paper's metadata does.
+            if html_conclusive:
+                sentinel.touch()
             return 0
         saved = run_isolated(
             extract_pdf_figures, content, [str(path) for path in fig_paths], resolution, timeout=_RENDER_TIMEOUT
         )
         if saved:
             LOGGER.info("Extracted %d figure(s) for %s from PDF", saved, arxiv_id)
+        elif html_conclusive:
+            sentinel.touch()  # both sources examined, neither has figures
         return saved
     except Exception as exc:
         LOGGER.warning("Figure extraction failed for %s: %s", arxiv_id, exc)

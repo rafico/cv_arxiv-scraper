@@ -24,7 +24,7 @@ flow, and step-by-step recipes for common extensions.
    ┌──────────┬──────────┬───────────┬───────────┬──────────────┐
    ingest     enrichment  pipeline    search/      jobs/          outputs
    (backends) (OpenAlex,  (features,  embeddings   scheduler      (digest,
-              S2,         ranker)     (FAISS,BM25) (in-process)    export,
+              S2,         ranker)     (vec, BM25) (in-process)    export,
               citations)                                          zotero…)
                 │
                 ▼
@@ -52,7 +52,7 @@ ingest.orchestrator.fetch(mode)            # RSS + arXiv-API backends, resumable
    → _save_results                         # explicit field mapping onto Paper rows
    → _enrich_results_with_github           # repo stars/license (rows must exist)
    → _generate_thumbnails                   # reads result["pdf_content"]; page + teaser
-   → _generate_embeddings                   # FAISS update (reuses in-flight vectors)
+   → _generate_embeddings                   # vector-index update (reuses in-flight vectors)
    → _extract_sections                      # reads result["pdf_content"]  ← last consumer
 ```
 
@@ -76,7 +76,7 @@ window degrades to `[]`.
   in-place fallback for non-renameable destinations (Docker single-file mount).
 - **Backup/restore is atomic and cross-device-safe** — `app/services/backup.py`
   exports a tarball (consistent SQLite snapshot via the backup API + a `copytree`
-  snapshot of the FAISS index + config). Restore *stages* each component onto its
+  snapshot of the vector index + config). Restore *stages* each component onto its
   target filesystem first, then *commits* with same-fs renames and rolls back every
   committed component on any failure (so a partial restore never destroys the live
   DB), and rejects oversized archives before extraction (decompression-bomb guard).

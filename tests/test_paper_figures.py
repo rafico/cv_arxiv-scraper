@@ -253,6 +253,61 @@ def test_generate_paper_figures_rejects_traversal_id(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def _http_404() -> requests.HTTPError:
+    return requests.HTTPError("404 Client Error: Not Found", response=Mock(status_code=404))
+
+
+def test_generate_paper_figures_memoizes_conclusive_negative(tmp_path):
+    static_dir = tmp_path / "static"
+
+    # No HTML rendition (a real 404) and no PDF source: a stable no-figures fact.
+    with patch("app.services.thumbnail_generator.request_with_backoff", side_effect=_http_404()) as mock_req:
+        assert generate_paper_figures("2401.77777", static_dir) == 0
+        assert mock_req.called
+    assert (static_dir / "thumbnails" / "2401.77777_nofig").exists()
+
+    # Second run: sentinel short-circuits before any network call.
+    with patch("app.services.thumbnail_generator.request_with_backoff") as mock_req:
+        assert generate_paper_figures("2401.77777", static_dir) == 0
+        mock_req.assert_not_called()
+
+
+def test_generate_paper_figures_does_not_memoize_transient_failure(tmp_path):
+    static_dir = tmp_path / "static"
+
+    with patch(
+        "app.services.thumbnail_generator.request_with_backoff",
+        side_effect=RuntimeError("network down"),
+    ):
+        assert generate_paper_figures("2401.66666", static_dir, pdf_link="https://arxiv.org/pdf/2401.66666") == 0
+
+    assert not (static_dir / "thumbnails" / "2401.66666_nofig").exists()
+
+
+def test_generate_paper_figures_memoizes_figureless_pdf(tmp_path):
+    import os
+    import tempfile
+
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=11)
+    pdf.cell(0, 6, txt="A text-only page with no figures.", ln=1)
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        pdf.output(tmp.name)
+    try:
+        text_pdf = Path(tmp.name).read_bytes()
+    finally:
+        os.unlink(tmp.name)
+
+    static_dir = tmp_path / "static"
+    with patch("app.services.thumbnail_generator.request_with_backoff", side_effect=_http_404()):
+        assert generate_paper_figures("2401.55555", static_dir, pdf_content=text_pdf) == 0
+
+    assert (static_dir / "thumbnails" / "2401.55555_nofig").exists()
+
+
 # ── figure_paths_for ─────────────────────────────────────────────────────────
 
 

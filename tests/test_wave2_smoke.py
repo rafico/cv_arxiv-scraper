@@ -65,8 +65,13 @@ class Wave2SmokeTests(FlaskDBTestCase):
 
     def test_details_partial_renders_figures_strip_and_chat_together(self):
         # Seam (c): both Wave-2 includes coexist in _paper_details.html.
+        # Annotate exactly the way the dashboard does before it renders cards
+        # (rank_score_value, score_breakdown, follow_recommendation, ...), then
+        # override figure_indices, which that helper derives from disk.
+        from app.routes.dashboard import _enrich_cards_with_feedback_and_related
         from app.services.preferences import get_preferences
 
+        _enrich_cards_with_feedback_and_related([self.paper], [], self.app.config["SCRAPER_CONFIG"])
         self.paper.figure_indices = [1, 2]
         with self.app.test_request_context("/"):
             html = render_template(
