@@ -156,17 +156,20 @@ gap analysis (three capabilities were genuinely absent; the rest we had):
     (all 2026 preprints) OpenAlex had parsed references for **zero** papers,
     while S2 covered 574 immediately (32 in-corpus edges on first sync; grows
     as the corpus ages).
-20. **PDF reader + annotations** ✅ — on-demand cached PDFs
-    (`instance/pdfs/`, reusing the thumbnail pipeline's hardened downloader),
-    vendored pdf.js reader, highlight/comment annotations in page-fraction
-    coordinates with a validated CRUD API.
-21. **Collection bundles** ✅ — plain-JSON export/import of one collection
+20. **Collection bundles** ✅ — plain-JSON export/import of one collection
     (no PDFs, no zip surface); fill-only merge on import, edges rebuild from
     shipped reference ids.
-22. **Per-collection BibTeX** ✅ — collection filter on the existing export.
+21. **Per-collection BibTeX** ✅ — collection filter on the existing export.
 
-Deliberate ceilings (marked `ponytail:` in code): no PDF cache eviction,
-full-corpus edge recompute per scrape, single-rect highlight rendering.
+Graphbib's **PDF reader + annotations** was built, then cut before release
+(2026-08-16): without annotations the reader adds nothing over the browser's
+native PDF viewer behind the existing PDF button, and annotation itself is
+better served by the Mendeley/Zotero sync — a second, disconnected annotation
+store fragments notes. If in-app annotation ever returns, it should sync
+*into* the reference manager, not beside it.
+
+Deliberate ceiling (marked `ponytail:` in code): full-corpus edge recompute
+per scrape.
 
 ### Wave 4 leftovers (small)
 

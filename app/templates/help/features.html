@@ -106,17 +106,6 @@
     <p class="text-sm text-fg-muted">Edges only connect papers you actually track and are refreshed automatically after every scrape. For papers added before this feature existed, run <code>cv-arxiv-backfill citation-edges</code> once to fetch their reference lists.</p>
 </section>
 
-<!-- PDF Reader & Annotations -->
-<section id="pdf-reader" class="scroll-mt-6 pt-12">
-    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">PDF Reader &amp; Annotations</h2>
-    <p class="text-sm text-fg-muted mb-3">The <strong>Read</strong> button in a paper&rsquo;s details opens the PDF in an in-app reader (no arXiv round-trip). The PDF is downloaded on first open and cached in <code>instance/pdfs/</code>, so later reads are instant and work offline.</p>
-    <ul class="space-y-2 text-sm text-fg-muted pl-5 list-disc marker:text-fg-subtle">
-        <li class="pl-1"><strong>Highlight</strong> mode: drag over any region to mark it. Click a highlight to delete it.</li>
-        <li class="pl-1"><strong>Comment</strong> mode: click anywhere to pin a note. Click the pin to edit; clear the text to delete.</li>
-    </ul>
-    <p class="text-sm text-fg-muted mt-3">Annotations are stored as page-relative coordinates, so they stay in place at any window size, and they travel with <a href="{{ url_for('help.view_page', page='export') }}#collection-bundles" class="font-medium text-blue-600 hover:text-blue-800">collection bundles</a>.</p>
-</section>
-
 <!-- Ask This Paper -->
 <section id="paper-chat" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Ask This Paper</h2>

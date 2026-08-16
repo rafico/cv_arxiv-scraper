@@ -20,20 +20,22 @@ global paper table and offline-first constraints.
   automatically after each scrape; `cv-arxiv-backfill citation-edges`
   backfills older papers. Vendored vis-network 9.1.9 (first vendored JS —
   the app stays CDN-free).
-- **In-app PDF reader** (`Read` on any paper): vendored pdf.js 4.10.38,
-  PDFs downloaded on first open and cached in `instance/pdfs/`. Drag to
-  **highlight**, click to pin **comments**; annotations are stored as
-  page-fraction coordinates so they survive any window size.
 - **Collection bundles**: export one collection as a plain-JSON file (papers,
-  notes, tags, annotations, reference ids — no PDFs, they re-fetch) and
-  import it elsewhere as a new collection. Imports link papers you already
-  track instead of duplicating, and never overwrite local notes/tags.
+  notes, tags, reference ids — no PDFs, they re-fetch) and import it
+  elsewhere as a new collection. Imports link papers you already track
+  instead of duplicating, and never overwrite local notes/tags.
 - **Per-collection BibTeX** (`Export .bib` in the collection sidebar, or
   `GET /api/export/bibtex?collection=<id>`).
 
 ### Removed
 - The unused `GET /api/papers/<id>/graph` TF-IDF similarity stub (no UI ever
   called it); `GET /api/graph` supersedes it with real citation edges.
+
+### Not adopted
+- Graphbib's in-app PDF reader + annotations were built, then cut before
+  release: plain reading is the browser's native PDF viewer (the existing PDF
+  button), and annotation is better served by the Mendeley/Zotero sync this
+  app already has — a second annotation store would only fragment notes.
 
 ## [0.5.0] — 2026-08-12
 

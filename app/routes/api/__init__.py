@@ -56,7 +56,6 @@ def _handle_bad_input(exc: Exception):
 
 # Route modules attach their handlers to api_bp on import.
 from app.routes.api import (  # noqa: E402
-    annotations,
     backup,
     chat,
     collections,
@@ -73,7 +72,6 @@ from app.routes.api import (  # noqa: E402
 
 __all__ = [
     "SCRAPE_JOB_MANAGER",
-    "annotations",
     "api_bp",
     "backup",
     "chat",

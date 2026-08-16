@@ -35,7 +35,7 @@ _PAPER_FIELDS = (
 
 
 def export_collection(collection_id: int) -> dict:
-    from app.models import Collection, Paper, PaperAnnotation, PaperCollection, db
+    from app.models import Collection, Paper, PaperCollection, db
 
     collection = db.session.get(Collection, collection_id)
     if collection is None:
@@ -46,12 +46,6 @@ def export_collection(collection_id: int) -> dict:
         .order_by(Paper.id)
         .all()
     )
-    index_by_id = {p.id: i for i, p in enumerate(papers)}
-    annotations = (
-        PaperAnnotation.query.filter(PaperAnnotation.paper_id.in_(index_by_id)).order_by(PaperAnnotation.id).all()
-        if index_by_id
-        else []
-    )
     return {
         "bundle_version": BUNDLE_VERSION,
         "collection": {
@@ -60,17 +54,6 @@ def export_collection(collection_id: int) -> dict:
             "color": collection.color,
         },
         "papers": [{field: getattr(p, field) for field in _PAPER_FIELDS} for p in papers],
-        "annotations": [
-            {
-                "paper": index_by_id[a.paper_id],
-                "page": a.page,
-                "kind": a.kind,
-                "rects": a.rects,
-                "color": a.color,
-                "note": a.note,
-            }
-            for a in annotations
-        ],
     }
 
 
@@ -132,7 +115,7 @@ def import_collection(manifest: object):
     """
     from datetime import date
 
-    from app.models import Collection, Paper, PaperAnnotation, PaperCollection, db
+    from app.models import Collection, Paper, PaperCollection, db
     from app.services.citation_graph import sync_citation_edges
 
     manifest = _validate(manifest)
@@ -145,7 +128,6 @@ def import_collection(manifest: object):
     db.session.add(collection)
     db.session.flush()
 
-    imported_papers: list = []
     linked = created = 0
     for entry in manifest["papers"]:
         arxiv_id = entry.get("arxiv_id") if isinstance(entry.get("arxiv_id"), str) else None
@@ -197,49 +179,6 @@ def import_collection(manifest: object):
 
         if not PaperCollection.query.filter_by(paper_id=paper.id, collection_id=collection.id).first():
             db.session.add(PaperCollection(paper_id=paper.id, collection_id=collection.id))
-        imported_papers.append(paper)
-
-    # Annotations travel with their paper, but only onto papers that have none
-    # locally yet (fill-only, like notes/tags). Invalid entries are skipped —
-    # annotations are best-effort decoration, not worth failing the import.
-    annotated_ids = set()
-    for entry in manifest.get("annotations") or []:
-        if not isinstance(entry, dict):
-            continue
-        index = entry.get("paper")
-        page = entry.get("page")
-        kind = entry.get("kind")
-        rects = entry.get("rects")
-        if (
-            not isinstance(index, int)
-            or isinstance(index, bool)
-            or not 0 <= index < len(imported_papers)
-            or not isinstance(page, int)
-            or isinstance(page, bool)
-            or page < 1
-            or kind not in ("highlight", "comment")
-            or not isinstance(rects, list)
-            or not all(
-                isinstance(r, dict)
-                and all(isinstance(r.get(k), int | float) and 0 <= r[k] <= 1 for k in ("x", "y", "w", "h"))
-                for r in rects
-            )
-        ):
-            continue
-        paper = imported_papers[index]
-        if paper.id not in annotated_ids and PaperAnnotation.query.filter_by(paper_id=paper.id).first():
-            continue
-        annotated_ids.add(paper.id)
-        db.session.add(
-            PaperAnnotation(
-                paper_id=paper.id,
-                page=page,
-                kind=kind,
-                rects=rects,
-                color=entry.get("color") if isinstance(entry.get("color"), str) else None,
-                note=_entry_str(entry, "note"),
-            )
-        )
 
     db.session.commit()
     edges = sync_citation_edges()

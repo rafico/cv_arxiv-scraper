@@ -31,9 +31,7 @@ def sync_citation_edges() -> int:
     """
     from app.models import Paper, PaperRelation, db
 
-    rows = db.session.query(
-        Paper.id, Paper.openalex_id, Paper.semantic_scholar_id, Paper.referenced_works
-    ).all()
+    rows = db.session.query(Paper.id, Paper.openalex_id, Paper.semantic_scholar_id, Paper.referenced_works).all()
     ref_to_paper = {oa_id: pid for pid, oa_id, _, _ in rows if oa_id}
     ref_to_paper.update({s2_id: pid for pid, _, s2_id, _ in rows if s2_id})
     existing = {
