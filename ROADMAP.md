@@ -172,7 +172,18 @@ full-corpus edge recompute per scrape, single-rect highlight rendering.
 
 - Figure-extraction negative sentinel exists (`{id}_nofig`); delete the file to
   force a re-attempt after arXiv backfills an HTML rendition.
-- Run the Scholar Inbox benchmark on the real dataset and record numbers here.
+- ~~Run the Scholar Inbox benchmark on the real dataset and record numbers
+  here.~~ Done 2026-08-16. Setup: the public release
+  (github.com/avg-dev/scholar_inbox_datasets, `rated_papers.csv`, 774k
+  ratings) ships only `arxiv_id`s, so titles/abstracts were joined from the
+  arXiv export API; evaluated the first 200 lexicographically-sorted users
+  with ≥20 ratings (137 had evaluable two-class holdouts), seed 0.
+  **Results** (mean / median): AUC **0.758 / 0.778**, nDCG@10
+  **0.862 / 0.931**, recall@20 **0.937 / 1.000**, MRR **0.869 / 1.000**.
+  Reading: the production recipe ranks well (a relevant paper reaches the
+  top-10 for the typical user) with headroom on raw AUC vs. the paper's
+  reported ~0.89 — theirs trains on each user's full history; ours is a
+  cold 80/20 split per user.
 - One-time manual step: register the PyPI trusted publisher, then tag v0.5.0.
 
 ## Deliberately not doing
