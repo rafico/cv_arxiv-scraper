@@ -187,7 +187,8 @@ opening the PDF:
 | **Chat & cold-start** | Chat with your saved papers (grounded, cited RAG answers) · seed your profile from a pasted list of arXiv IDs · active-learning prompts surface borderline papers to sharpen ranking |
 | **Summaries** | Extractive TL;DR with no API needed · optional AI TL;DR + structured insights when an LLM is enabled |
 | **Organization** | Save / skip / prioritize / share to train rankings · collections · custom tags · notes · reading status · saved searches |
-| **Export & sync** | BibTeX (single or bulk) · Mendeley · Zotero · HTML report · daily Gmail digest · one-click full backup & restore (DB + search index + config) |
+| **Citation graph** | Your library as a force-directed network of real citation edges (Semantic Scholar + OpenAlex reference lists) · node size = PageRank influence within your corpus · color by year · collection & year filters |
+| **Export & sync** | BibTeX (single, bulk, or per collection) · shareable collection bundles (plain JSON — import on another instance without duplicating papers) · Mendeley · Zotero · HTML report · daily Gmail digest · one-click full backup & restore (DB + search index + config) |
 | **Enrichment** | Citation counts (Semantic Scholar, OpenAlex) · topic classifications & open-access status · GitHub repo stars/license · PDF thumbnails · related-paper recommendations · corpus analytics (clusters & emerging trends) |
 
 ---
@@ -202,7 +203,7 @@ After `pip install -e .`:
 | `cv-arxiv-scrape` | One-shot scrape, prints matches to terminal |
 | `cv-arxiv-digest` | Send email digest (`--dry-run`, `--send-only`) |
 | `cv-arxiv-sync` | Historical sync (`--from`, `--to`, `--category`) |
-| `cv-arxiv-backfill` | Enrichment backfills (`embeddings`, `citations`, `openalex`, `thumbnails`, `all`) |
+| `cv-arxiv-backfill` | Enrichment backfills (`embeddings`, `citations`, `citation-edges`, `openalex`, `thumbnails`, `all`) |
 
 Standalone scripts (`python scrape_cli.py`, `python export_cli.py`, etc.) also work without
 installing once the environment is active.
@@ -218,7 +219,8 @@ Full REST API at `/api/`. Key endpoints:
 | Scraping | `POST /api/scrape`, `GET /api/scrape/stream` |
 | Search | `GET /api/search?q=...&mode=hybrid` |
 | Papers | `/api/papers/<id>/feedback`, `explain`, `notes`, `tags`, `bibtex` |
-| Collections | `GET/POST /api/collections`, manage papers in collections |
+| Collections | `GET/POST /api/collections`, manage papers in collections, `GET .../export` + `POST /api/collections/import` bundles |
+| Citation graph | `GET /api/graph?collection=<id>` — nodes with PageRank + citation edges |
 | Saved searches | `GET/POST /api/saved-searches`, `POST .../run` |
 | Corpus | `/api/corpus/clusters`, `emerging`, `neighbors`, `POST /api/corpus/chat` |
 | Onboarding | `POST /api/onboarding/bootstrap`, `GET /api/onboarding/uncertain` |
