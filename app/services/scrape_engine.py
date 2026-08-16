@@ -926,6 +926,7 @@ def _enrich_results_with_citations(
             res["citation_count"] = data.get("citation_count")
             res["influential_citation_count"] = data.get("influential_citation_count")
             res["semantic_scholar_id"] = data.get("semantic_scholar_id")
+            res["referenced_works"] = data.get("references", [])
             if res["citation_count"] is not None:
                 _mark_citation_source(res, "semantic_scholar", now)
             _rescore_result(res, config)
@@ -961,7 +962,9 @@ def _enrich_results_with_openalex(
             res["oa_status"] = data.get("oa_status")
             res["openalex_cited_by_count"] = data.get("openalex_cited_by_count")
             res["referenced_works_count"] = data.get("referenced_works_count")
-            res["referenced_works"] = data.get("referenced_works", [])
+            # Extend, don't overwrite: S2 references (different id namespace)
+            # were already collected by the citations step just before this one.
+            res["referenced_works"] = res.get("referenced_works", []) + data.get("referenced_works", [])
             if res.get("citation_count") is None and res["openalex_cited_by_count"] is not None:
                 res["citation_count"] = res["openalex_cited_by_count"]
                 _mark_citation_source(res, "openalex", now)

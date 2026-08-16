@@ -75,6 +75,24 @@ class SemanticScholarChunkingTests(unittest.TestCase):
             self.assertEqual(result[aid]["influential_citation_count"], global_idx * 2)
             self.assertEqual(result[aid]["semantic_scholar_id"], f"PID-{global_idx}")
 
+    def test_references_parsed_into_paper_id_list(self):
+        def fake_request_fn(method, url, *, json, params, session, timeout):
+            assert "references.paperId" in params["fields"]
+            return _FakeResponse(
+                [
+                    {
+                        "citationCount": 1,
+                        "paperId": "PID-0",
+                        "references": [{"paperId": "REF-1"}, {"paperId": None}, None, {"paperId": "REF-2"}],
+                    }
+                ]
+            )
+
+        provider = SemanticScholarProvider(request_fn=fake_request_fn)
+        result = provider.fetch_batch(["2301.00001"])
+
+        self.assertEqual(result["2301.00001"]["references"], ["REF-1", "REF-2"])
+
     def test_g2_one_failed_chunk_does_not_abandon_the_rest(self):
         ids = [f"2401.{i:05d}" for i in range(600)]
 

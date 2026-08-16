@@ -272,12 +272,15 @@ def backfill_citation_edges(
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
     emit: Emit = print,
 ) -> int:
-    """Fetch OpenAlex referenced_works for papers missing them, then rebuild
-    the local PaperRelation "cites" edges.
+    """Fetch reference lists for papers missing them, then rebuild the local
+    PaperRelation "cites" edges.
 
-    Targets papers never fetched (referenced_works_count IS NULL) or fetched
-    before the referenced_works column existed (count > 0 but empty list).
+    Two passes: OpenAlex referenced_works for papers never fetched in the new
+    shape, then Semantic Scholar references for papers OpenAlex left empty —
+    S2 parses fresh arXiv preprints' references months before OpenAlex does,
+    and a daily-scraper corpus is mostly fresh preprints.
     """
+    from app.enrich.citations import fetch_citations_batch
     from app.enrich.openalex import fetch_openalex_batch
     from app.models import EnrichmentCache
     from app.services.citation_graph import sync_citation_edges
@@ -339,6 +342,56 @@ def backfill_citation_edges(
                 total_updated += updated_now
                 emit(
                     f"Citation-edges batch through paper {last_seen_id}: "
+                    f"updated {updated_now}/{len(papers)} papers (total {total_updated})"
+                )
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
+
+            # Pass 2 — Semantic Scholar, for papers OpenAlex left empty.
+            stale = EnrichmentCache.query.filter(
+                EnrichmentCache.source == "semantic_scholar",
+                ~db.cast(EnrichmentCache.data, db.Text).like('%"references"%'),
+            ).delete(synchronize_session=False)
+            db.session.commit()
+            if stale:
+                emit(f"Evicted {stale} stale Semantic Scholar cache rows (predate references)")
+
+            last_seen_id = 0
+            while True:
+                papers = (
+                    Paper.query.filter(
+                        Paper.id > last_seen_id,
+                        Paper.arxiv_id.is_not(None),
+                        db.cast(Paper.referenced_works, db.Text) == "[]",
+                    )
+                    .order_by(Paper.id)
+                    .limit(batch_size)
+                    .all()
+                )
+                if not papers:
+                    break
+
+                last_seen_id = papers[-1].id
+                arxiv_ids = [paper.arxiv_id for paper in papers if paper.arxiv_id]
+                citation_data = fetch_citations_batch(arxiv_ids, session=session)
+                updated_now = 0
+
+                for paper in papers:
+                    data = citation_data.get(paper.arxiv_id or "")
+                    if not data:
+                        continue
+                    # Store the S2 id even when this paper's own reference list is
+                    # empty — other papers' edges resolve *to* it through this id.
+                    if paper.semantic_scholar_id is None:
+                        paper.semantic_scholar_id = data.get("semantic_scholar_id")
+                    if data.get("references"):
+                        paper.referenced_works = data["references"]
+                        updated_now += 1
+
+                db.session.commit()
+                total_updated += updated_now
+                emit(
+                    f"Citation-edges S2 batch through paper {last_seen_id}: "
                     f"updated {updated_now}/{len(papers)} papers (total {total_updated})"
                 )
                 if delay_seconds > 0:

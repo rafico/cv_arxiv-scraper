@@ -47,6 +47,17 @@ class SyncCitationEdgesTests(FlaskDBTestCase):
         self.assertEqual(sync_citation_edges(), 0)
         self.assertEqual(PaperRelation.query.filter_by(relation_type="cites").count(), 1)
 
+    def test_resolves_semantic_scholar_ids_too(self):
+        a = _paper("2601.00001", None, ["abc123"])  # S2 hex id, no openalex ids anywhere
+        b = _paper("2601.00002")
+        b.semantic_scholar_id = "abc123"
+        db.session.add_all([a, b])
+        db.session.commit()
+
+        self.assertEqual(sync_citation_edges(), 1)
+        edge = PaperRelation.query.filter_by(relation_type="cites").one()
+        self.assertEqual((edge.paper_id, edge.related_paper_id), (a.id, b.id))
+
     def test_picks_up_late_arriving_cited_paper(self):
         a = _paper("2601.00001", "W1", ["W2"])
         db.session.add(a)

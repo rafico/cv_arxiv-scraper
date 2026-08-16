@@ -1,5 +1,10 @@
-"""Local citation graph: resolve stored OpenAlex reference ids into
-PaperRelation "cites" edges, and rank papers with PageRank.
+"""Local citation graph: resolve stored reference ids into PaperRelation
+"cites" edges, and rank papers with PageRank.
+
+referenced_works holds ids from two namespaces — OpenAlex "W…" ids and
+Semantic Scholar 40-char hex paperIds (S2 covers fresh preprints months
+before OpenAlex parses their references) — resolved against Paper.openalex_id
+and Paper.semantic_scholar_id respectively; the namespaces cannot collide.
 
 Edges only ever connect papers already in the local DB — references to
 papers we don't track are simply skipped (and picked up automatically on a
@@ -26,12 +31,11 @@ def sync_citation_edges() -> int:
     """
     from app.models import Paper, PaperRelation, db
 
-    rows = (
-        db.session.query(Paper.id, Paper.openalex_id, Paper.referenced_works)
-        .filter(Paper.openalex_id.isnot(None))
-        .all()
-    )
-    paper_by_oa = {oa_id: pid for pid, oa_id, _ in rows}
+    rows = db.session.query(
+        Paper.id, Paper.openalex_id, Paper.semantic_scholar_id, Paper.referenced_works
+    ).all()
+    ref_to_paper = {oa_id: pid for pid, oa_id, _, _ in rows if oa_id}
+    ref_to_paper.update({s2_id: pid for pid, _, s2_id, _ in rows if s2_id})
     existing = {
         (citing, cited)
         for citing, cited in db.session.query(PaperRelation.paper_id, PaperRelation.related_paper_id).filter(
@@ -40,9 +44,9 @@ def sync_citation_edges() -> int:
     }
 
     inserted = 0
-    for pid, _, refs in rows:
+    for pid, _, _, refs in rows:
         for ref in refs or []:
-            cited_id = paper_by_oa.get(ref)
+            cited_id = ref_to_paper.get(ref)
             if cited_id is None or cited_id == pid or (pid, cited_id) in existing:
                 continue
             db.session.add(PaperRelation(paper_id=pid, related_paper_id=cited_id, relation_type=CITES))

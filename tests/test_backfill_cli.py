@@ -147,8 +147,9 @@ class BackfillCliTests(FlaskDBTestCase):
             ),
         )
 
+    @patch("app.services.citations.fetch_citations_batch")
     @patch("app.services.openalex.fetch_openalex_batch")
-    def test_backfill_citation_edges_updates_refs_and_builds_edges(self, mock_fetch):
+    def test_backfill_citation_edges_updates_refs_and_builds_edges(self, mock_openalex, mock_s2):
         from app.models import EnrichmentCache, PaperRelation
 
         citing = _paper("2601.00010")
@@ -160,13 +161,14 @@ class BackfillCliTests(FlaskDBTestCase):
         # Stale cache row from before referenced_works existed — must be evicted.
         db.session.add(EnrichmentCache(paper_id=citing.id, source="openalex", data={"openalex_id": "W10"}))
         db.session.commit()
-        mock_fetch.return_value = {
+        mock_openalex.return_value = {
             "2601.00010": {
                 "openalex_id": "W10",
                 "referenced_works_count": 2,
                 "referenced_works": ["W11", "W999"],
             }
         }
+        mock_s2.return_value = {}
 
         updated = backfill_citation_edges(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
 
@@ -177,8 +179,33 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertEqual(EnrichmentCache.query.count(), 0)  # stale row evicted
         edge = PaperRelation.query.filter_by(relation_type="cites").one()
         self.assertEqual((edge.paper_id, edge.related_paper_id), (citing.id, cited.id))
-        # cited paper already has count=0: nothing to fetch for it.
-        self.assertEqual(mock_fetch.call_args[0][0], ["2601.00010"])
+        # cited paper already has count=0: nothing to fetch for it via OpenAlex.
+        self.assertEqual(mock_openalex.call_args[0][0], ["2601.00010"])
+        # The S2 pass targets papers still without references (the cited one).
+        self.assertEqual(mock_s2.call_args[0][0], ["2601.00011"])
+
+    @patch("app.services.citations.fetch_citations_batch")
+    @patch("app.services.openalex.fetch_openalex_batch", return_value={})
+    def test_backfill_citation_edges_s2_pass_fills_openalex_gaps(self, mock_openalex, mock_s2):
+        from app.models import PaperRelation
+
+        citing = _paper("2601.00020")
+        cited = _paper("2601.00021")
+        db.session.add_all([citing, cited])
+        db.session.commit()
+        mock_s2.return_value = {
+            "2601.00020": {"semantic_scholar_id": "s2-citing", "references": ["s2-cited", "s2-unknown"]},
+            "2601.00021": {"semantic_scholar_id": "s2-cited", "references": []},
+        }
+
+        updated = backfill_citation_edges(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
+
+        stored = Paper.query.filter_by(arxiv_id="2601.00020").one()
+        self.assertEqual(updated, 1)  # only the paper with non-empty refs counts
+        self.assertEqual(stored.referenced_works, ["s2-cited", "s2-unknown"])
+        self.assertEqual(stored.semantic_scholar_id, "s2-citing")
+        edge = PaperRelation.query.filter_by(relation_type="cites").one()
+        self.assertEqual((edge.paper_id, edge.related_paper_id), (citing.id, cited.id))
 
     @patch("app.services.thumbnail_generator.generate_thumbnail", return_value=True)
     def test_backfill_thumbnails_only_generates_missing_files(self, mock_generate):
