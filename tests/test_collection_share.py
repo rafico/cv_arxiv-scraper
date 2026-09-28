@@ -46,6 +46,12 @@ class CollectionShareTests(FlaskDBTestCase):
         backfill = patch("app.services.embed_backfill.backfill_embeddings", return_value=0)
         self.backfill = backfill.start()
         self.addCleanup(backfill.stop)
+        embed = patch("app.services.embeddings.add_papers_to_index", return_value=0)
+        self.embed = embed.start()
+        self.addCleanup(embed.stop)
+        service = patch("app.services.embeddings.get_embedding_service", return_value=MagicMock(index_dir="/idx"))
+        service.start()
+        self.addCleanup(service.stop)
 
     def _csrf_token(self) -> str:
         self.client.get("/")
@@ -86,7 +92,7 @@ class CollectionShareTests(FlaskDBTestCase):
         imported, stats = import_collection(manifest)
 
         self.assertEqual(imported.name, "Bundle Source (imported)")
-        self.assertEqual(stats, {"created": 0, "linked": 2, "edges": 1})  # edge W1→W2 synced
+        self.assertEqual(stats, {"created": 0, "linked": 2, "edges": 1, "embedded": True})  # edge W1→W2 synced
         self.assertEqual(Paper.query.count(), 3)  # no duplicate rows
         member_ids = {pc.paper_id for pc in PaperCollection.query.filter_by(collection_id=imported.id)}
         self.assertEqual(len(member_ids), 2)
@@ -169,7 +175,53 @@ class CollectionShareTests(FlaskDBTestCase):
         self.assertEqual(Collection.query.count(), 2)  # source + target, no "(imported)" copy
         self.assertEqual(stats["created"], 2)
         self.assertEqual(PaperCollection.query.filter_by(collection_id=target.id).count(), 2)
-        self.backfill.assert_called_once()
+        self.embed.assert_called_once()
+
+    def test_import_embeds_only_created_papers_through_the_locked_index_path(self):
+        # Backfilling via the process singleton re-embedded the whole corpus and saved
+        # its stale matrix over vectors a concurrent scrape or CLI had just written.
+        manifest = export_collection(self._seed_collection().id)
+        db.session.query(PaperCollection).delete()
+        Paper.query.filter(Paper.arxiv_id != "2601.00001").delete()
+        db.session.commit()
+
+        import_collection(manifest)
+
+        created = Paper.query.filter_by(arxiv_id="2601.00002").one()
+        self.assertEqual(self.embed.call_args.args, ("/idx", [created.id], [f"{created.title} "]))
+        self.backfill.assert_not_called()
+
+    def test_bundle_route_leaves_large_imports_to_the_backfill(self):
+        # Embedding a 5000-paper bundle would hold the single web worker for minutes.
+        manifest = export_collection(self._seed_collection().id)
+        db.session.query(PaperCollection).delete()
+        db.session.query(Paper).delete()
+        db.session.commit()
+
+        with patch("app.routes.api.collections._MAX_IMPORT_IDS", 1):
+            res = self.client.post(
+                "/api/collections/import", json=manifest, headers={"X-CSRF-Token": self._csrf_token()}
+            )
+
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual((res.get_json()["created"], res.get_json()["embedded"]), (2, False))
+        self.embed.assert_not_called()
+        self.backfill.assert_not_called()
+
+    def test_import_ids_reports_hidden_local_papers(self):
+        # Hidden papers are filtered out of the collection view, .bib and MCP, so the
+        # UI must say why a linked paper is missing instead of silently reloading.
+        db.session.add(_paper("2601.00001", is_hidden=True))
+        db.session.commit()
+
+        res = self.client.post(
+            "/api/collections/import-ids",
+            json={"name": "Seeds", "text": "2601.00001"},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual((res.get_json()["linked"], res.get_json()["hidden"]), (1, ["2601.00001"]))
 
     def test_import_ids_seeds_collection_without_feedback(self):
         local = _paper("2601.00001")

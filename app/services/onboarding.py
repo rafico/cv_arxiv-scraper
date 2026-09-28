@@ -48,11 +48,17 @@ _OLD_ID_RE = re.compile(r"([a-z][a-z\-]*)(?:\.[a-z][a-z\-]*)?/(\d{7})", re.IGNOR
 
 # Finds ids inside free text (a pasted list, URLs, a .bib). New-scheme ids need a
 # real month (YYMM) and no digit/"digit." before them, so DOIs such as
-# 10.1109/TPAMI.2019.2929257 don't match; legacy ids only count after an
-# ``arXiv:`` label or an arxiv.org abs/pdf URL, since "word/1234567" is too common.
+# 10.1109/TPAMI.2019.2929257 don't match. Legacy ids must name one of arXiv's
+# fixed pre-2007 archives and, when bare, not follow a path/DOI character, since
+# "word/1234567" is too common.
+_LEGACY_ARCHIVES = (
+    "acc-phys|adap-org|alg-geom|ao-sci|astro-ph|atom-ph|bayes-an|chao-dyn|chem-ph|cmp-lg|comp-gas|cond-mat|cs"
+    "|dg-ga|funct-an|gr-qc|hep-ex|hep-lat|hep-ph|hep-th|math|math-ph|mtrl-th|nlin|nucl-ex|nucl-th|patt-sol"
+    "|physics|plasm-ph|q-alg|q-bio|quant-ph|solv-int|supr-con"
+)
 _TEXT_ID_RE = re.compile(
     r"(?<!\d)(?<!\d\.)(\d{2}(?:0[1-9]|1[0-2])\.\d{4,5})(?!\d)"
-    r"|(?:arxiv:|arxiv\.org/(?:abs|pdf)/)([a-z][a-z\-]*(?:\.[a-z][a-z\-]*)?/\d{7})(?!\d)",
+    rf"|(?:arxiv:|arxiv\.org/(?:abs|pdf)/|(?<![\w/.-]))((?:{_LEGACY_ARCHIVES})(?:\.[a-z][a-z\-]*)?/\d{{7}})(?!\d)",
     re.IGNORECASE,
 )
 

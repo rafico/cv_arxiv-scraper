@@ -136,7 +136,7 @@ def export_collection_csv(collection_id: int):
     db.session.get(Collection, collection_id) or abort(404)
     papers = (
         Paper.query.join(PaperCollection, PaperCollection.paper_id == Paper.id)
-        .filter(PaperCollection.collection_id == collection_id)
+        .filter(PaperCollection.collection_id == collection_id, Paper.is_hidden.is_(False))
         .order_by(Paper.id)
         .all()
     )
@@ -167,6 +167,10 @@ def export_collection_csv(collection_id: int):
 
 
 _MAX_BUNDLE_UPLOAD_BYTES = 64 * 1024 * 1024
+# ponytail: the arXiv fetch and CPU embedding run synchronously on the single
+# worker, so seeds are capped and bigger bundles skip embedding (left to
+# cv-arxiv-backfill embeddings); a background job if reviews need bigger seeds.
+_MAX_IMPORT_IDS = 100
 
 
 @api_bp.route("/collections/import", methods=["POST"])
@@ -177,15 +181,10 @@ def import_collection_bundle():
     request.max_content_length = _MAX_BUNDLE_UPLOAD_BYTES
     manifest = request.get_json(silent=True)
     try:
-        collection, stats = import_collection(manifest)
+        collection, stats = import_collection(manifest, embed_max=_MAX_IMPORT_IDS)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"id": collection.id, "name": collection.name, **stats}), 201
-
-
-# ponytail: the arXiv fetch and CPU embedding run synchronously on the single
-# worker, so seeds are capped; a background job if reviews need bigger seeds.
-_MAX_IMPORT_IDS = 100
 
 
 @api_bp.route("/collections/import-ids", methods=["POST"])
@@ -212,6 +211,8 @@ def import_collection_ids():
         abort(404)
 
     local = {p.arxiv_id: p for p in Paper.query.filter(Paper.arxiv_id.in_(ids))}
+    # Hidden papers link but stay out of the collection view/.bib/MCP; report them.
+    hidden = [aid for aid, p in local.items() if p.is_hidden]
     missing = [aid for aid in ids if aid not in local]
     try:
         fetched = fetch_arxiv_metadata(missing) if missing else []
@@ -227,7 +228,14 @@ def import_collection_ids():
     manifest = {"bundle_version": BUNDLE_VERSION, "collection": {"name": collection.name}, "papers": papers}
     _collection, stats = import_collection(manifest, into=collection)
     found = {entry["arxiv_id"] for entry in papers}
-    return jsonify({"collection_id": collection.id, **stats, "not_found": [aid for aid in ids if aid not in found]})
+    return jsonify(
+        {
+            "collection_id": collection.id,
+            **stats,
+            "not_found": [aid for aid in ids if aid not in found],
+            "hidden": hidden,
+        }
+    )
 
 
 @api_bp.route("/collections/<int:collection_id>/papers", methods=["POST"])

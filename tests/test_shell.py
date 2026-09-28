@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.enums import FeedbackAction
 from app.models import Collection, PaperFeedback, SavedSearch, db
 from tests.helpers import FlaskDBTestCase
@@ -41,3 +43,12 @@ class ShellTests(FlaskDBTestCase):
         text = self.client.get("/").get_data(as_text=True)
         self.assertIn('id="new-collection-btn"', text)
         self.assertIn("function newCollection(", text)
+
+    def test_new_collection_works_from_pages_without_their_own_csrf_token(self):
+        # The sidebar "+" renders everywhere, so every page must carry the CSRF meta tag.
+        for path in ("/graph", "/help/organization"):
+            text = self.client.get(path).get_data(as_text=True)
+            token = re.search(r'<meta name="csrf-token" content="([^"]+)"', text)
+            self.assertIsNotNone(token, path)
+            res = self.client.post("/api/collections", json={"name": path}, headers={"X-CSRF-Token": token.group(1)})
+            self.assertEqual(res.status_code, 201, path)

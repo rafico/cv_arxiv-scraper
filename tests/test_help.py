@@ -64,3 +64,8 @@ class HelpRouteTests(FlaskDBTestCase):
             "Tags",
         ]:
             self.assertIn(feature, full_text, f"Missing feature in help: {feature}")
+
+    def test_cli_help_documents_sync_query_import(self):
+        text = self.client.get("/help/cli").get_data(as_text=True)
+        for flag in ("--query", "--collection", "--max-results"):
+            self.assertIn(flag, text)

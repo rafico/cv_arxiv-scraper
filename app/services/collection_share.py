@@ -129,7 +129,7 @@ def arxiv_bundle_entry(
     }
 
 
-def import_collection(manifest: object, *, into=None):
+def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDLE_PAPERS):
     """Import a bundle as a new collection (or ``into`` an existing one);
     returns (collection, stats dict).
 
@@ -137,7 +137,8 @@ def import_collection(manifest: object, *, into=None):
     local paper (by arxiv_id, then link) links into the collection and
     only fills user_notes/user_tags where locally empty — imports never
     overwrite local data. Unmatched entries become new Paper rows, embedded
-    after the commit so search and "Suggest similar" can find them.
+    after the commit so search and "Suggest similar" can find them — unless
+    there are more than ``embed_max`` (stats ``embedded`` is then False).
     """
     from datetime import date
 
@@ -145,7 +146,6 @@ def import_collection(manifest: object, *, into=None):
 
     from app.models import Collection, Paper, PaperCollection, db
     from app.services.citation_graph import sync_citation_edges
-    from app.services.embed_backfill import backfill_embeddings
 
     manifest = _validate(manifest)
 
@@ -159,7 +159,9 @@ def import_collection(manifest: object, *, into=None):
         db.session.add(collection)
         db.session.flush()
 
-    linked = created = 0
+    linked = 0
+    new_ids: list[int] = []
+    new_texts: list[str] = []
     for entry in manifest["papers"]:
         arxiv_id = entry.get("arxiv_id") if isinstance(entry.get("arxiv_id"), str) else None
         paper = Paper.query.filter_by(arxiv_id=arxiv_id).first() if arxiv_id else None
@@ -195,7 +197,8 @@ def import_collection(manifest: object, *, into=None):
             )
             db.session.add(paper)
             db.session.flush()
-            created += 1
+            new_ids.append(paper.id)
+            new_texts.append(f"{paper.title} {paper.abstract_text or ''}")
         else:
             # Fill-only merge: never overwrite local data with imported data.
             if not paper.user_notes and _entry_str(entry, "user_notes"):
@@ -213,9 +216,22 @@ def import_collection(manifest: object, *, into=None):
 
     db.session.commit()
     edges = sync_citation_edges()
-    if created:
+    embedded = len(new_ids) <= embed_max
+    if new_ids and embedded:
+        # Only this import's papers, via the scrape path's reload-append-save under the
+        # index locks: saving the process singleton would write its stale matrix over
+        # vectors a concurrent scrape or CLI just added.
+        from app.services.embeddings import add_papers_to_index, get_embedding_service, reset_embedding_service
+        from app.services.scrape_engine import _INDEX_WRITE_LOCK, _NATIVE_STAGE_TIMEOUT
+        from app.services.subprocess_runner import run_isolated
+
         try:
-            backfill_embeddings(current_app._get_current_object())
+            index_dir = str(get_embedding_service(current_app._get_current_object()).index_dir)
+            with _INDEX_WRITE_LOCK:
+                run_isolated(add_papers_to_index, index_dir, new_ids, new_texts, timeout=_NATIVE_STAGE_TIMEOUT)
+                reset_embedding_service()
         except Exception:
             LOGGER.warning("Embedding imported papers failed (non-fatal)", exc_info=True)
-    return collection, {"created": created, "linked": linked, "edges": edges}
+    elif new_ids:
+        LOGGER.info("Imported %d papers unembedded; run `cv-arxiv-backfill embeddings`", len(new_ids))
+    return collection, {"created": len(new_ids), "linked": linked, "edges": edges, "embedded": embedded}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
+from app.constants import INBOX_ANNOUNCEMENT_LAG_DAYS
 from app.models import Paper, SavedSearch, db, inbox_freshness_clause
 from app.services.text import now_utc
 
@@ -195,9 +196,11 @@ def run_notify_searches(
     """Run saved searches flagged ``notify_on_match`` for digest alerting.
 
     Returns ``[{"search": SavedSearch, "papers": [Paper, ...]}, ...]`` keeping only
-    papers scraped on/after ``since`` (new since the last digest) and not in
-    ``exclude_paper_ids`` (already featured in the digest's main list). Papers are
-    also deduped across searches so one paper never appears in two alert sections.
+    papers scraped on/after ``since`` (new since the last digest), published
+    within the announcement lag of it (as ``inbox_freshness_clause``, so old
+    imports don't alert), and not in ``exclude_paper_ids`` (already featured in
+    the digest's main list). Papers are also deduped across searches so one
+    paper never appears in two alert sections.
     A single broken search is skipped rather than failing the whole digest.
     """
     searches = (
@@ -206,6 +209,7 @@ def run_notify_searches(
         .all()
     )
     seen: set[int] = set(exclude_paper_ids)
+    floor = since.date() - timedelta(days=INBOX_ANNOUNCEMENT_LAG_DAYS) if since is not None else None
     results: list[dict] = []
     for search in searches:
         try:
@@ -216,7 +220,15 @@ def run_notify_searches(
         fresh = [
             paper
             for paper in papers
-            if paper.id not in seen and (since is None or (paper.scraped_at is not None and paper.scraped_at >= since))
+            if paper.id not in seen
+            and (
+                since is None
+                or (
+                    paper.scraped_at is not None
+                    and paper.scraped_at >= since
+                    and (paper.publication_dt is None or paper.publication_dt >= floor)
+                )
+            )
         ][:per_search_limit]
         if fresh:
             seen.update(paper.id for paper in fresh)

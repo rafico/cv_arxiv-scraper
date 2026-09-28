@@ -135,11 +135,6 @@ def paper_to_bibtex(paper: Paper) -> str:
     if paper.pdf_link:
         fields.append(f"  pdf = {{{_escape_latex(paper.pdf_link)}}}")
 
-    if paper.user_tags_list:
-        fields.append(f"  keywords = {{{_escape_latex(', '.join(paper.user_tags_list))}}}")
-    if paper.user_notes:
-        fields.append(f"  annote = {{{_escape_latex(paper.user_notes)}}}")
-
     field_str = ",\n".join(fields)
     return f"@{entry_type}{{{cite_key},\n{field_str}\n}}"
 

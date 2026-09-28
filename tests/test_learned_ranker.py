@@ -35,6 +35,7 @@ from app.services.ranking import (
     generate_ranking_explanation,
     top_score_contributors,
 )
+from app.services.text import utc_today
 from tests.helpers import FlaskDBTestCase
 
 DIM = 768
@@ -507,7 +508,7 @@ class ExplainHonestyTests(LearnedRankerTestCase):
         breakdown = explain_score(
             match_types=["Title"],
             matched_terms_count=1,
-            publication_dt=date(2026, 7, 1),
+            publication_dt=utc_today(),  # a fixed date decays out of the top contributors
             resource_count=0,
             interest_similarity=0.8,
         )

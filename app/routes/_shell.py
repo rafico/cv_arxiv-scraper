@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import Flask
+from flask import Flask, has_request_context
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.csrf import get_or_create_csrf_token
 from app.enums import FeedbackAction
 from app.models import Collection, Paper, PaperFeedback, SavedSearch, db, inbox_freshness_clause
 from app.services.text import now_utc
@@ -47,4 +48,9 @@ def _build_shell() -> dict:
 def register_shell_context(app: Flask) -> None:
     @app.context_processor
     def inject_shell() -> dict:
-        return {"shell": _build_shell()}
+        context: dict = {"shell": _build_shell()}
+        # The sidebar "+" (newCollection) POSTs from every page, not just those whose
+        # route passes csrf_token. Exports render templates outside a request.
+        if has_request_context():
+            context["csrf_token"] = get_or_create_csrf_token()
+        return context

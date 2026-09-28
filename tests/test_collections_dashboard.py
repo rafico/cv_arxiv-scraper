@@ -63,6 +63,19 @@ class CollectionDashboardTests(FlaskDBTestCase):
         self.assertIn(f"removeFromCollection({paper.id}, {collection.id}", text)
         self.assertIn('const collectionName = "Survey Seeds";', text)
 
+    def test_collection_actions_explain_failures(self):
+        # A new (empty) collection from the sidebar "+": Suggest similar 400s, and a
+        # stale-token/already-deleted Delete 4xxs; neither may silently no-op.
+        collection = Collection(name="Fresh")
+        db.session.add(collection)
+        db.session.commit()
+
+        text = self.client.get(f"/?collection={collection.id}&timeframe=all").get_data(as_text=True)
+
+        self.assertIn("Add a paper to this collection first, then try Suggest similar.", text)
+        self.assertIn("Could not delete the collection.", text)
+        self.assertIn("un-skip to see them here", text)
+
     def test_search_inside_collection_keeps_members_outside_global_top_hits(self):
         collection = Collection(name="Review")
         member = _make_paper(1, title="Sparse Voxel Occupancy")
@@ -97,9 +110,11 @@ class CollectionDashboardTests(FlaskDBTestCase):
             user_notes="@SUM(A1)\nsecond line",
         )
         outsider = _make_paper(2)
-        db.session.add_all([collection, member, outsider])
+        hidden = _make_paper(3, is_hidden=True)  # out of the view and .bib, so out of the CSV too
+        db.session.add_all([collection, member, outsider, hidden])
         db.session.flush()
         db.session.add(PaperCollection(paper_id=member.id, collection_id=collection.id))
+        db.session.add(PaperCollection(paper_id=hidden.id, collection_id=collection.id))
         db.session.commit()
 
         response = self.client.get(f"/api/collections/{collection.id}/table.csv")

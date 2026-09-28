@@ -972,21 +972,46 @@ class StaleCitationRefreshTests(FlaskDBTestCase):
         self.assertEqual(stale.citation_source, "semantic_scholar")
         self.assertEqual(stale.referenced_works, ["W1", "s2x"])
         self.assertGreater(stale.citation_updated_at, now_utc() - timedelta(minutes=1))
-        self.assertEqual(
-            stale.paper_score,
-            compute_paper_score(
-                match_types=["title"],
-                matched_terms_count=1,
-                publication_dt=None,
-                resource_count=0,
-                llm_relevance_score=None,
-                citation_count=42,
-                config=self.app.config["SCRAPER_CONFIG"],
-            ),
-        )
         # S2's None count leaves the OpenAlex count alone; ids and refs still fill in.
         self.assertEqual((never.citation_count, never.citation_source), (5, "openalex"))
         self.assertEqual((never.semantic_scholar_id, never.referenced_works), ("s2b", ["s2y"]))
+
+    @patch("app.services.citations.fetch_citations_batch")
+    def test_refresh_keeps_the_stored_score(self, mock_fetch):
+        # Re-scoring only S2-indexed papers against today's recency (and without the
+        # readiness bonus) would sink them below unindexed peers of the same age.
+        from app.services.scrape_engine import _refresh_stale_citations
+
+        stale = self._paper("2601.00001", None, publication_dt=date.today() - timedelta(days=20), github_repo="o/r")
+        stale.paper_score = 12.5
+        db.session.commit()
+        mock_fetch.return_value = {"2601.00001": {"citation_count": 42}}
+
+        _refresh_stale_citations(self.app, session=None)
+
+        db.session.expire_all()
+        self.assertEqual((stale.citation_count, stale.paper_score), (42, 12.5))
+
+    @patch("app.services.citations.fetch_citations_batch")
+    def test_each_chunk_commits_before_the_next_request(self, mock_fetch):
+        # Pending rows would be autoflushed by the next chunk's cache lookup, holding
+        # SQLite's write lock through that chunk's S2 request.
+        from app.services.scrape_engine import _refresh_stale_citations
+
+        for i in range(501):
+            self._paper(f"2601.{i:05d}", None)
+        db.session.commit()
+        dirty_at_request = []
+
+        def fetch(ids, session=None):
+            dirty_at_request.append(bool(db.session.dirty))
+            return {aid: {"citation_count": 1} for aid in ids}
+
+        mock_fetch.side_effect = fetch
+
+        _refresh_stale_citations(self.app, session=None)
+
+        self.assertEqual(dirty_at_request, [False, False])
 
     @patch("app.services.citations.fetch_citations_batch")
     def test_daily_scrape_turns_refreshed_refs_into_edges(self, mock_fetch):

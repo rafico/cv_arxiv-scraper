@@ -282,12 +282,12 @@
         } catch (e) { /* non-fatal */ }
     }
 
-    function render(results) {
+    function render(results, emptyText) {
         list.innerHTML = "";
         if (!results.length) {
             const empty = document.createElement("p");
             empty.className = "text-[11px] text-fg-subtle px-1";
-            empty.textContent = "No similar papers found yet — index more papers first.";
+            empty.textContent = emptyText || "No similar papers found yet — index more papers first.";
             list.append(empty);
             return;
         }
@@ -321,6 +321,11 @@
             if (res.ok) {
                 const data = await res.json();
                 render(data.results || []);
+            } else {
+                // 400 = no members to seed from (a new collection from the sidebar "+").
+                render([], res.status === 400
+                    ? "Add a paper to this collection first, then try Suggest similar."
+                    : "Couldn't load suggestions.");
             }
         } catch (e) { /* non-fatal */ }
         button.disabled = false;
@@ -343,8 +348,10 @@
             const data = await res.json();
             if (!res.ok) { importStatus.textContent = "Error: " + (data.error || "import failed"); return; }
             const missed = data.not_found.length ? " Not found: " + data.not_found.join(", ") + "." : "";
-            importStatus.textContent = data.created + " new, " + data.linked + " already in library." + missed;
-            if (!data.not_found.length) window.location.reload();
+            const hidden = data.hidden.length
+                ? " Hidden (skipped earlier), un-skip to see them here: " + data.hidden.join(", ") + "." : "";
+            importStatus.textContent = data.created + " new, " + data.linked + " already in library." + missed + hidden;
+            if (!data.not_found.length && !data.hidden.length) window.location.reload();
         } catch (e) {
             importStatus.textContent = "Error: request failed";
         } finally {
@@ -371,6 +378,7 @@
             headers: { "X-CSRF-Token": getCsrfToken() },
         });
         if (res.ok) window.location.href = "/";
+        else alert((await res.json().catch(() => ({}))).error || "Could not delete the collection.");
     };
 })();
 </script>

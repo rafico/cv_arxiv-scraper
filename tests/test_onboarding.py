@@ -154,8 +154,13 @@ class ExtractArxivIdsTests(unittest.TestCase):
         )
         self.assertEqual(extract_arxiv_ids(text), ["2401.01234", "2312.00752", "math/0309136", "hep-th/9901001"])
 
-    def test_rejects_dois_bad_months_and_unlabelled_legacy_ids(self):
-        self.assertEqual(extract_arxiv_ids("10.1109/TPAMI.2019.2929257 2413.01234 foo/1234567 2401.012345"), [])
+    def test_finds_bare_legacy_ids_and_bib_eprints(self):
+        text = "hep-th/9901001\ncs/0701001v2, 2401.01234\n@misc{y, eprint = {cs/0212028}, archivePrefix = {arXiv}}"
+        self.assertEqual(extract_arxiv_ids(text), ["hep-th/9901001", "cs/0701001", "2401.01234", "cs/0212028"])
+
+    def test_rejects_dois_bad_months_and_non_archive_legacy_ids(self):
+        text = "10.1109/TPAMI.2019.2929257 2413.01234 foo/1234567 2401.012345 10.1000/cs/0701001 https://x.org/math/1234567"
+        self.assertEqual(extract_arxiv_ids(text), [])
 
 
 class FetchArxivMetadataTests(unittest.TestCase):

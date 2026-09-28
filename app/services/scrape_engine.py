@@ -310,10 +310,15 @@ def _refresh_stale_citations(app, session) -> None:
     S2 cache TTL). Scrape day is usually before S2 has indexed a paper, so without
     this its counts stay NULL and its reference list empty for good. Non-fatal.
 
+    paper_score is left alone: re-scoring only S2-indexed papers against today's
+    recency would sink them below unindexed peers. sort=citations reads the count.
+
     # ponytail: the whole stale corpus is refreshed per run (~corpus/500 POSTs at
     # bulk pacing); add a LIMIT once the corpus passes ~50k papers.
+    # ponytail: counts reach paper_score only on the next recompute_all_paper_scores
+    # (settings/profile save); add a scrape-day-anchored citation delta if ranking
+    # should react sooner.
     """
-    from app.cli.backfill import _recompute_paper_score
     from app.models import Paper, db
     from app.services.citations import fetch_citations_batch
 
@@ -343,8 +348,9 @@ def _refresh_stale_citations(app, session) -> None:
                     paper.citation_source = "semantic_scholar"
                     paper.citation_provenance = {"source": "semantic_scholar", "updated_at": now.isoformat()}
                     paper.citation_updated_at = now
-                    _recompute_paper_score(paper, app.config.get("SCRAPER_CONFIG"))
-            db.session.commit()
+                # Commit per chunk: pending rows would otherwise be autoflushed by the
+                # next chunk's cache lookup and hold SQLite's write lock through its request.
+                db.session.commit()
     except Exception as exc:
         LOGGER.warning("Stale citation refresh failed: %s", exc)
 

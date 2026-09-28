@@ -189,6 +189,38 @@ per scrape.
   cold 80/20 split per user.
 - One-time manual step: register the PyPI trusted publisher, then tag v0.5.0.
 
+## Wave 5 — literature review (September 2026, branch `feat/wave5-lit-review`, v0.7.0)
+
+Turns collections into a working surface for a literature review:
+
+22. **Collection manager** ✅ — sidebar "+" (works with zero collections),
+    rename/delete, remove-from-collection, bulk "Add to collection"; search
+    inside a collection no longer drops members below the global top-100.
+23. **Seed a collection** ✅ — paste arXiv ids, URLs or a .bib
+    (`POST /api/collections/import-ids`, max 100) or run
+    `cv-arxiv-sync --query ... --collection NAME`; both go through the bundle
+    importer, write no feedback rows (the ranker is untouched) and embed only
+    the papers they create.
+24. **Review exports** ✅ — venue-aware BibTeX (`@misc` preprint,
+    `@inproceedings`/`@article` once accepted; private notes/tags stay out of
+    the .bib) and a per-collection screening CSV.
+25. **MCP read tools** ✅ — `get_collection`, `get_paper_text` for Claude Code
+    as the review synthesizer.
+26. **Trust fixes** ✅ — `?ids=` paper permalinks, a working Follow-author
+    link, and a daily refresh of stale S2 citation counts and references.
+
+Deliberate ceilings (marked `ponytail:` in code): synchronous id import
+(100 ids; bundles over 100 new papers skip embedding), whole-stale-corpus
+citation refresh per run, refreshed counts reach `paper_score` only on the
+next full rescore.
+
+### Later: gated on evidence that collections get used
+
+Only if `select count(*) from paper_collections` is above 0 after 2-4 weeks:
+prior works (references cited by 2+ members), "Ask this collection" chat,
+paper-chat chunk cleanup; tier 3 (screening column, `near=` watch filter,
+matrix cells, S2 recommendations, outline.md) each only on a trigger.
+
 ## Deliberately not doing
 
 - **Social/commenting features** — alphaXiv's own data shows commenting stalled while

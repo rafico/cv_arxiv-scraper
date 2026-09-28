@@ -127,7 +127,7 @@ class SyncCliStateTests(FlaskDBTestCase):
 
 
 class SyncCliQueryTests(FlaskDBTestCase):
-    @patch("app.services.embed_backfill.backfill_embeddings", return_value=0)
+    @patch("app.services.embeddings.add_papers_to_index", return_value=0)
     @patch("sync_cli.upsert_sync_state")
     @patch("sync_cli.execute_historical_scrape")
     @patch("sync_cli.ArxivApiBackend.fetch")

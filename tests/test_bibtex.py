@@ -124,10 +124,12 @@ class PaperToBibtexTests(unittest.TestCase):
         self.assertIn("journal = {TPAMI}", bib)
         self.assertIn("year = {2026}", bib)
 
-    def test_user_tags_and_notes_exported(self):
-        bib = paper_to_bibtex(_make_paper(user_tags=["survey", "3d"], user_notes="Uses 50% less memory"))
-        self.assertIn("keywords = {survey, 3d}", bib)
-        self.assertIn(r"annote = {Uses 50\% less memory}", bib)
+    def test_private_tags_and_notes_stay_out_of_the_bib(self):
+        # A .bib gets committed and uploaded with LaTeX sources; notes/tags go via CSV/bundle.
+        bib = paper_to_bibtex(_make_paper(user_tags=["survey", "3d"], user_notes="weak baseline"))
+        self.assertNotIn("keywords", bib)
+        self.assertNotIn("annote", bib)
+        self.assertNotIn("weak baseline", bib)
 
     def test_multiple_papers_export(self):
         p1 = _make_paper(arxiv_id="2603.00001", link="https://arxiv.org/abs/2603.00001")
