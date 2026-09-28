@@ -28,9 +28,10 @@ Wave 5: collections as a literature-review workspace.
 - **Prior works** (`GET /api/collections/<id>/prior-works`): outside papers
   that 2+ members cite, resolved in one Semantic Scholar batch call, with
   one-click Add. It degrades to a 502 with `{results: [], error}`, never a 500.
-- **Ask this collection**: an optional `collection_id` on
-  `POST /api/corpus/chat` (Discover `?collection=`) answers from that
-  collection's visible members only.
+- **Ask this collection**: the collection sidebar's "Ask this collection →"
+  opens Discover chat with `?collection=`, which sends an optional
+  `collection_id` on `POST /api/corpus/chat` and answers from that
+  collection's visible members only. Answers are labelled with their scope.
 
 ### Changed
 - BibTeX entries are `@misc` arXiv preprints (eprint, primaryclass, arXiv
@@ -70,8 +71,15 @@ Wave 5: collections as a literature-review workspace.
   "Error" entry as a paper when an id is malformed.
 - The MCP setup example points `CV_ARXIV_DATA_DIR` at a real data dir
   (a source checkout's `instance/`).
-- Newly scraped papers, and papers updated by the Hugging Face and GitHub
-  backfills, now include the implementation-readiness bonus in their score.
+- Newly scraped papers, and papers rescored by a backfill, now include the
+  implementation-readiness bonus in their score. Backfills dropped it, and the
+  GitHub backfill didn't rescore at all.
+- The OpenAlex and citation-edge backfills merge OpenAlex references into
+  `referenced_works` instead of overwriting the stored Semantic Scholar ones
+  and the citation edges they produce.
+- `cv-arxiv-mcp` works with mcp 2.x, which `pip install '.[mcp]'` now
+  resolves. It exited with the "extra not installed" hint because `FastMCP`
+  was renamed to `MCPServer`; 1.x still works.
 - The onboarding and Settings text no longer says a profile description adds
   papers beyond your whitelists while learned ranking is switched off.
 

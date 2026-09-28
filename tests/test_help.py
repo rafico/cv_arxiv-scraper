@@ -70,6 +70,11 @@ class HelpRouteTests(FlaskDBTestCase):
         self.assertIn("Prior works", text)
         self.assertIn("Semantic Scholar API key", text)
 
+    def test_collection_help_documents_ask_this_collection(self):
+        for page in ("organization", "search"):
+            text = self.client.get(f"/help/{page}").get_data(as_text=True)
+            self.assertIn("Ask this collection", text, page)
+
     def test_cli_help_documents_sync_query_import(self):
         text = self.client.get("/help/cli").get_data(as_text=True)
         for flag in ("--query", "--collection", "--max-results"):

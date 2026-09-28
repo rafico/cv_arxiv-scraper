@@ -249,6 +249,10 @@ next full rescore.
   quotes that don't appear verbatim, and strip numeric in-text citations that
   would collide with the `[n]` labels.
 
+Deliberate ceilings: prior works makes an uncached live S2 call per click
+(add `lru_cache` if it gets clicked a lot), and collection members without an
+embedding trail unranked in chat.
+
 ### Later: gated on evidence that collections get used
 
 Checkpoint after 2-4 weeks:
