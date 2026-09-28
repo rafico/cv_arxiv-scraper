@@ -44,21 +44,41 @@ files are backward-compat shims via `app/_module_alias.py`. Put new logic in
 ```
 ingest.orchestrator.fetch(mode)            # RSS + arXiv-API backends, resumable
    → enrich_entries_with_api_metadata      # arXiv API affiliations/comments/links
+   → _prefetch_affiliation_text            # fetches PDFs → result["pdf_content"]
    → _process_entries_with_pipeline        # features (venue, learned-interest sim)
                                            #   + ranking + LLM summary/insights
+   → _refresh_stale_citations              # daily only: S2 counts/refs older than 7 days
    → _enrich_results_with_citations        # Semantic Scholar
    → _enrich_results_with_openalex         # OpenAlex
    → _enrich_results_with_pdf_links        # code/project links from PDF pages 1-2
    → _save_results                         # explicit field mapping onto Paper rows
+   → _sync_citation_edges                  # "cites" edges, incl. the refreshed refs
+   → _enrich_results_with_huggingface      # HF code links/upvotes (rows must exist)
    → _enrich_results_with_github           # repo stars/license (rows must exist)
-   → _generate_thumbnails                   # reads result["pdf_content"]; page + teaser
-   → _generate_embeddings                   # vector-index update (reuses in-flight vectors)
-   → _extract_sections                      # reads result["pdf_content"]  ← last consumer
+   → _rescore_saved_papers                 # score_paper on the rows, now with readiness
+   → _generate_thumbnails                  # reads result["pdf_content"]; page + teaser
+   → _generate_figures                     # reads result["pdf_content"]
+   → _generate_embeddings                  # vector-index update (reuses in-flight vectors)
+   → _extract_sections                     # reads result["pdf_content"]  ← last consumer
 ```
 
 Each result dict carries `pdf_content` (PDF bytes) fetched once and reused by the
-last two steps; it is **not** persisted (`_save_results` maps explicit columns).
-Don't pop it before section extraction.
+PDF-link, thumbnail, figure and section steps; it is **not** persisted
+(`_save_results` maps explicit columns). Don't pop it before section extraction.
+
+The stale-citation refresh runs before `_save_results` so the edge sync picks up
+the refreshed references. The pipeline score lacks the implementation-readiness
+bonus (result dicts get their GitHub/HF inputs only after save), so
+`_rescore_saved_papers` rescores the saved rows with the canonical `score_paper`.
+
+**arXiv refusals.** Every export-API call goes through `request_arxiv_api`
+(`ingest/arxiv_api_backend.py`). A 403/406, or a 429 that outlives the retries,
+is remembered in-process for 30 minutes and raised as `ArxivRefused`, so every
+later caller goes straight to its fallback: id lookups (scrape metadata, seed
+import, bootstrap) use OAI-PMH `GetRecord` (~1 req/s, 25 ids per call); date
+windows (rolling window, backfill/catch-up) use OAI-PMH `ListRecords` from the
+window start, raising past 10 pages rather than leaving a gap; `cv-arxiv-sync
+--query` uses Semantic Scholar bulk search (Computer Science only).
 
 Errors from ingest backends **propagate** by design (no catch-all swallow). The
 background job manager converts them to a `scrape_error` SSE event; the

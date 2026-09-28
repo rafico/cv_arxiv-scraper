@@ -28,6 +28,8 @@ Wave 5: collections as a literature-review workspace.
 - **Prior works** (`GET /api/collections/<id>/prior-works`): outside papers
   that 2+ members cite, resolved in one Semantic Scholar batch call, with
   one-click Add. It degrades to a 502 with `{results: [], error}`, never a 500.
+  Add keeps the paper's Semantic Scholar id (`import-ids` takes an optional
+  `s2_ids` map), so it joins the citation graph in the same request.
 - **Ask this collection**: the collection sidebar's "Ask this collection →"
   opens Discover chat with `?collection=`, which sends an optional
   `collection_id` on `POST /api/corpus/chat` and answers from that
@@ -62,6 +64,22 @@ Wave 5: collections as a literature-review workspace.
   rescored.
 
 ### Fixed
+- **arXiv refusing the export API.** Since September 2026 arXiv answers a
+  throttled host with HTTP 406 on every request (or 429s that outlive the
+  retries), and waiting doesn't clear it. The daily scrape lost the arXiv
+  metadata (affiliations, comments, DOI, categories) of every new paper and
+  its rolling window came back empty; seed import returned 502 and profile
+  bootstrap resolved none of the pasted ids; historical sync and
+  `cv-arxiv-sync --query` failed. A refusal is now remembered for 30 minutes
+  and every path falls back: arXiv OAI-PMH for id lookups (~1 per second, 25
+  per request; retry for the rest) and date windows, Semantic Scholar search
+  for `--query` (Computer Science only; a non-cs category or a `cat:`-only
+  query is refused, not guessed). A historical sync reaching too far back for
+  OAI-PMH fails instead of leaving a silent gap.
+- `/api/search` (every mode) and MCP `search_papers` in hybrid and semantic
+  mode no longer return skipped papers, matching the dashboard and exports.
+- Bundle import keeps `semantic_scholar_id` only when it is a real Semantic
+  Scholar paperId, so a bundle can't take over another paper's citation edges.
 - Search inside a collection no longer drops members outside the global
   top-100 hits.
 - Follow author links to that author's papers instead of the plain inbox.

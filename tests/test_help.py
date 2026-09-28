@@ -79,3 +79,8 @@ class HelpRouteTests(FlaskDBTestCase):
         text = self.client.get("/help/cli").get_data(as_text=True)
         for flag in ("--query", "--collection", "--max-results"):
             self.assertIn(flag, text)
+
+    def test_cli_help_explains_arxiv_refusal(self):
+        text = self.client.get("/help/cli").get_data(as_text=True)
+        for term in ("HTTP 406", "OAI-PMH"):
+            self.assertIn(term, text)

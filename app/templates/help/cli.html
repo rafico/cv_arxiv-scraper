@@ -102,6 +102,17 @@
     <pre class="bg-surface-2 rounded-lg p-3 text-xs text-fg-muted overflow-x-auto mt-2"><code>0 8 * * * cv-arxiv-scrape && cv-arxiv-digest</code></pre>
 </section>
 
+<!-- arXiv refusals -->
+<section id="arxiv-refused" class="scroll-mt-6 pt-12">
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">When arXiv Refuses Requests</h2>
+    <p class="text-sm text-fg-muted mb-4">A log line or error saying arXiv refused a request (<code>HTTP 406</code>, or 429) means arXiv&rsquo;s export API is throttling your host; waiting a few minutes doesn&rsquo;t clear it. The app stops asking for 30 minutes and falls back on its own:</p>
+    <ul class="space-y-1 text-sm text-fg-muted pl-5 list-disc marker:text-fg-subtle">
+        <li class="pl-1">Scrapes, <code>cv-arxiv-sync</code> date ranges and id lookups use arXiv OAI-PMH. Id lookups run at about one per second, and a seed import resolves 25 new ids per request, so run it again for the rest.</li>
+        <li class="pl-1"><code>cv-arxiv-sync --query</code> uses Semantic Scholar search instead. It covers Computer Science only, so a non-cs <code>--category</code> or a query made only of <code>cat:</code> terms is refused.</li>
+        <li class="pl-1">A <code>cv-arxiv-sync</code> range reaching far back fails instead of leaving a gap; run it again once arXiv accepts requests.</li>
+    </ul>
+</section>
+
 <!-- Feed Sources -->
 <section id="feed-sources" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Multiple Feed Sources</h2>

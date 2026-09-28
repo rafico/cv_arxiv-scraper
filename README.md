@@ -392,6 +392,13 @@ download; override it with `OLLAMA_MODEL=... docker compose --profile local-ai u
   its thumbnail/section extraction is skipped.
 - **No papers after a scrape** — your whitelists may not match today's feed. Widen them in
   **Settings → Research Setup** (or `config.yaml`) and scrape again.
+- **Logs say arXiv "refused" a request (HTTP 406, or 429)** — arXiv's export API is
+  throttling your host, and waiting minutes doesn't clear it. Nothing to fix: the app stops
+  asking for 30 minutes and falls back on its own. Scrapes, sync windows and id lookups use
+  arXiv OAI-PMH (id lookups run at ~1 per second, and a seed import resolves 25 new ids per
+  request, so re-run it for the rest); `cv-arxiv-sync --query` uses Semantic Scholar search
+  (Computer Science only). A `cv-arxiv-sync` that reaches far back fails instead of leaving
+  a gap; rerun it once arXiv accepts requests again.
 
 ---
 
