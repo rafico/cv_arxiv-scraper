@@ -15,9 +15,16 @@ from app.services.enrichment import (
     fetch_recent_papers,
     merge_resource_links,
 )
+from app.services.http_client import create_session
 from app.services.ingest import PaperCandidate, arxiv_api_backend
 from app.services.ingest.arxiv_api_backend import ArxivRefused
 from tests.helpers import OAI_RECORD_2609_12871, oai_response
+
+_UA = "MyApp/9.9 (mailto:me@example.com)"
+
+
+def _ua_session() -> requests.Session:
+    return create_session(scraper_config={"ingest": {"user_agent": _UA}})
 
 
 def _make_pdf(pages: list[list[str]]) -> bytes:
@@ -131,8 +138,10 @@ class ArxivRefusalFallbackTests(unittest.TestCase):
             Mock(content=oai_response("GetRecord", OAI_RECORD_2609_12871)),
         ]
         metadata: dict[str, dict] = {}
+        session = _ua_session()
+        self.addCleanup(session.close)
 
-        _fetch_api_metadata_batch(["2609.12871"], metadata)
+        _fetch_api_metadata_batch(["2609.12871"], metadata, session=session)
 
         self.assertEqual(
             metadata,
@@ -145,6 +154,7 @@ class ArxivRefusalFallbackTests(unittest.TestCase):
                 }
             },
         )
+        self.assertEqual(mock_request.call_args.kwargs["user_agent"], _UA)  # OAI keeps the configured UA
 
     @patch("app.services.enrichment.list_oai_candidates")
     @patch("app.services.enrichment.request_arxiv_api", side_effect=ArxivRefused(406))
@@ -154,10 +164,28 @@ class ArxivRefusalFallbackTests(unittest.TestCase):
             PaperCandidate(arxiv_id="2609.22706", link="https://arxiv.org/abs/2609.22706", title="DOA-SORT")
         ]
 
-        entries = fetch_recent_papers(2, "https://rss.arxiv.org/rss/cs.CV")
+        session = _ua_session()
+        self.addCleanup(session.close)
+
+        entries = fetch_recent_papers(2, "https://rss.arxiv.org/rss/cs.CV", session=session)
 
         self.assertEqual([entry["arxiv_id"] for entry in entries], ["2609.22706"])
         self.assertEqual(mock_list.call_args.args[:3], (["cs.CV"], date(2026, 9, 17), date(2026, 9, 20)))
+        self.assertIn(_UA, mock_list.call_args.args)  # OAI keeps the configured UA
+
+    @patch("app.services.enrichment.list_oai_candidates", side_effect=RuntimeError("OAI listing exceeds 10 pages"))
+    @patch("app.services.enrichment.request_arxiv_api")
+    @patch("app.services.enrichment._ARXIV_API_BATCH_SIZE", 1)
+    @patch("app.services.enrichment.time.sleep")
+    def test_rolling_window_keeps_fetched_pages_when_oai_fails_too(self, _sleep, mock_request, _list):
+        page = (
+            '<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/2609.22706v1</id></entry></feed>'
+        )
+        mock_request.side_effect = [Mock(text=page), ArxivRefused(429)]
+
+        entries = fetch_recent_papers(2, "https://rss.arxiv.org/rss/cs.CV")
+
+        self.assertEqual([entry["arxiv_id"] for entry in entries], ["2609.22706"])
 
 
 class ExtractPdfResourceLinksTests(unittest.TestCase):

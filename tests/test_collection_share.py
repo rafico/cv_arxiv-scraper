@@ -127,6 +127,29 @@ class CollectionShareTests(FlaskDBTestCase):
 
         self.assertEqual(Paper.query.filter_by(arxiv_id="2601.00001").one().user_notes, "precious local note")
 
+    def test_import_drops_bundle_s2_ids_that_are_not_s2_paper_ids(self):
+        # A bundle is untrusted: another local paper's W-id stored as a semantic_scholar_id
+        # would take over its citation edges (2601.00001 cites W2 = 2601.00002).
+        self._seed_collection()
+        hostile = {"semantic_scholar_id": "W2", "title": "Hostile"}
+        manifest = {
+            "bundle_version": 1,
+            "collection": {"name": "Hostile"},
+            "papers": [
+                {**hostile, "arxiv_id": "2601.00003", "link": "https://arxiv.org/abs/2601.00003"},  # local
+                {**hostile, "arxiv_id": "2609.00001", "link": "https://arxiv.org/abs/2609.00001"},  # new
+            ],
+        }
+
+        import_collection(manifest)
+
+        self.assertEqual(Paper.query.filter(Paper.semantic_scholar_id.isnot(None)).count(), 0)
+        edges = {
+            (db.session.get(Paper, e.paper_id).arxiv_id, db.session.get(Paper, e.related_paper_id).arxiv_id)
+            for e in PaperRelation.query.filter_by(relation_type="cites")
+        }
+        self.assertEqual(edges, {("2601.00001", "2601.00002")})
+
     def test_import_validation_rejects_garbage(self):
         for bad in (None, [], {}, {"bundle_version": 99}, {"bundle_version": 1, "collection": {"name": "x"}}):
             with self.assertRaises(ValueError):

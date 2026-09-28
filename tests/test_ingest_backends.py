@@ -413,7 +413,7 @@ class ArxivRefusalTests(TestCase):
         ]
         window = {"start_dt": date(2026, 9, 11), "end_dt": date(2026, 9, 18)}
 
-        candidates = ArxivApiBackend().fetch(categories=["cs.CV"], max_results=25, **window)
+        candidates = ArxivApiBackend().fetch(categories=["cs.CV"], max_results=25, user_agent="MyApp/9.9", **window)
 
         # 2303.15533: created long ago; 2508.11450: created in the window is its v2, the id says August 2025;
         # 2609.22706: created the day after the window.
@@ -426,6 +426,7 @@ class ArxivRefusalTests(TestCase):
                 {"verb": "ListRecords", "resumptionToken": "tok1"},
             ],
         )
+        self.assertEqual({call.kwargs["user_agent"] for call in mock_request.call_args_list}, {"MyApp/9.9"})
         with self.assertRaises(ArxivRefused):  # a search has no OAI equivalent; the caller decides
             ArxivApiBackend().fetch(categories=["cs.CV"], query="ti:x", **window)
         self.assertEqual(mock_request.call_count, 3)

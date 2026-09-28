@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, time, timedelta
@@ -172,8 +173,22 @@ def run_query_import(
                 query=query,
             )
         except ArxivRefused as exc:
-            emit(f"arXiv refused the query (HTTP {exc.status}); used Semantic Scholar search instead")
+            # S2 has no arXiv categories, only fieldsOfStudy: cs.* becomes all of Computer
+            # Science (warned), anything else would be searched as the wrong field (refused).
+            cats = [*(categories or []), *re.findall(r'\bcat:"?([\w.*-]+)', query)]
+            outside_cs = [c for c in cats if c.split(".")[0] != "cs"]
+            if outside_cs:
+                raise ValueError(
+                    f"arXiv refused the query (HTTP {exc.status}) and the Semantic Scholar fallback only "
+                    f"covers Computer Science, not {', '.join(outside_cs)}; retry once arXiv accepts the query"
+                ) from exc
             candidates = search_arxiv_papers(query, start_dt, end_dt, max_results)
+            emit(f"arXiv refused the query (HTTP {exc.status}); used Semantic Scholar search instead")
+            if cats:
+                emit(
+                    "WARNING: Semantic Scholar has no arXiv categories; --category/cat: filters were "
+                    "replaced by all of Computer Science."
+                )
         if len(candidates) >= max_results:
             emit(
                 f"WARNING: hit --max-results {max_results}. arXiv returns newest first, so the OLDEST "

@@ -225,6 +225,7 @@ class SyncCliQueryTests(FlaskDBTestCase):
         )
 
         self.assertIn("arXiv refused the query (HTTP 406); used Semantic Scholar search instead", messages)
+        self.assertTrue(any(m.startswith("WARNING: Semantic Scholar has no arXiv categories") for m in messages))
         self.assertEqual(stats["created"], 1)
         params = s2.call_args.kwargs["params"]
         self.assertEqual(
@@ -244,6 +245,32 @@ class SyncCliQueryTests(FlaskDBTestCase):
         )
         self.assertEqual(SyncState.query.count(), 0)
         upsert.assert_not_called()
+
+    @patch("app.services.http_client.request_with_backoff")
+    @patch("sync_cli.ArxivApiBackend.fetch", side_effect=ArxivRefused(406))
+    def test_refused_query_refuses_what_semantic_scholar_cannot_filter(self, _fetch, s2):
+        # S2 has no arXiv categories: an all-cat: query would be an empty S2 query (every CS
+        # paper in the window), and a non-CS category would be searched as Computer Science.
+        s2.return_value = Mock(json=Mock(return_value={"total": 0, "data": []}))
+        for query, categories in (
+            ("cat:cs.RO", None),
+            ("(cat:cs.CV OR cat:cs.LG)", ["cs.CV"]),
+            ("abs:spiking", ["q-bio.NC"]),
+            ("abs:spiking AND cat:q-bio.NC", None),
+        ):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                run_query_import(
+                    self.app,
+                    query=query,
+                    collection="X",
+                    start_dt=date(2026, 9, 1),
+                    end_dt=date(2026, 9, 20),
+                    categories=categories,
+                    emit=lambda _message: None,
+                )
+
+        s2.assert_not_called()
+        self.assertEqual((Collection.query.count(), Paper.query.count()), (0, 0))
 
     def test_arxiv_query_translates_to_s2_syntax(self):
         cases = {

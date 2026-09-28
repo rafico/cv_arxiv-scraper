@@ -100,6 +100,11 @@ def query_arxiv_api(categories: list[str], start_dt: date, end_dt: date, max_res
     ]
 
 
+def _session_user_agent(session: requests.Session | None) -> str | None:
+    """The configured UA a scrape session sends, for the OAI fallback's session-less requests."""
+    return session.headers.get("User-Agent") if session is not None else None
+
+
 def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | None = None) -> list[dict]:
     category = _extract_category_from_feed_url(feed_url)
     if not category or days <= 0:
@@ -132,7 +137,12 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
             root = ET.fromstring(response.text)
         except ArxivRefused:
             limit = _ARXIV_ROLLING_WINDOW_MAX_PAGES * batch_size
-            entries = [c.to_entry_dict() for c in list_oai_candidates([category], start_date, end_date, limit)]
+            try:
+                oai = list_oai_candidates([category], start_date, end_date, limit, _session_user_agent(session))
+                entries = [c.to_entry_dict() for c in oai]
+            except Exception as exc:
+                # OAI failed too: keep the pages already fetched, like the handler below.
+                LOGGER.warning("OAI-PMH fallback failed for %s after %d page(s): %s", category, pages_fetched, exc)
             break
         except Exception as exc:
             # A mid-pagination arXiv failure (exhausted retries) or a malformed page
@@ -326,7 +336,7 @@ def _fetch_api_metadata_batch(
     except ArxivRefused:
         # Refused or rate-limited (429 after retries): halving would only multiply the
         # requests arXiv is refusing, so ask OAI-PMH for the whole batch instead.
-        for arxiv_id, candidate in fetch_oai_records(arxiv_ids).items():
+        for arxiv_id, candidate in fetch_oai_records(arxiv_ids, _session_user_agent(session)).items():
             metadata[arxiv_id] = {
                 "api_affiliations": candidate.api_affiliations,
                 "categories": candidate.categories,

@@ -158,9 +158,15 @@ def search_arxiv_papers(query: str, start_dt: date, end_dt: date, max_results: i
     from app.services.ingest.base import PaperCandidate, extract_arxiv_id, parse_publication_dt
     from app.services.secret_files import resolve_data_source_key
 
+    s2_query = arxiv_query_to_s2(query)
+    if not s2_query:  # an empty S2 query matches every Computer Science paper in the window
+        raise ValueError(
+            "the query has no search terms besides cat: filters, which the Semantic Scholar fallback "
+            "cannot apply; retry once arXiv accepts the query"
+        )
     api_key = resolve_data_source_key("semantic_scholar")
     params = {
-        "query": arxiv_query_to_s2(query),
+        "query": s2_query,
         "fields": "externalIds,title,abstract,authors,publicationDate",
         "publicationDateOrYear": f"{start_dt}:{end_dt}",
         "fieldsOfStudy": "Computer Science",

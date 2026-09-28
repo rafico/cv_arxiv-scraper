@@ -145,7 +145,7 @@ def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDL
     from flask import current_app
 
     from app.models import Collection, Paper, PaperCollection, db
-    from app.services.citation_graph import sync_citation_edges
+    from app.services.citation_graph import _S2_PAPER_ID, sync_citation_edges
 
     manifest = _validate(manifest)
 
@@ -167,6 +167,10 @@ def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDL
         paper = Paper.query.filter_by(arxiv_id=arxiv_id).first() if arxiv_id else None
         if paper is None:
             paper = Paper.query.filter_by(link=entry["link"]).first()
+        # Bundles are untrusted: anything but a real S2 paperId (say another paper's W-id)
+        # would take over that paper's citation edges in sync_citation_edges.
+        s2_match = _S2_PAPER_ID.fullmatch(_entry_str(entry, "semantic_scholar_id"))
+        s2_id = s2_match.group() if s2_match else None
 
         if paper is None:
             publication_date = _entry_str(entry, "publication_date") or None
@@ -190,7 +194,7 @@ def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDL
                 user_notes=_entry_str(entry, "user_notes"),
                 user_tags=_entry_list(entry, "user_tags"),
                 openalex_id=_entry_str(entry, "openalex_id") or None,
-                semantic_scholar_id=_entry_str(entry, "semantic_scholar_id") or None,
+                semantic_scholar_id=s2_id,
                 referenced_works=_entry_list(entry, "referenced_works"),
                 match_type="import",
                 scraped_date=date.today().isoformat(),
@@ -207,8 +211,8 @@ def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDL
                 paper.user_tags = _entry_list(entry, "user_tags")
             if not paper.openalex_id and _entry_str(entry, "openalex_id"):
                 paper.openalex_id = _entry_str(entry, "openalex_id")
-            if not paper.semantic_scholar_id and _entry_str(entry, "semantic_scholar_id"):
-                paper.semantic_scholar_id = _entry_str(entry, "semantic_scholar_id")
+            if not paper.semantic_scholar_id and s2_id:
+                paper.semantic_scholar_id = s2_id
             if not paper.referenced_works and _entry_list(entry, "referenced_works"):
                 paper.referenced_works = _entry_list(entry, "referenced_works")
             linked += 1

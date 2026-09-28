@@ -88,7 +88,8 @@ def request_arxiv_api(params: dict[str, str | int], **kwargs: Any) -> requests.R
         raise ArxivRefused(status, response=exc.response) from exc
 
 
-def _oai_root(params: dict[str, str]) -> ET.Element:
+def _oai_root(params: dict[str, str], user_agent: str | None = None) -> ET.Element:
+    # No session: its limiter/UA would be retuned to _OAI_PACE. The caller passes its UA.
     response = request_with_backoff(
         "GET",
         _OAI_URL,
@@ -97,6 +98,7 @@ def _oai_root(params: dict[str, str]) -> ET.Element:
         attempts=_ARXIV_API_ATTEMPTS,
         base_delay=_ARXIV_API_BASE_DELAY,
         scraper_config=_OAI_PACE,
+        user_agent=user_agent,
         max_bytes=25 * 1024 * 1024,
     )
     return ET.fromstring(response.content)
@@ -138,7 +140,7 @@ def _parse_oai_record(meta: ET.Element) -> PaperCandidate:
     )
 
 
-def fetch_oai_records(arxiv_ids: Sequence[str]) -> dict[str, PaperCandidate]:
+def fetch_oai_records(arxiv_ids: Sequence[str], user_agent: str | None = None) -> dict[str, PaperCandidate]:
     """Look ids up via OAI-PMH GetRecord, the fallback when the export API refuses us.
 
     Best effort, like the id_list query: unknown ids are absent from the result, and a
@@ -150,7 +152,7 @@ def fetch_oai_records(arxiv_ids: Sequence[str]) -> dict[str, PaperCandidate]:
     for arxiv_id in arxiv_ids[:_OAI_LOOKUP_CAP]:
         params = {"verb": "GetRecord", "identifier": f"oai:arXiv.org:{arxiv_id}", "metadataPrefix": "arXiv"}
         try:
-            root = _oai_root(params)
+            root = _oai_root(params, user_agent)
         except Exception as exc:
             LOGGER.warning("arXiv OAI-PMH lookup failed at %s; stopping the fallback: %s", arxiv_id, exc)
             break
@@ -169,7 +171,7 @@ def _oai_set(category: str) -> str:
 
 
 def list_oai_candidates(
-    categories: Sequence[str], start_dt: date, end_dt: date, max_results: int
+    categories: Sequence[str], start_dt: date, end_dt: date, max_results: int, user_agent: str | None = None
 ) -> list[PaperCandidate]:
     """List a submission window via OAI-PMH ListRecords, the fallback when the export API refuses us.
 
@@ -191,7 +193,7 @@ def list_oai_candidates(
         LOGGER.warning("Listing %s since %s via arXiv OAI-PMH", category, start_dt)
         params = {"verb": "ListRecords", "metadataPrefix": "arXiv", "set": _oai_set(category), "from": str(start_dt)}
         for _page in range(_OAI_MAX_PAGES):
-            root = _oai_root(params)
+            root = _oai_root(params, user_agent)
             error = root.find("oai:error", _OAI_NS)
             if error is not None and error.get("code") != "noRecordsMatch":
                 raise RuntimeError(f"arXiv OAI-PMH error for {category}: {error.get('code')} {error.text or ''}")
@@ -326,7 +328,7 @@ class ArxivApiBackend:
                 if query:
                     raise  # a search has no OAI equivalent; cv-arxiv-sync --query asks Semantic Scholar
                 # The whole window at once: the page cursor (offset/resume/progress) is API-only.
-                return list_oai_candidates(categories, start_dt, end_dt, max_results)
+                return list_oai_candidates(categories, start_dt, end_dt, max_results, user_agent)
             root = ET.fromstring(response.text)
             entries = root.findall("atom:entry", _ATOM_NS)
             if not entries:
