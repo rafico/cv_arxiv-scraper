@@ -229,6 +229,27 @@ class BackfillCliTests(FlaskDBTestCase):
         edge = PaperRelation.query.filter_by(relation_type="cites").one()
         self.assertEqual((edge.paper_id, edge.related_paper_id), (citing.id, cited.id))
 
+    @patch("app.services.citations.fetch_citations_batch", return_value={})
+    @patch("app.services.openalex.fetch_openalex_batch")
+    def test_openalex_backfills_merge_refs_with_stored_s2_ids(self, mock_openalex, _mock_s2):
+        # referenced_works holds S2 ids and OpenAlex "W…" ids side by side; an
+        # OpenAlex backfill must extend the list, not wipe the S2 half.
+        mock_openalex.return_value = {
+            "2601.00040": {"openalex_id": "W40", "referenced_works_count": 2, "referenced_works": ["W1", "W2"]}
+        }
+        for backfill in (backfill_openalex, backfill_citation_edges):
+            Paper.query.delete()
+            paper = _paper("2601.00040")
+            paper.referenced_works = ["s2-a", "W1"]
+            db.session.add(paper)
+            db.session.commit()
+
+            backfill(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
+
+            db.session.expire_all()
+            stored = Paper.query.filter_by(arxiv_id="2601.00040").one()
+            self.assertEqual(stored.referenced_works, ["s2-a", "W1", "W2"], backfill.__name__)
+
     @patch("app.services.thumbnail_generator.generate_thumbnail", return_value=True)
     def test_backfill_thumbnails_only_generates_missing_files(self, mock_generate):
         static_dir = Path(self._tmpdir.name) / "static"

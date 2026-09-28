@@ -229,7 +229,9 @@ def backfill_openalex(
                     paper.oa_status = data.get("oa_status")
                     paper.openalex_cited_by_count = data.get("openalex_cited_by_count")
                     paper.referenced_works_count = data.get("referenced_works_count")
-                    paper.referenced_works = data.get("referenced_works", [])
+                    # Merge, don't overwrite: S2 reference ids share this list.
+                    refs = data.get("referenced_works") or []
+                    paper.referenced_works = list(dict.fromkeys([*paper.referenced_works, *refs]))
                     if paper.citation_count is None and paper.openalex_cited_by_count is not None:
                         paper.citation_count = paper.openalex_cited_by_count
                         paper.citation_source = "openalex"
@@ -322,7 +324,9 @@ def backfill_citation_edges(
                     data = openalex_data.get(paper.arxiv_id or "")
                     if not data:
                         continue
-                    paper.referenced_works = data.get("referenced_works", [])
+                    # Merge, don't overwrite: S2 reference ids share this list.
+                    refs = data.get("referenced_works") or []
+                    paper.referenced_works = list(dict.fromkeys([*paper.referenced_works, *refs]))
                     paper.referenced_works_count = data.get("referenced_works_count")
                     if paper.openalex_id is None:
                         paper.openalex_id = data.get("openalex_id")
