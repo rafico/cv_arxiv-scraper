@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import uuid
 from html.parser import HTMLParser
 from pathlib import Path
@@ -256,6 +257,10 @@ class _FigureImageParser(HTMLParser):
             self._figure_depth -= 1
 
 
+# "{id}v{n}/..." asset paths on current arXiv HTML pages (new-scheme ids only; HTML is 2023+).
+_VERSIONED_ASSET = re.compile(r"^\d{4}\.\d{4,5}v\d+/")
+
+
 def parse_figure_image_urls(html_text: str, base_url: str) -> list[str]:
     """Absolute URLs of raster <figure> images in an arXiv HTML page, in order."""
     parser = _FigureImageParser()
@@ -265,12 +270,13 @@ def parse_figure_image_urls(html_text: str, base_url: str) -> list[str]:
     except Exception as exc:  # malformed markup — keep whatever was collected
         LOGGER.debug("Figure HTML parse stopped early: %s", exc)
 
-    # arXiv serves the page at /html/{id}v{n} (no trailing slash) with assets at
-    # /html/{id}v{n}/x1.png, so the base must end in a slash for urljoin.
+    # Older arXiv pages reference assets relative to /html/{id}v{n}/ ("x1.png"), so that
+    # base must end in a slash for urljoin. Current pages (served at /html/{id}, no
+    # redirect) prefix assets with "{id}v{n}/" relative to /html/ instead.
     base = base_url if base_url.endswith("/") else f"{base_url}/"
     urls: list[str] = []
     for src in parser.sources:
-        resolved = urljoin(base, src)
+        resolved = urljoin(base_url, f"/html/{src}") if _VERSIONED_ASSET.match(src) else urljoin(base, src)
         if not resolved.startswith(("http://", "https://")):
             continue  # data: URIs and other non-fetchable schemes
         suffix = Path(urlparse(resolved).path).suffix.lower()

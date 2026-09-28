@@ -70,6 +70,15 @@ def test_parse_figure_image_urls_resolves_and_filters():
     ]
 
 
+def test_parse_figure_image_urls_resolves_the_current_arxiv_layout():
+    # arXiv now serves /html/{id} (no redirect) with assets referenced as "{id}v{n}/file.png"
+    # relative to /html/ — resolving against "{page}/" produced /html/{id}/{id}v1/... (404).
+    html = '<figure><img src="2609.22849v1/flowchart_zip.png"></figure>'
+    expected = ["https://arxiv.org/html/2609.22849v1/flowchart_zip.png"]
+    assert parse_figure_image_urls(html, "https://arxiv.org/html/2609.22849") == expected
+    assert parse_figure_image_urls(html, "https://arxiv.org/html/2609.22849v1") == expected
+
+
 def test_parse_figure_image_urls_ignores_images_outside_figures():
     urls = parse_figure_image_urls('<img src="banner.png"><p>no figures</p>', BASE_URL)
     assert urls == []
