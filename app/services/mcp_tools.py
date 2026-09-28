@@ -193,7 +193,9 @@ def search_papers(query: str, mode: str = "hybrid", limit: int = _DEFAULT_LIMIT)
     if not ordered_ids and normalized_mode != "semantic":
         ordered_ids = _keyword_ids(clean_query, n)
 
-    papers_by_id = {p.id: p for p in Paper.query.filter(Paper.id.in_(ordered_ids)).all()} if ordered_ids else {}
+    # Skipped (hidden) papers drop out of the ranked modes too, as _keyword_ids does.
+    visible = Paper.query.filter(Paper.id.in_(ordered_ids), Paper.is_hidden.is_(False))
+    papers_by_id = {p.id: p for p in visible.all()} if ordered_ids else {}
     results = [_paper_brief(papers_by_id[pid]) for pid in ordered_ids if pid in papers_by_id]
     return {"query": clean_query, "mode": normalized_mode, "count": len(results), "results": results}
 

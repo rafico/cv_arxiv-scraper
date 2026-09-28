@@ -14,6 +14,7 @@ import importlib
 import sys
 import unittest
 from datetime import date, datetime, timezone
+from unittest.mock import patch
 
 from app.models import Collection, Paper, PaperCollection, PaperSection, db
 from app.services import mcp_tools
@@ -88,6 +89,21 @@ class SearchPapersTests(FlaskDBTestCase):
     def test_limit_is_respected(self):
         result = mcp_tools.search_papers("Vision", mode="keyword", limit=2)
         self.assertLessEqual(len(result["results"]), 2)
+
+    def test_ranked_modes_skip_hidden_papers_like_keyword_mode(self):
+        hidden = _make_paper(5, title="Vision Transformer skipped", is_hidden=True)
+        db.session.add(hidden)
+        db.session.commit()
+        visible = Paper.query.filter_by(arxiv_id="2607.3000").one()
+        hits = [(hidden.id, 1.0), (visible.id, 0.5)]
+
+        with (
+            patch("app.services.search.search_bm25", return_value=hits),
+            patch("app.services.search.search_semantic", return_value=hits),
+        ):
+            for mode in ("hybrid", "semantic"):
+                result = mcp_tools.search_papers("Vision", mode=mode)
+                self.assertEqual([r["id"] for r in result["results"]], [visible.id], mode)
 
 
 class GetPaperTests(FlaskDBTestCase):

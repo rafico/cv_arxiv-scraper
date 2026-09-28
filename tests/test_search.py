@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from app.models import Paper, db
 from app.services.search import RRF_K, search_hybrid
+from tests.helpers import FlaskDBTestCase
 
 
 class TestRRFFusion:
@@ -76,3 +78,24 @@ class TestRRFFusion:
         # Paper at rank 1 in both systems
         expected = bm25_weight / (RRF_K + 1) + semantic_weight / (RRF_K + 1)
         assert abs(expected - (1.0 / (RRF_K + 1))) < 1e-9
+
+
+class SearchRouteTests(FlaskDBTestCase):
+    def test_hidden_papers_never_reach_the_search_api(self):
+        # The dashboard, collection views, .bib, CSV and corpus chat all drop skipped papers.
+        papers = [
+            Paper(title=t, authors="A", link=t, pdf_link=t, match_type="Title", scraped_date="2026-01-01", is_hidden=h)
+            for t, h in (("hidden", True), ("visible", False))
+        ]
+        db.session.add_all(papers)
+        db.session.commit()
+        hits = [(p.id, 1.0) for p in papers]
+        client = self.app.test_client()
+
+        with (
+            patch("app.services.search.search_bm25", return_value=hits),
+            patch("app.services.search.search_semantic", return_value=hits),
+        ):
+            for mode in ("hybrid", "semantic", "keyword"):
+                results = client.get(f"/api/search?q=vision&mode={mode}").get_json()["results"]
+                self.assertEqual([r["title"] for r in results], ["visible"], mode)

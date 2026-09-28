@@ -53,9 +53,11 @@ def search_papers():
     else:
         results = search_hybrid(q, top_k=top_k)
 
-    # Enrich with paper data
+    # Enrich with paper data; skipped (hidden) papers drop out in every mode, as on the dashboard.
+    # ponytail: hidden hits shrink the page below `limit`; over-fetch like rag.py if that bites.
     paper_ids = [r["paper_id"] for r in results]
-    papers_by_id = {p.id: p for p in Paper.query.filter(Paper.id.in_(paper_ids)).all()} if paper_ids else {}
+    visible = Paper.query.filter(Paper.id.in_(paper_ids), Paper.is_hidden.is_(False))
+    papers_by_id = {p.id: p for p in visible.all()} if paper_ids else {}
 
     enriched = []
     for r in results:
