@@ -55,6 +55,15 @@ class OnboardingActivationThresholdTests(FlaskDBTestCase):
         # profile has a description; saves are not the only way to switch it on.
         self.assertIn("profile description", _save_step(self._steps(1))["description"])
 
+    def test_copy_does_not_ask_for_a_description_the_profile_already_has(self):
+        from app.services.profiles import get_active_profile, update_description
+
+        update_description(get_active_profile().id, "Robot learning from video")
+
+        description = _save_step(self._steps(1))["description"]
+        self.assertNotIn("add a profile description", description)
+        self.assertIn("profile description", description)
+
     def test_digest_step_appears_only_without_a_recipient(self):
         without = _build_onboarding_steps({"whitelists": {}}, positive_count=0, has_successful_scrape=True)
         self.assertIn("Set a digest recipient", [step["label"] for step in without])

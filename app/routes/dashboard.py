@@ -264,6 +264,8 @@ def _build_filter_options(query: Query) -> dict:
 
 
 def _build_onboarding_steps(config: dict, *, positive_count: int, has_successful_scrape: bool) -> list[dict]:
+    from app.services.profiles import get_active_profile
+
     interest_total = _interest_counts(config)["total"]
     # The learned ranker and the centroid interest profile stay inert below
     # MIN_POSITIVE_FEEDBACK positives, so the step is only "done" at the
@@ -271,6 +273,17 @@ def _build_onboarding_steps(config: dict, *, positive_count: int, has_successful
     # Whitelist-free Interest admission turns on then too, or earlier once the
     # active profile has a non-empty description (the candidate interest gate).
     remaining = max(0, MIN_POSITIVE_FEEDBACK - positive_count)
+    if (get_active_profile().description or "").strip():
+        beyond_whitelists = (
+            f"Save {remaining} more to switch on learned ranking — your profile "
+            "description already brings in recommendations beyond your whitelists."
+        )
+    else:
+        beyond_whitelists = (
+            f"Save {remaining} more to switch on learned ranking and "
+            "recommendations beyond your whitelists — or add a profile "
+            "description in Settings to get those recommendations now."
+        )
     steps = [
         {
             "label": "Add interests",
@@ -287,10 +300,7 @@ def _build_onboarding_steps(config: dict, *, positive_count: int, has_successful
         {
             "label": "Save or skip papers",
             "description": (
-                f"Saved {positive_count}/{MIN_POSITIVE_FEEDBACK}. "
-                f"Save {remaining} more to switch on learned ranking and "
-                "recommendations beyond your whitelists — or add a profile "
-                "description in Settings to get those recommendations now."
+                f"Saved {positive_count}/{MIN_POSITIVE_FEEDBACK}. {beyond_whitelists}"
                 if remaining
                 else "Learned ranking is active. Keep saving and skipping to sharpen it."
             ),

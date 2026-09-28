@@ -29,8 +29,9 @@ def feature_liveness() -> dict:
             "papers": int(Paper.query.count()),
             # Full text behind per-paper chat, corpus chat and citation verification.
             "sections_papers": int(db.session.query(func.count(distinct(PaperSection.paper_id))).scalar() or 0),
-            # The gate on the centroid profile, the learned ranker and whitelist-free
-            # dense-retrieval admission: all three stay inert below the threshold.
+            # The gate on the centroid profile and the learned ranker. Whitelist-free
+            # dense-retrieval admission opens here too, or earlier once the active
+            # profile has a description (candidate_generation._resolve_interest_gate).
             "positive_feedback": positive,
             "positive_feedback_needed": max(0, MIN_POSITIVE_FEEDBACK - positive),
             "interest_signal_ready": positive >= MIN_POSITIVE_FEEDBACK,
