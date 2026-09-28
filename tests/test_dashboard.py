@@ -128,6 +128,23 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Page 2", text)
 
+    def test_ids_permalink_opens_old_hidden_muted_paper(self):
+        # In-app "open this paper" links go to /?ids=; an old, hidden paper by a muted
+        # author must still open there, and stay out of the normal inbox.
+        self._add_paper(title="Permalink Target Paper", arxiv_id="2602.9003", published_days_ago=90)
+        paper = Paper.query.filter_by(arxiv_id="2602.9003").one()
+        paper.is_hidden = True
+        db.session.commit()
+        self.app.config["SCRAPER_CONFIG"]["preferences"] = {"muted": {"authors": ["Author B"]}}
+
+        permalink = self.client.get(f"/?ids=junk,{paper.id},{2**63}")
+        inbox = self.client.get("/?timeframe=all&include_hidden=1")
+
+        self.assertEqual(permalink.status_code, 200)
+        self.assertIn("Permalink Target Paper", permalink.get_data(as_text=True))
+        self.assertNotIn("Paper 0", permalink.get_data(as_text=True))
+        self.assertNotIn("Permalink Target Paper", inbox.get_data(as_text=True))
+
     def test_feedback_endpoint_toggles_action(self):
         paper = Paper.query.first()
         token = self._csrf_token()

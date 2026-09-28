@@ -446,8 +446,14 @@ def index():
         view = "inbox"
 
     collection_id = request.args.get("collection", type=int)
+    # Permalink (?ids=1,2): exact papers whatever their age, mutes or hidden state.
+    # Lenient: junk is dropped, and >18 digits would overflow SQLite INTEGER (a 500).
+    raw_ids = (x.strip() for x in request.args.get("ids", "").split(","))
+    paper_ids = [int(x) for x in raw_ids if x.isdecimal() and len(x) <= 18]
 
     query = Paper.query
+    if paper_ids:
+        query = query.filter(Paper.id.in_(paper_ids))
     if collection_id:
         query = query.join(
             PaperCollection,
@@ -458,13 +464,13 @@ def index():
             PaperFeedback,
             db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == FeedbackAction.SAVE.value),
         )
-    query = _apply_muted_filters(query, config, active=view != "saved" and not collection_id)
+    query = _apply_muted_filters(query, config, active=view != "saved" and not collection_id and not paper_ids)
 
     include_hidden = request.args.get("include_hidden") == "1"
-    if not include_hidden:
+    if not include_hidden and not paper_ids:
         query = query.filter(Paper.is_hidden.is_(False))
 
-    default_timeframe = "all" if view == "saved" else "daily"
+    default_timeframe = "all" if view == "saved" or paper_ids else "daily"
     timeframe = request.args.get("timeframe", default_timeframe)
     if timeframe not in TIMEFRAME_DAYS:
         timeframe = default_timeframe

@@ -113,7 +113,7 @@
         network.on("doubleClick", function (params) {
             if (!params.nodes.length) return;
             const node = raw.nodes.find(function (n) { return n.id === params.nodes[0]; });
-            if (node) window.location = "/?timeframe=all&q=" + encodeURIComponent(node.title);
+            if (node) window.location = "/?ids=" + node.id;
         });
     }
 

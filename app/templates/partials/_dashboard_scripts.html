@@ -480,7 +480,7 @@
             if (c.status === "verified") {
                 const chip = document.createElement("a");
                 chip.className = "badge bg-save-soft text-save hover:opacity-80";
-                chip.href = "/?q=" + encodeURIComponent(c.matched_title || c.ref || "");
+                chip.href = c.paper_id ? "/?ids=" + c.paper_id : "/?q=" + encodeURIComponent(c.matched_title || c.ref || "");
                 chip.title = "Found in your library — open it";
                 chip.textContent = "✓ " + label;
                 refsEl.appendChild(chip);

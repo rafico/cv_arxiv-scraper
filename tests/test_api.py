@@ -112,6 +112,8 @@ class ApiCsrfTests(FlaskDBTestCase):
         self.assertEqual(len(alerts), 1)
         self.assertTrue(alerts[0].notify_on_match)
         self.assertEqual(alerts[0].author_filters, ["Author A"])
+        # The sidebar link splats ``filters`` into the dashboard URL.
+        self.assertEqual(alerts[0].filters, {"author": "Author A", "timeframe": "all"})
 
     def test_mute_endpoint_adds_topic_to_preferences(self):
         paper = Paper.query.first()

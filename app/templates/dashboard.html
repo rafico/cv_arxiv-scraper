@@ -297,7 +297,7 @@
             const title = document.createElement("a");
             title.className = "text-xs font-medium text-fg line-clamp-2 hover:text-accent";
             title.textContent = p.title;
-            title.href = "/?view=all&q=" + encodeURIComponent(p.title);
+            title.href = "/?ids=" + p.id;
             const meta = document.createElement("div");
             meta.className = "mt-0.5 text-[11px] text-fg-muted line-clamp-1";
             meta.textContent = (p.authors || "") + " · " + Math.round((p.similarity_score || 0) * 100) + "% similar";
