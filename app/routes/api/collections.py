@@ -127,10 +127,9 @@ def import_collection_ids():
     ``name`` is a collection name (created on miss) or a numeric id. Unlike the
     onboarding bootstrap, no feedback rows are written, so the ranker is untouched.
     """
-    from app.services.collection_share import BUNDLE_VERSION, import_collection
+    from app.services.collection_share import BUNDLE_VERSION, arxiv_bundle_entry, import_collection
     from app.services.mcp_tools import _resolve_or_create_collection
     from app.services.onboarding import extract_arxiv_ids, fetch_arxiv_metadata
-    from app.services.summary import generate_summary
 
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
@@ -152,17 +151,9 @@ def import_collection_ids():
         return jsonify({"error": "arXiv fetch failed; try again later"}), 502
     papers = [{"arxiv_id": p.arxiv_id, "title": p.title, "link": p.link} for p in local.values()]
     papers += [
-        {
-            "arxiv_id": e["arxiv_id"],
-            "title": e["title"] or e["arxiv_id"],
-            "authors": ", ".join(e["authors"]),
-            "link": e["link"],
-            "pdf_link": e["pdf_link"],
-            "abstract_text": e["abstract"],
-            "summary_text": generate_summary(e["title"], e["abstract"]),
-            "publication_date": e["publication_date"],
-            "categories": e["categories"],
-        }
+        arxiv_bundle_entry(
+            e["arxiv_id"], e["title"], e["authors"], e["abstract"], e["publication_date"], e["categories"]
+        )
         for e in fetched
     ]
     manifest = {"bundle_version": BUNDLE_VERSION, "collection": {"name": collection.name}, "papers": papers}

@@ -7,10 +7,15 @@ import sys
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, time, timedelta
 
+import requests
+
 from app import create_app
 from app.ingest.scrape_engine import execute_historical_scrape
 from app.models import SyncState, db
 from app.search_.text import now_utc
+from app.services.collection_share import BUNDLE_VERSION, MAX_BUNDLE_PAPERS, arxiv_bundle_entry, import_collection
+from app.services.ingest import ArxivApiBackend
+from app.services.mcp_tools import _resolve_or_create_collection
 
 CHUNK_DAYS = 7
 # Mirrors the max_results cap execute_historical_scrape passes to the ingest
@@ -136,16 +141,81 @@ def run_sync(
     return aggregate
 
 
+def run_query_import(
+    app,
+    *,
+    query: str,
+    collection: str,
+    start_dt: date,
+    end_dt: date,
+    max_results: int = 1000,
+    categories: list[str] | None = None,
+    emit: Callable[[str], None] = print,
+) -> Summary:
+    """Import an arXiv search straight into a collection (created on miss).
+
+    Bypasses the scrape pipeline (no PDF downloads, no whitelist matching) and
+    never calls run_sync/upsert_sync_state: a topic query says nothing about how
+    far a category has been synced.
+    """
+    with app.app_context():
+        emit(f"Querying arXiv {start_dt.isoformat()} -> {end_dt.isoformat()}: {query}")
+        candidates = ArxivApiBackend().fetch(
+            categories=categories or [],
+            start_dt=start_dt,
+            end_dt=end_dt,
+            max_results=max_results,
+            query=query,
+        )
+        if len(candidates) >= max_results:
+            emit(
+                f"WARNING: hit --max-results {max_results}. arXiv returns newest first, so the OLDEST "
+                "matches were dropped. Narrow the query or --from/--to, or raise --max-results."
+            )
+        papers = [
+            arxiv_bundle_entry(c.arxiv_id, c.title, c.authors_list, c.abstract, c.publication_date, c.categories)
+            for c in candidates
+            if c.arxiv_id
+        ]
+        if not papers:
+            emit("No matching papers; nothing imported.")
+            return {"created": 0, "linked": 0, "edges": 0}
+        target, _created = _resolve_or_create_collection(collection)
+        if target is None:
+            raise ValueError(f"Collection {collection} not found")
+        manifest = {"bundle_version": BUNDLE_VERSION, "collection": {"name": target.name}, "papers": papers}
+        _target, stats = import_collection(manifest, into=target)
+        emit(f"Imported into '{target.name}': {stats['created']} new, {stats['linked']} already stored")
+    return stats
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Sync arXiv papers over a historical date range")
-    parser.add_argument("--from", dest="start_dt", required=True, type=parse_date_arg, help="Start date (YYYY-MM-DD)")
-    parser.add_argument("--to", dest="end_dt", required=True, type=parse_date_arg, help="End date (YYYY-MM-DD)")
-    parser.add_argument("--category", required=True, help="arXiv category, for example cs.CV")
+    parser = argparse.ArgumentParser(
+        description="Sync arXiv papers over a historical date range, or import an arXiv search into a collection.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "topic query example (OR in synonyms: matching is lexical):\n"
+            '  cv-arxiv-sync --query \'abs:"open-vocabulary segmentation" OR abs:"open-vocabulary semantic '
+            "segmentation\"' --collection OVS --from 2019-01-01"
+        ),
+    )
+    parser.add_argument("--from", dest="start_dt", type=parse_date_arg, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--to", dest="end_dt", type=parse_date_arg, help="End date (YYYY-MM-DD)")
+    parser.add_argument("--category", help="arXiv category, for example cs.CV")
     parser.add_argument(
         "--chunk-days",
         type=int,
         default=CHUNK_DAYS,
         help=f"Chunk size in days, defaults to {CHUNK_DAYS}",
+    )
+    parser.add_argument(
+        "--query",
+        help="arXiv API search query (ti:, abs:, au:, AND/OR); imports matches into --collection "
+        "instead of syncing. --from/--to default to all of arXiv, --category is optional",
+    )
+    parser.add_argument("--collection", help="Collection name (created if missing) or id, for --query")
+    parser.add_argument(
+        "--max-results", type=int, default=1000, help="Cap on --query results (newest first), defaults to 1000"
     )
     return parser
 
@@ -153,17 +223,35 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.query:
+        if not args.collection:
+            parser.error("--query requires --collection")
+        if not 0 < args.max_results <= MAX_BUNDLE_PAPERS:
+            parser.error(f"--max-results must be between 1 and {MAX_BUNDLE_PAPERS}")
+    elif not (args.start_dt and args.end_dt and args.category):
+        parser.error("--from, --to and --category are required (or use --query)")
 
     app = create_app()
     try:
-        run_sync(
-            app,
-            category=args.category,
-            start_dt=args.start_dt,
-            end_dt=args.end_dt,
-            chunk_days=args.chunk_days,
-        )
-    except (RuntimeError, ValueError, OverflowError) as exc:
+        if args.query:
+            run_query_import(
+                app,
+                query=args.query,
+                collection=args.collection,
+                start_dt=args.start_dt or date(1991, 1, 1),  # arXiv's first year
+                end_dt=args.end_dt or now_utc().date(),
+                max_results=args.max_results,
+                categories=[args.category] if args.category else None,
+            )
+        else:
+            run_sync(
+                app,
+                category=args.category,
+                start_dt=args.start_dt,
+                end_dt=args.end_dt,
+                chunk_days=args.chunk_days,
+            )
+    except (RuntimeError, ValueError, OverflowError, requests.RequestException) as exc:
         # OverflowError: an oversized --chunk-days overflows date/timedelta arithmetic
         # in iter_date_chunks; report it cleanly instead of dumping a traceback.
         print(f"ERROR: {exc}", file=sys.stderr)

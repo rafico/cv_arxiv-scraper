@@ -202,7 +202,7 @@ After `pip install -e .`:
 | `cv-arxiv serve` | Launch the web server against one `--data-dir` (also `cv-arxiv --version`) |
 | `cv-arxiv-scrape` | One-shot scrape, prints matches to terminal |
 | `cv-arxiv-digest` | Send email digest (`--dry-run`, `--send-only`) |
-| `cv-arxiv-sync` | Historical sync (`--from`, `--to`, `--category`) |
+| `cv-arxiv-sync` | Historical sync (`--from`, `--to`, `--category`), or `--query` + `--collection` to import an arXiv search into a collection |
 | `cv-arxiv-backfill` | Enrichment backfills (`embeddings`, `citations`, `citation-edges`, `openalex`, `thumbnails`, `all`) |
 
 Standalone scripts (`python scrape_cli.py`, `python export_cli.py`, etc.) also work without

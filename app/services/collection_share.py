@@ -109,6 +109,26 @@ def _entry_list(entry: dict, field: str) -> list:
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
+def arxiv_bundle_entry(
+    arxiv_id: str, title: str, authors: list[str], abstract: str, publication_date: str, categories: list[str]
+) -> dict:
+    """A bundle paper entry for arXiv API metadata, so seeded ids (the import-ids
+    route) and topic queries (``cv-arxiv-sync --query``) import like bundles."""
+    from app.services.summary import generate_summary
+
+    return {
+        "arxiv_id": arxiv_id,
+        "title": title or arxiv_id,
+        "authors": ", ".join(authors),
+        "link": f"https://arxiv.org/abs/{arxiv_id}",
+        "pdf_link": f"https://arxiv.org/pdf/{arxiv_id}",
+        "abstract_text": abstract,
+        "summary_text": generate_summary(title, abstract),
+        "publication_date": publication_date,
+        "categories": categories,
+    }
+
+
 def import_collection(manifest: object, *, into=None):
     """Import a bundle as a new collection (or ``into`` an existing one);
     returns (collection, stats dict).

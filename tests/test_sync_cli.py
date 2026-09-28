@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import unittest
 from datetime import date, datetime
 from unittest.mock import patch
 
-from app.models import SyncState
-from sync_cli import chunk_end_timestamp, iter_date_chunks, run_sync, upsert_sync_state
+from app.models import Collection, Paper, PaperCollection, PaperFeedback, SyncState, db
+from app.services.ingest import PaperCandidate
+from sync_cli import chunk_end_timestamp, iter_date_chunks, main, run_query_import, run_sync, upsert_sync_state
 from tests.helpers import FlaskDBTestCase
 
 
@@ -121,6 +124,80 @@ class SyncCliStateTests(FlaskDBTestCase):
         self.assertIsNone(stored.last_cursor_arxiv_id)
         self.assertTrue(messages[0].startswith("Starting sync for cs.CV"))
         self.assertTrue(messages[-1].startswith("Sync complete:"))
+
+
+class SyncCliQueryTests(FlaskDBTestCase):
+    @patch("app.services.embed_backfill.backfill_embeddings", return_value=0)
+    @patch("sync_cli.upsert_sync_state")
+    @patch("sync_cli.execute_historical_scrape")
+    @patch("sync_cli.ArxivApiBackend.fetch")
+    def test_query_imports_into_collection_and_leaves_sync_state_alone(self, fetch, scrape, upsert, _embed):
+        db.session.add(
+            Paper(
+                arxiv_id="2601.00001",
+                title="Already Stored",
+                authors="Author A",
+                link="https://arxiv.org/abs/2601.00001",
+                pdf_link="https://arxiv.org/pdf/2601.00001",
+                match_type="title",
+                scraped_date="2026-01-01",
+            )
+        )
+        db.session.commit()
+        fetch.return_value = [
+            PaperCandidate(arxiv_id="2601.00001", link="http://arxiv.org/abs/2601.00001v1", title="Already Stored"),
+            PaperCandidate(
+                arxiv_id="1905.00001",
+                link="http://arxiv.org/abs/1905.00001v2",
+                title="A Seminal Paper",
+                authors_list=["Dana Seed"],
+                abstract="Seed abstract.",
+                publication_date="2019-05-01",
+                categories=["cs.CV"],
+            ),
+        ]
+        messages: list[str] = []
+
+        stats = run_query_import(
+            self.app,
+            query='abs:"ovs"',
+            collection="OVS",
+            start_dt=date(2019, 1, 1),
+            end_dt=date(2026, 9, 28),
+            max_results=2,
+            emit=messages.append,
+        )
+
+        self.assertEqual((stats["created"], stats["linked"]), (1, 1))
+        self.assertEqual(fetch.call_args.kwargs["query"], 'abs:"ovs"')
+        collection = Collection.query.filter_by(name="OVS").one()
+        members = Paper.query.join(PaperCollection).filter(PaperCollection.collection_id == collection.id).all()
+        self.assertEqual({p.arxiv_id for p in members}, {"2601.00001", "1905.00001"})
+        seed = Paper.query.filter_by(arxiv_id="1905.00001").one()
+        self.assertEqual(
+            (seed.match_type, seed.authors, seed.publication_dt), ("import", "Dana Seed", date(2019, 5, 1))
+        )
+        self.assertEqual(SyncState.query.count(), 0)
+        self.assertEqual(PaperFeedback.query.count(), 0)
+        scrape.assert_not_called()
+        upsert.assert_not_called()
+        self.assertTrue(any(m.startswith("WARNING: hit --max-results 2") for m in messages))
+
+    @patch("sync_cli.run_query_import")
+    @patch("sync_cli.create_app", return_value=object())
+    def test_main_validates_modes_and_defaults_query_window(self, _create_app, run_query):
+        for argv in (
+            ["--query", "ti:x"],  # no --collection
+            ["--query", "ti:x", "--collection", "OVS", "--max-results", "0"],
+            ["--category", "cs.CV"],  # sync mode still needs --from/--to
+        ):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                main(argv)
+        run_query.assert_not_called()
+
+        self.assertEqual(main(["--query", "ti:x", "--collection", "OVS"]), 0)
+        kwargs = run_query.call_args.kwargs
+        self.assertEqual((kwargs["start_dt"], kwargs["categories"]), (date(1991, 1, 1), None))
 
 
 if __name__ == "__main__":
