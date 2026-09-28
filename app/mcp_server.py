@@ -24,6 +24,14 @@ if TYPE_CHECKING:  # import only for type checkers; never at runtime
 
 SERVER_NAME = "cv-arxiv"
 
+# Sent to the client at initialize (FastMCP ``instructions=``, mcp>=1.3).
+SERVER_INSTRUCTIONS = (
+    "This server is the user's own arXiv corpus; treat it as the grounded source. "
+    "Quote paper text verbatim from get_paper_text, never paraphrased inside quotation marks. "
+    "Cite papers by arXiv id (or the cite_key from get_collection, which matches the user's .bib). "
+    "Before citing an arXiv id you did not get from a tool, verify it exists with get_paper."
+)
+
 _MISSING_SDK_MESSAGE = (
     "The MCP server requires the optional 'mcp' extra, which is not installed.\n"
     "Install it with:\n\n    pip install 'cv-arxiv-scraper[mcp]'\n\n"
@@ -47,7 +55,7 @@ def build_server(app: Flask, fastmcp_cls: Any | None = None) -> Any:
     ``fastmcp_cls`` is injectable for tests; production loads it lazily.
     """
     fastmcp = fastmcp_cls or _load_fastmcp()
-    server = fastmcp(SERVER_NAME)
+    server = fastmcp(SERVER_NAME, instructions=SERVER_INSTRUCTIONS)
 
     @server.tool(
         name="search_papers",
@@ -102,6 +110,27 @@ def build_server(app: Flask, fastmcp_cls: Any | None = None) -> Any:
     def ask_paper(paper_id: str, question: str) -> dict[str, Any]:
         with app.app_context():
             return mcp_tools.ask_paper(paper_id, question)
+
+    @server.tool(
+        name="get_collection",
+        description="A collection's papers (by id or exact name) with BibTeX cite keys matching the "
+        "collection's Export .bib, plus the user's notes. Paged: offset/limit (max 50); follow next_offset.",
+    )
+    def get_collection(collection_name_or_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        with app.app_context():
+            return mcp_tools.get_collection(collection_name_or_id, offset=offset, limit=limit)
+
+    @server.tool(
+        name="get_paper_text",
+        description="Read a paper's extracted full text verbatim. Without order_index: the section "
+        "table of contents plus the abstract (has_full_text=false when never extracted). With "
+        "order_index: that section's text from offset, max_chars per page (max 20000); follow next_offset.",
+    )
+    def get_paper_text(
+        paper_id: str, order_index: int | None = None, offset: int = 0, max_chars: int = 8000
+    ) -> dict[str, Any]:
+        with app.app_context():
+            return mcp_tools.get_paper_text(paper_id, order_index=order_index, offset=offset, max_chars=max_chars)
 
     # The single mutation, clearly separated from the read tools above.
     @server.tool(

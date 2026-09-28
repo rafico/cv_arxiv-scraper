@@ -254,14 +254,16 @@ Edit Config):
   "mcpServers": {
     "cv-arxiv": {
       "command": "cv-arxiv-mcp",
-      "env": { "CV_ARXIV_DATA_DIR": "~/.local/share/cv-arxiv" }
+      "env": { "CV_ARXIV_DATA_DIR": "/path/to/cv_arxiv-scraper/instance" }
     }
   }
 }
 ```
 
 Point `CV_ARXIV_DATA_DIR` at the directory that holds your `arxiv_papers.db`,
-vector index, and `config.yaml` (the same dir `cv-arxiv serve --data-dir` uses).
+vector index, and `config.yaml`: a source checkout's absolute `instance/` path (as
+above), or `~/.local/share/cv-arxiv` if you run `cv-arxiv serve` with its default
+data dir. A path with no DB in it silently starts a fresh, empty corpus.
 Restart Claude Desktop and the tools appear:
 
 | Tool | What it does |
@@ -272,6 +274,8 @@ Restart Claude Desktop and the tools appear:
 | `top_ranked_today` | Today's top-ranked fresh papers (optional interest-profile lens) |
 | `list_collections` | Your collections and their paper counts |
 | `ask_paper` | Grounded Q&A over one paper's own text, with section citations |
+| `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes (paged) |
+| `get_paper_text` | A paper's section table of contents + abstract, then any section's verbatim text (paged) |
 | `add_to_collection` | The one write tool — file a paper into a collection (idempotent) |
 
 The `mcp` package is an **optional extra**: the core install and web server work

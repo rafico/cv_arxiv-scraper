@@ -15,7 +15,7 @@ import sys
 import unittest
 from datetime import date, datetime, timezone
 
-from app.models import Collection, Paper, PaperCollection, db
+from app.models import Collection, Paper, PaperCollection, PaperSection, db
 from app.services import mcp_tools
 from tests.helpers import FlaskDBTestCase
 
@@ -250,6 +250,113 @@ class AddToCollectionTests(FlaskDBTestCase):
         result = mcp_tools.add_to_collection(999999, self.paper_id)
         self.assertEqual(result["error"], "not_found")
         self.assertEqual(result["resource"], "collection")
+
+
+class GetCollectionTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        papers = [_make_paper(i, user_notes="key baseline" if i == 2 else "") for i in range(3)]
+        hidden = _make_paper(7, is_hidden=True)
+        self.collection = Collection(name="Review")
+        db.session.add_all([*papers, hidden, self.collection])
+        db.session.commit()
+        for paper in [*papers, hidden]:
+            db.session.add(PaperCollection(paper_id=paper.id, collection_id=self.collection.id))
+        db.session.commit()
+        self.collection_id = self.collection.id
+
+    def test_by_name_returns_members_with_cite_keys_and_notes(self):
+        result = mcp_tools.get_collection("Review")
+        self.assertEqual(result["id"], self.collection_id)
+        self.assertEqual(result["count"], 3)  # hidden member excluded, like Export .bib
+        by_arxiv = {row["arxiv_id"]: row for row in result["papers"]}
+        self.assertEqual(by_arxiv["2607.3002"]["cite_key"], "2607_3002")
+        self.assertEqual(by_arxiv["2607.3002"]["user_notes"], "key baseline")
+        self.assertNotIn("2607.3007", by_arxiv)
+        self.assertIsNone(result["next_offset"])
+
+    def test_by_id_pages_with_next_offset(self):
+        first = mcp_tools.get_collection(str(self.collection_id), limit=2)
+        self.assertEqual(len(first["papers"]), 2)
+        self.assertEqual(first["next_offset"], 2)
+        rest = mcp_tools.get_collection(self.collection_id, offset=first["next_offset"], limit=2)
+        self.assertEqual(len(rest["papers"]), 1)
+        self.assertIsNone(rest["next_offset"])
+
+    def test_unknown_name_is_not_created(self):
+        result = mcp_tools.get_collection("Nope")
+        self.assertEqual(result["error"], "not_found")
+        self.assertIsNone(Collection.query.filter_by(name="Nope").first())
+
+
+class GetPaperTextTests(FlaskDBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.paper = _make_paper(0)
+        self.bare = _make_paper(1)
+        db.session.add_all([self.paper, self.bare])
+        db.session.commit()
+        self.long_text = "".join(str(i % 10) for i in range(25_000))
+        db.session.add_all(
+            [
+                PaperSection(paper_id=self.paper.id, section_type="introduction", text="Intro text.", order_index=0),
+                PaperSection(paper_id=self.paper.id, section_type="method", text=self.long_text, order_index=1),
+            ]
+        )
+        db.session.commit()
+
+    def test_contents_lists_sections_and_abstract(self):
+        result = mcp_tools.get_paper_text(self.paper.id)
+        self.assertTrue(result["has_full_text"])
+        self.assertIn("vision transformers", result["abstract"])
+        self.assertEqual(
+            result["sections"],
+            [
+                {"order_index": 0, "section_type": "introduction", "chars": 11},
+                {"order_index": 1, "section_type": "method", "chars": 25_000},
+            ],
+        )
+
+    def test_section_pages_verbatim_and_clamps(self):
+        page = mcp_tools.get_paper_text(self.paper.id, order_index=1, offset=10, max_chars=100)
+        self.assertEqual(page["text"], self.long_text[10:110])
+        self.assertEqual(page["next_offset"], 110)
+        big = mcp_tools.get_paper_text(self.paper.id, order_index=1, max_chars=999_999)
+        self.assertEqual(len(big["text"]), 20_000)
+        tail = mcp_tools.get_paper_text(self.paper.id, order_index=1, offset=big["next_offset"])
+        self.assertEqual(tail["text"], self.long_text[20_000:])
+        self.assertIsNone(tail["next_offset"])
+
+    def test_no_sections_falls_back(self):
+        result = mcp_tools.get_paper_text(self.bare.id)
+        self.assertFalse(result["has_full_text"])
+        self.assertEqual(result["sections"], [])
+        self.assertEqual(result["link"], self.bare.link)
+
+    def test_unknown_section_is_graceful(self):
+        result = mcp_tools.get_paper_text(self.paper.id, order_index=9)
+        self.assertEqual(result["resource"], "section")
+
+
+class BuildServerTests(FlaskDBTestCase):
+    def test_registers_read_tools_and_instructions(self):
+        from app.mcp_server import build_server
+
+        class FakeFastMCP:
+            def __init__(self, name, **kwargs):
+                self.kwargs, self.tools = kwargs, {}
+
+            def tool(self, name, description):
+                def register(fn):
+                    self.tools[name] = fn
+                    return fn
+
+                return register
+
+        server = build_server(self.app, FakeFastMCP)
+        self.assertIn("get_paper_text", server.kwargs["instructions"])
+        self.assertIn("get_collection", server.tools)
+        self.assertEqual(server.tools["get_paper_text"](str(424242))["error"], "not_found")
 
 
 class AskPaperTests(FlaskDBTestCase):
