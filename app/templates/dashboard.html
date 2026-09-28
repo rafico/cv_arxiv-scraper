@@ -246,11 +246,16 @@
             Share
         </a>
     </div>
-    <div class="mt-2 px-2">
+    <div class="mt-2 px-2 flex gap-2">
         <a href="{{ url_for('api.export_collection_csv', collection_id=current_filters.collection) }}"
            title="Screening spreadsheet: one row per paper with venue, code, citations, your tags and notes"
-           class="block w-full px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+           class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
             Download CSV
+        </a>
+        <a id="collection-graph-link" href="{{ url_for('graph.index', collection=current_filters.collection) }}"
+           title="Citation graph of this collection"
+           class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Graph
         </a>
     </div>
     <div class="mt-2 px-2 flex gap-2">

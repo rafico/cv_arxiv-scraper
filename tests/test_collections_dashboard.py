@@ -59,6 +59,7 @@ class CollectionDashboardTests(FlaskDBTestCase):
         self.assertIn('id="collection-delete-btn"', text)
         self.assertIn('id="collection-import-ids"', text)
         self.assertIn(f'href="/api/collections/{collection.id}/table.csv"', text)
+        self.assertIn(f'href="/graph?collection={collection.id}"', text)
         self.assertIn("data-remove-from-collection", text)
         self.assertIn(f"removeFromCollection({paper.id}, {collection.id}", text)
         self.assertIn('const collectionName = "Survey Seeds";', text)
