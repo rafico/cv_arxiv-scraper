@@ -39,7 +39,7 @@ _PDF_STAGE_TIMEOUT = 900.0
 
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 # Tags whose content must never become section text.
-_SKIP_TAGS = frozenset({"script", "style", "head", "noscript"})
+_SKIP_TAGS = frozenset({"script", "style", "head", "noscript", "footer"})
 # Block-level tags: emit a separator so adjacent paragraphs/list items don't run together.
 _SPACE_TAGS = frozenset({"p", "div", "br", "li", "tr", "section", "blockquote", "figcaption", "td"})
 

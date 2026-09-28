@@ -22,6 +22,7 @@ import math
 import re
 
 from app.models import Paper, PaperSection, db
+from app.services.citation_verifier import _normalize_title
 from app.services.rag import build_llm_client as _build_client
 
 LOGGER = logging.getLogger(__name__)
@@ -42,6 +43,9 @@ _HISTORY_TURNS = 4
 _HISTORY_CHAR_BUDGET = 400
 
 _NOT_ADDRESSED = "The paper does not address this."
+
+# Back matter that never answers a question about the paper (and carries LaTeXML footer noise).
+_SKIP_SECTION_TYPES = frozenset({"references", "acknowledgments"})
 
 _EVIDENCE_SYSTEM_PROMPT = (
     "You judge whether an excerpt from a research paper is relevant to a reader's question. "
@@ -70,14 +74,14 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def _paper_chunks(paper: Paper) -> list[dict]:
-    """The paper's retrievable chunks: abstract first, then each extracted section."""
+    """The paper's retrievable chunks: abstract first, then each extracted body section."""
     chunks: list[dict] = []
     abstract = (paper.abstract_text or paper.summary_text or "").strip()
     if abstract:
         chunks.append({"section_type": "abstract", "order_index": -1, "text": abstract, "score": None})
     for section in paper.sections.order_by(PaperSection.order_index).all():
         text = (section.text or "").strip()
-        if text:
+        if text and section.section_type not in _SKIP_SECTION_TYPES:
             chunks.append(
                 {
                     "section_type": section.section_type,
@@ -150,7 +154,13 @@ def _score_one_chunk(client, question: str, chunk: dict) -> tuple[float, str] | 
         return None
     score = max(0.0, min(10.0, score))
     quote = data.get("quote") if isinstance(data, dict) else ""
-    quote = _truncate(quote, _QUOTE_CHAR_BUDGET) if isinstance(quote, str) else ""
+    if not isinstance(quote, str):
+        quote = ""
+    # ponytail: normalized substring check drops paraphrased "verbatim" quotes; fuzzy/span
+    # alignment if near-verbatim quotes (elided words, ligatures) get dropped too often.
+    if quote and _normalize_title(quote) not in _normalize_title(chunk["text"]):
+        quote = ""
+    quote = _truncate(quote, _QUOTE_CHAR_BUDGET)
     return score, quote
 
 
