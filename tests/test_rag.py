@@ -1,4 +1,4 @@
-"""Tests for conversational RAG over the saved corpus (app.services.rag + endpoint)."""
+"""Tests for conversational RAG over a collection / the saved papers / the corpus (app.services.rag + endpoint)."""
 
 from __future__ import annotations
 
@@ -6,12 +6,14 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
+
 # Importing the module attaches its route to the shared ``api_bp`` blueprint so the
 # endpoint is registered when ``create_app`` runs. In production this happens via the
 # import tuple in ``app/routes/api/__init__.py`` (see REPORT for the wiring snippet).
 import app.routes.api.chat  # noqa: E402,F401  (import-for-side-effect: route registration)
 from app.enums import FeedbackAction
-from app.models import Paper, PaperFeedback, db
+from app.models import Collection, Paper, PaperCollection, PaperFeedback, PaperSection, db
 from app.services import rag
 from tests.helpers import FlaskDBTestCase
 
@@ -47,6 +49,24 @@ def _save(paper: Paper) -> None:
     db.session.add(PaperFeedback(paper_id=paper.id, action=FeedbackAction.SAVE.value))
 
 
+class FakeEmbeddingService:
+    """2-dim embeddings: 'voxel' texts align with a 'voxel' query; paper vectors are given per id."""
+
+    def __init__(self, paper_vectors=None):
+        self.paper_vectors = paper_vectors or {}
+
+    def encode(self, texts):
+        return np.asarray([[1.0, 0.0] if "voxel" in t.lower() else [0.0, 1.0] for t in texts], dtype=np.float32)
+
+    def get_paper_vectors(self, paper_ids):
+        found = [pid for pid in paper_ids if pid in self.paper_vectors]
+        return found, np.asarray([self.paper_vectors[pid] for pid in found], dtype=np.float32)
+
+
+def _patch_embeddings(service):
+    return patch("app.services.embeddings.get_embedding_service", return_value=service)
+
+
 class RetrieveSavedContextTests(FlaskDBTestCase):
     def setUp(self):
         super().setUp()
@@ -59,30 +79,70 @@ class RetrieveSavedContextTests(FlaskDBTestCase):
         db.session.commit()
         self.saved_ids = {p.id for p in self.papers[:3]}
 
-    def test_filters_hybrid_results_to_saved_papers(self):
+    def test_saved_scope_ranks_saved_papers_exactly(self):
         unsaved = self.papers[3]
-        ranked = [
-            {"paper_id": unsaved.id, "rrf_score": 0.9, "bm25_rank": 1, "semantic_rank": 1},
-            {"paper_id": self.papers[0].id, "rrf_score": 0.5, "bm25_rank": 2, "semantic_rank": 2},
-            {"paper_id": self.papers[1].id, "rrf_score": 0.3, "bm25_rank": 3, "semantic_rank": 3},
-        ]
-        with patch("app.services.rag.search_hybrid", return_value=ranked):
-            result = rag.retrieve_saved_context("vision transformers", top_k=6)
+        vectors = {p.id: [0.0, 1.0] for p in self.papers}
+        vectors[self.papers[2].id] = [1.0, 0.0]  # best match for a "voxel" query
+        with _patch_embeddings(FakeEmbeddingService(vectors)):
+            result = rag.retrieve_saved_context("voxel occupancy", top_k=6)
 
-        returned_ids = {s["paper_id"] for s in result["sources"]}
+        returned_ids = [s["paper_id"] for s in result["sources"]]
+        self.assertEqual(result["scope"], "saved")
         self.assertNotIn(unsaved.id, returned_ids)
-        self.assertTrue(returned_ids.issubset(self.saved_ids))
-        # Highest-ranked saved paper comes first.
-        self.assertEqual(result["sources"][0]["paper_id"], self.papers[0].id)
-        self.assertIn("Title: RAG Paper 0", result["context"])
-        self.assertFalse(result["no_saved_papers"])
+        self.assertEqual(set(returned_ids), self.saved_ids)
+        self.assertEqual(returned_ids[0], self.papers[2].id)
+        self.assertEqual([s["n"] for s in result["sources"]], [1, 2, 3])
+        self.assertIn("[1] RAG Paper 2", result["context"])
 
-    def test_falls_back_to_saved_papers_when_hybrid_empty(self):
+    def test_unembedded_saved_papers_still_returned(self):
+        # Replaces the old "hybrid empty -> saved ids" fallback: an empty index must not hide saves.
         with patch("app.services.rag.search_hybrid", return_value=[]):
             result = rag.retrieve_saved_context("anything", top_k=6)
 
-        returned_ids = {s["paper_id"] for s in result["sources"]}
-        self.assertEqual(returned_ids, self.saved_ids)
+        self.assertEqual({s["paper_id"] for s in result["sources"]}, self.saved_ids)
+
+    def test_scoped_member_outside_hybrid_top_k_is_returned(self):
+        member = self.papers[3]  # unsaved, and missing from the global hybrid hits
+        vectors = {p.id: [0.0, 1.0] for p in self.papers}
+        vectors[member.id] = [1.0, 0.0]
+        hits = [{"paper_id": self.papers[0].id, "rrf_score": 0.9}]
+        with (
+            patch("app.services.rag.search_hybrid", return_value=hits),
+            _patch_embeddings(FakeEmbeddingService(vectors)),
+        ):
+            result = rag.retrieve_saved_context(
+                "voxel occupancy", top_k=1, paper_ids=[self.papers[0].id, self.papers[1].id, member.id]
+            )
+
+        self.assertEqual(result["scope"], "collection")
+        self.assertEqual([s["paper_id"] for s in result["sources"]], [member.id])
+
+    def test_no_saves_searches_whole_corpus(self):
+        PaperFeedback.query.delete()
+        db.session.commit()
+        unsaved = self.papers[3]
+        hits = [{"paper_id": unsaved.id, "rrf_score": 0.5}]
+        with patch("app.services.rag.search_hybrid", return_value=hits):
+            result = rag.retrieve_saved_context("anything", top_k=6)
+
+        self.assertEqual(result["scope"], "corpus")
+        self.assertEqual([s["paper_id"] for s in result["sources"]], [unsaved.id])
+
+    def test_excerpt_is_best_body_section_never_references(self):
+        paper = self.papers[0]
+        db.session.add_all(
+            [
+                PaperSection(paper_id=paper.id, section_type="method", text="We lift features to 3D.", order_index=1),
+                PaperSection(paper_id=paper.id, section_type="references", text="[1] Voxel nets.", order_index=9),
+            ]
+        )
+        db.session.commit()
+        with _patch_embeddings(FakeEmbeddingService()):
+            result = rag.retrieve_saved_context("voxel", top_k=6, paper_ids=[paper.id])
+
+        self.assertEqual(result["sources"][0]["section"], "method")
+        self.assertIn("Excerpt (method): We lift features to 3D.", result["context"])
+        self.assertNotIn("Voxel nets", result["context"])
 
 
 class AnswerQueryTests(FlaskDBTestCase):
@@ -106,7 +166,7 @@ class AnswerQueryTests(FlaskDBTestCase):
 
         self.assertIsNone(result["synthesis"])
         self.assertFalse(result["llm_used"])
-        self.assertFalse(result["no_saved_papers"])
+        self.assertEqual(result["scope"], "saved")
         self.assertEqual(len(result["sources"]), 2)
         self.assertEqual(result["query"], "what is new in segmentation?")
 
@@ -125,6 +185,18 @@ class AnswerQueryTests(FlaskDBTestCase):
         self.assertEqual(result["synthesis"], "Grounded answer citing RAG Paper 0.")
         self.assertTrue(result["llm_used"])
         self.assertEqual(len(result["sources"]), 2)
+
+    def test_fabricated_citation_is_stripped(self):
+        fake_response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Real [2], fake [7]."))]
+        )
+        fake_client = SimpleNamespace(complete=lambda **kwargs: fake_response)
+        with patch("app.services.rag._build_client", return_value=fake_client):
+            result = rag.answer_query("anything", app=self.app)
+
+        self.assertEqual(len(result["sources"]), 2)
+        self.assertIn("[2]", result["synthesis"])
+        self.assertNotIn("[7]", result["synthesis"])
 
     def test_llm_failure_degrades_to_none(self):
         def _boom(**kwargs):
@@ -154,14 +226,14 @@ class AnswerQueryTests(FlaskDBTestCase):
         client.complete.assert_called_once()
         client._create_completion.assert_not_called()
 
-    def test_no_saved_papers_returns_friendly_empty(self):
-        # Remove all save feedback.
+    def test_no_saved_papers_answers_from_whole_corpus(self):
         PaperFeedback.query.delete()
         db.session.commit()
 
-        result = rag.answer_query("anything at all", app=self.app)
-        self.assertTrue(result["no_saved_papers"])
-        self.assertEqual(result["sources"], [])
+        with patch("app.services.rag.search_hybrid", return_value=self.ranked):
+            result = rag.answer_query("anything at all", app=self.app)
+        self.assertEqual(result["scope"], "corpus")
+        self.assertEqual([s["paper_id"] for s in result["sources"]], [p.id for p in self.papers[:2]])
         self.assertIsNone(result["synthesis"])
         self.assertFalse(result["llm_used"])
 
@@ -192,9 +264,8 @@ class ChatEndpointTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_chat_returns_200_json_with_sources(self):
-        # Add an UNSAVED paper and have hybrid surface it first: the endpoint must
-        # filter it out so chat is genuinely scoped to saved papers (and not just
-        # passing via the empty-results fallback).
+        # Add an UNSAVED paper and have hybrid surface it first: with saves present
+        # chat is scoped to them, so the unsaved paper must not appear.
         saved = Paper.query.one()
         unsaved = _make_paper(1)
         db.session.add(unsaved)
@@ -212,23 +283,50 @@ class ChatEndpointTests(FlaskDBTestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
-        self.assertFalse(data["no_saved_papers"])
+        self.assertEqual(data["scope"], "saved")
         self.assertFalse(data["llm_used"])
         self.assertIsNone(data["synthesis"])
         source_ids = [s["paper_id"] for s in data["sources"]]
         self.assertEqual(source_ids, [saved.id])
         self.assertNotIn(unsaved.id, source_ids)
 
-    def test_chat_no_saved_papers_friendly_payload(self):
-        PaperFeedback.query.delete()
+    def test_chat_scoped_to_collection(self):
+        saved = Paper.query.one()
+        member = _make_paper(1)
+        collection = Collection(name="Review")
+        db.session.add_all([member, collection])
+        db.session.flush()
+        db.session.add(PaperCollection(paper_id=member.id, collection_id=collection.id))
         db.session.commit()
+
         response = self.client.post(
             "/api/corpus/chat",
-            json={"query": "anything"},
+            json={"query": "anything", "collection_id": collection.id},
             headers={"X-CSRF-Token": self.csrf_token},
         )
+
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
-        self.assertTrue(data["no_saved_papers"])
-        self.assertIn("message", data)
-        self.assertEqual(data["sources"], [])
+        self.assertEqual(data["scope"], "collection")
+        self.assertEqual([s["paper_id"] for s in data["sources"]], [member.id])
+        self.assertNotIn(saved.id, [s["paper_id"] for s in data["sources"]])
+
+    def test_chat_rejects_unknown_or_malformed_collection(self):
+        headers = {"X-CSRF-Token": self.csrf_token}
+        missing = self.client.post("/api/corpus/chat", json={"query": "q", "collection_id": 999}, headers=headers)
+        self.assertEqual(missing.status_code, 404)
+        malformed = self.client.post("/api/corpus/chat", json={"query": "q", "collection_id": "1"}, headers=headers)
+        self.assertEqual(malformed.status_code, 400)
+
+    def test_discover_sends_collection_from_url(self):
+        collection = Collection(name="Occupancy <Review>")
+        db.session.add(collection)
+        db.session.commit()
+
+        text = self.client.get(f"/discover?collection={collection.id}").get_data(as_text=True)
+
+        self.assertIn(f"const collectionId = {collection.id};", text)
+        self.assertIn("collection_id: collectionId", text)
+        self.assertIn("Occupancy &lt;Review&gt;", text)
+        self.assertIn('id="chat-scope"', text)
+        self.assertIn("const collectionId = null;", self.client.get("/discover").get_data(as_text=True))

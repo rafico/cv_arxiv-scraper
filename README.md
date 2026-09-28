@@ -137,8 +137,10 @@ Search by exact terms, by meaning (SPECTER2 embeddings), or both combined — so
 paper you half-remember even when you don't have its words.
 
 **💬 Ask your own library questions.**
-Chat with the papers you've saved (**Discover → Chat with your saved papers**): grounded,
-cited answers when an LLM is enabled, and the most relevant saved papers listed when it isn't.
+Chat with the papers you've saved (**Discover → Chat with your papers**), or one collection (its sidebar's
+**Ask this collection →**): grounded, `[n]`-cited answers when an LLM is enabled, and the most relevant
+papers listed, numbered, with the section that matched when it isn't. With nothing saved it searches the
+whole library and says so.
 Per-paper chat, corpus chat, and citation verification all read the full text captured by
 `scraper.extract_sections` (on by default) — with it off, they have nothing to quote.
 
@@ -184,7 +186,7 @@ opening the PDF:
 |---|---|
 | **Finding papers** | Daily/on-demand arXiv scrape with interest matching · hybrid search (keyword · semantic · combined) · historical backfill of any date range · monitor extra arXiv categories beyond cs.CV |
 | **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · learned interest profile · per-paper "why it ranked" explanations + optional inline score-factor bars · optional AI relevance scoring |
-| **Chat & cold-start** | Chat with your saved papers (grounded, cited RAG answers) · seed your profile from a pasted list of arXiv IDs · active-learning prompts surface borderline papers to sharpen ranking |
+| **Chat & cold-start** | Chat with your saved papers or a collection (grounded, cited RAG answers) · seed your profile from a pasted list of arXiv IDs · active-learning prompts surface borderline papers to sharpen ranking |
 | **Summaries** | Extractive TL;DR with no API needed · optional AI TL;DR + structured insights when an LLM is enabled |
 | **Organization** | Save / skip / prioritize / share to train rankings · collections (create, rename, bulk add) seeded from pasted arXiv ids/URLs/.bib or an arXiv search · custom tags · notes · reading status · saved searches |
 | **Citation graph** | Your library as a force-directed network of real citation edges (Semantic Scholar + OpenAlex reference lists) · node size = PageRank influence within your corpus · color by year · collection & year filters |

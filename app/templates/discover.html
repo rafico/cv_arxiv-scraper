@@ -303,18 +303,21 @@
     }
 </script>
 
-{# ── Chat with your saved papers (RAG) ── #}
+{# ── Chat with your papers (RAG): a collection via ?collection=<id>, else saved, else the whole library ── #}
+{% set chat_collection_id = (request.args.get('collection') | int) or none %}
+{% set chat_collection_name = shell.collections | selectattr('id', 'equalto', chat_collection_id) | map(attribute='name') | first %}
 <div class="max-w-2xl mx-auto mt-10" id="chat-panel">
-    <h2 class="text-lg font-bold text-fg mb-1">Chat with your saved papers</h2>
-    <p class="text-sm text-fg-muted mb-4">Ask a question grounded in the papers you've saved. AI synthesis needs an LLM enabled in Settings — otherwise the most relevant saved papers are listed.</p>
+    <h2 class="text-lg font-bold text-fg mb-1">{% if chat_collection_id %}Ask collection “{{ chat_collection_name or chat_collection_id }}”{% else %}Chat with your papers{% endif %}</h2>
+    <p class="text-sm text-fg-muted mb-4">Ask a question grounded in {% if chat_collection_id %}this collection's papers{% else %}the papers you've saved (or your whole library while nothing is saved){% endif %}. AI synthesis needs an LLM enabled in Settings — otherwise the most relevant papers are listed, numbered, with the section that matched.</p>
     <div class="rounded-xl border border-edge bg-surface p-6">
         <div class="flex gap-2">
             <input id="chat-input" type="text"
-                   placeholder="e.g. What low-light methods do my saved papers use?"
+                   placeholder="e.g. What low-light methods do these papers use?"
                    class="flex-1 rounded-lg border border-edge bg-surface-2 px-3 py-2 text-sm
                           focus:ring-2 focus:ring-accent focus:border-transparent focus:bg-surface outline-none">
             <button id="chat-send" class="btn-primary text-sm shrink-0">Ask</button>
         </div>
+        <p id="chat-scope" class="hidden mt-3 text-[11px] text-fg-subtle"></p>
         <div id="chat-answer" class="hidden mt-4 text-sm text-fg leading-relaxed whitespace-pre-wrap rounded-lg border border-edge bg-surface-2 p-3"></div>
         {# Citation-verification chips: references the answer names, resolved (green) or flagged (amber) against your library. #}
         <p id="chat-refs-note" class="hidden mt-3 text-[11px] text-fg-subtle"></p>
@@ -330,6 +333,13 @@
     const sourcesEl = document.getElementById("chat-sources");
     const refsEl = document.getElementById("chat-refs");
     const refsNoteEl = document.getElementById("chat-refs-note");
+    const scopeEl = document.getElementById("chat-scope");
+    const collectionId = {{ chat_collection_id | tojson }};
+    const scopeLabels = {
+        collection: "Answered from this collection.",
+        saved: "Answered from your saved papers.",
+        corpus: "Nothing saved yet — answered from your whole library, including papers you haven't vetted.",
+    };
     if (!btn) return;
     /* Citation verification chips — verified links to the local copy, unverified is
        flagged as possibly fabricated. textContent / href only, never innerHTML. */
@@ -370,28 +380,30 @@
         refsEl.textContent = "";
         refsNoteEl.classList.add("hidden");
         refsNoteEl.textContent = "";
+        scopeEl.classList.add("hidden");
         try {
             const response = await fetch("/api/corpus/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
-                body: JSON.stringify({ query: query }),
+                body: JSON.stringify({ query: query, collection_id: collectionId }),
             });
             const data = await response.json();
             if (!response.ok) { answerEl.textContent = data.error || "Something went wrong."; return; }
-            if (data.no_saved_papers) {
-                answerEl.textContent = data.message || "Save a few papers first, then ask again.";
-                return;
-            }
-            answerEl.textContent = data.synthesis || "AI synthesis is off — here are your most relevant saved papers.";
-            (data.sources || []).forEach(function (s) {
+            scopeEl.dataset.scope = data.scope || "";
+            scopeEl.textContent = scopeLabels[data.scope] || "";
+            scopeEl.classList.toggle("hidden", !scopeEl.textContent);
+            if (!(data.sources || []).length) { answerEl.textContent = "No matching papers found."; return; }
+            answerEl.textContent = data.synthesis || "AI synthesis is off — here are the most relevant papers.";
+            data.sources.forEach(function (s) {
                 const row = document.createElement("a");
                 row.className = "block text-xs text-fg-muted hover:text-accent";
                 row.href = "/?ids=" + s.paper_id;
+                const section = s.section ? " · § " + s.section : "";
                 const score = (s.score !== undefined && s.score !== null) ? " · score " + s.score : "";
-                row.textContent = "• " + s.title + score;
+                row.textContent = "[" + s.n + "] " + s.title + section + score;
                 sourcesEl.appendChild(row);
             });
-            if ((data.sources || []).length) sourcesEl.classList.remove("hidden");
+            sourcesEl.classList.remove("hidden");
             renderVerifications(data.verifications);
         } catch (e) {
             answerEl.textContent = "Could not reach the server. Please try again.";

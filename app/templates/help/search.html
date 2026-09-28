@@ -70,22 +70,22 @@
     <p class="text-sm text-fg-muted">Use the <strong>Discover</strong> page when you want to search older arXiv papers by date range and category. It backfills historical papers into your library, and any matches are added to your inbox like a normal scrape.</p>
 </section>
 
-<!-- Chat with saved papers -->
+<!-- Chat with your papers -->
 <section id="chat" class="scroll-mt-6 pt-12">
-    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Chat With Your Saved Papers</h2>
-    <p class="text-sm text-fg-muted mb-4">At the bottom of <strong>Discover</strong>, the <strong>Chat with your saved papers</strong> box answers a plain-language question grounded only in the papers you have saved &mdash; useful for &ldquo;what methods do my saved low-light papers use?&rdquo;-style questions.</p>
+    <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Chat With Your Papers</h2>
+    <p class="text-sm text-fg-muted mb-4">At the bottom of <strong>Discover</strong>, the <strong>Chat with your papers</strong> box answers a plain-language question grounded in the papers you have saved &mdash; useful for &ldquo;what methods do my saved low-light papers use?&rdquo;-style questions. From a collection's sidebar, <strong>Ask this collection &rarr;</strong> scopes it to that collection instead.</p>
     <div class="grid gap-4 md:grid-cols-2">
         <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
             <h3 class="text-sm font-bold text-fg mb-2">With AI enabled</h3>
-            <p class="text-sm text-fg-muted">When an <a href="{{ url_for('settings.view_settings', section='ai') }}" class="font-medium text-blue-600 hover:text-blue-800">LLM is enabled</a>, you get a synthesized answer with the saved papers it drew on listed as sources.</p>
+            <p class="text-sm text-fg-muted">When an <a href="{{ url_for('settings.view_settings', section='ai') }}" class="font-medium text-blue-600 hover:text-blue-800">LLM is enabled</a>, you get a synthesized answer citing the numbered papers it drew on as <code>[1]</code>, <code>[2]</code>&hellip;</p>
         </div>
         <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
             <h3 class="text-sm font-bold text-fg mb-2">Without AI</h3>
-            <p class="text-sm text-fg-muted">With AI off, it still works: instead of a written answer it lists the most relevant saved papers for your question, so it stays fully offline.</p>
+            <p class="text-sm text-fg-muted">With AI off, it still works: instead of a written answer it lists the most relevant papers, numbered, with the section that matched, so it stays fully offline.</p>
         </div>
     </div>
     <div class="help-admonition bg-surface-2 border-l-4 border-edge-strong p-4 rounded-r-lg mt-4">
-        <p class="text-sm text-fg-muted">Chat only ever reads papers you have <strong>saved</strong> &mdash; not your whole inbox &mdash; so the answer stays scoped to work you have already vouched for.</p>
+        <p class="text-sm text-fg-muted">Chat reads the collection you asked, else the papers you have <strong>saved</strong>. Only while nothing is saved does it fall back to your whole library &mdash; the answer says which scope it used, because those papers are not vetted.</p>
     </div>
 </section>
 {% endblock %}

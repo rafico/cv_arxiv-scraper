@@ -45,9 +45,10 @@ from here — add logic here, not there.
 **Search / embeddings / corpus**
 - `embeddings.py` (`EmbeddingService`, exact NumPy vector index; singleton via
   `get_embedding_service`), `embed_backfill.py`, `search.py` (BM25 + semantic +
-  hybrid/RRF), `rag.py` (chat-with-saved-papers: retrieves over the **saved**
-  corpus via hybrid search, optionally synthesizes via the LLM client; degrades to
-  retrieval-only when `llm.enabled` is false), `related.py`, `corpus_analysis.py`,
+  hybrid/RRF), `rag.py` (corpus chat: scope is a collection's `paper_ids`, else the **saved**
+  papers — ranked exactly by per-id vectors — else the whole corpus via hybrid
+  search, labelled `scope`; optionally synthesizes via the LLM client with `[n]`
+  grounding; degrades to retrieval-only when `llm.enabled` is false), `related.py`, `corpus_analysis.py`,
   `saved_search.py`, `pdf_extraction.py`,
   `summary.py`, `text.py`.
 

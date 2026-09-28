@@ -15,7 +15,7 @@ belongs in [app/services](../services).
   searches, inbox/saved counts) into **every** template so the sidebar renders
   app-wide. Queries are guarded against a missing DB.
 - `discover.py` — discovery/recommendations/corpus views, incl. the **chat with
-  your saved papers** panel (posts to `/api/corpus/chat`).
+  your papers** panel (posts to `/api/corpus/chat`; `?collection=<id>` scopes it).
 - `settings.py` — settings UI + credential uploads, Gmail OAuth callback, config
   writes (via `save_config`). Note: credential files are written with `0600`.
 - `help.py` — static help/onboarding pages.
