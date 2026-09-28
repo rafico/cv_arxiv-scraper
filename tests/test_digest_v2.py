@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -42,7 +42,7 @@ def _make_paper(**overrides) -> Paper:
         is_hidden=False,
         publication_date="2026-07-01",
         scraped_date="2026-07-01",
-        publication_dt=date(2026, 7, 1),
+        publication_dt=datetime.now(timezone.utc).date(),
         scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     defaults.update(overrides)

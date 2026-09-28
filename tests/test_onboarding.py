@@ -14,6 +14,8 @@ import app.routes.api.onboarding  # noqa: F401
 from app.models import Paper, PaperFeedback, db
 from app.services.onboarding import (
     bootstrap_from_arxiv_ids,
+    extract_arxiv_ids,
+    fetch_arxiv_metadata,
     normalize_arxiv_id,
     select_uncertain_papers,
 )
@@ -141,6 +143,34 @@ class NormalizeArxivIdTests(unittest.TestCase):
         self.assertIsNone(normalize_arxiv_id("   "))
         self.assertIsNone(normalize_arxiv_id("not-an-id"))
         self.assertIsNone(normalize_arxiv_id(None))  # type: ignore[arg-type]
+
+
+class ExtractArxivIdsTests(unittest.TestCase):
+    def test_finds_ids_in_urls_labels_and_bib(self):
+        text = (
+            "https://arxiv.org/abs/2401.01234v2\n"
+            "@misc{x, eprint={2312.00752}, doi={10.48550/arXiv.2401.01234}}\n"
+            "arXiv:math.GT/0309136 and https://arxiv.org/pdf/hep-th/9901001v1"
+        )
+        self.assertEqual(extract_arxiv_ids(text), ["2401.01234", "2312.00752", "math/0309136", "hep-th/9901001"])
+
+    def test_rejects_dois_bad_months_and_unlabelled_legacy_ids(self):
+        self.assertEqual(extract_arxiv_ids("10.1109/TPAMI.2019.2929257 2413.01234 foo/1234567 2401.012345"), [])
+
+
+class FetchArxivMetadataTests(unittest.TestCase):
+    def test_skips_api_error_entries(self):
+        error_feed = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/api/errors#incorrect_id_format_for_2401.0123</id>
+    <title>Error</title>
+    <summary>incorrect id format for 2401.0123</summary>
+  </entry>
+</feed>
+"""
+        with patch("app.services.onboarding.request_with_backoff", return_value=_fake_response(error_feed)):
+            self.assertEqual(fetch_arxiv_metadata(["2401.01234"]), [])
 
 
 class BootstrapTests(FlaskDBTestCase):

@@ -10,6 +10,10 @@ edges exactly on the receiving side.
 
 from __future__ import annotations
 
+import logging
+
+LOGGER = logging.getLogger(__name__)
+
 BUNDLE_VERSION = 1
 MAX_BUNDLE_PAPERS = 5000
 MAX_FIELD_CHARS = 200_000  # sanity cap on any single string field
@@ -105,28 +109,35 @@ def _entry_list(entry: dict, field: str) -> list:
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
-def import_collection(manifest: object):
-    """Import a bundle as a new collection; returns (collection, stats dict).
+def import_collection(manifest: object, *, into=None):
+    """Import a bundle as a new collection (or ``into`` an existing one);
+    returns (collection, stats dict).
 
     Papers are global here (unlike per-dataset stores): an entry matching a
-    local paper (by arxiv_id, then link) links into the new collection and
+    local paper (by arxiv_id, then link) links into the collection and
     only fills user_notes/user_tags where locally empty — imports never
-    overwrite local data. Unmatched entries become new Paper rows.
+    overwrite local data. Unmatched entries become new Paper rows, embedded
+    after the commit so search and "Suggest similar" can find them.
     """
     from datetime import date
 
+    from flask import current_app
+
     from app.models import Collection, Paper, PaperCollection, db
     from app.services.citation_graph import sync_citation_edges
+    from app.services.embed_backfill import backfill_embeddings
 
     manifest = _validate(manifest)
 
-    collection = Collection(
-        name=_unique_collection_name(manifest["collection"]["name"].strip()),
-        description=str(manifest["collection"].get("description") or ""),
-        color=manifest["collection"].get("color") if isinstance(manifest["collection"].get("color"), str) else None,
-    )
-    db.session.add(collection)
-    db.session.flush()
+    collection = into
+    if collection is None:
+        collection = Collection(
+            name=_unique_collection_name(manifest["collection"]["name"].strip()),
+            description=str(manifest["collection"].get("description") or ""),
+            color=manifest["collection"].get("color") if isinstance(manifest["collection"].get("color"), str) else None,
+        )
+        db.session.add(collection)
+        db.session.flush()
 
     linked = created = 0
     for entry in manifest["papers"]:
@@ -182,4 +193,9 @@ def import_collection(manifest: object):
 
     db.session.commit()
     edges = sync_citation_edges()
+    if created:
+        try:
+            backfill_embeddings(current_app._get_current_object())
+        except Exception:
+            LOGGER.warning("Embedding imported papers failed (non-fatal)", exc_info=True)
     return collection, {"created": created, "linked": linked, "edges": edges}

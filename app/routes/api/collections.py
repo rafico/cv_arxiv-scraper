@@ -115,6 +115,62 @@ def import_collection_bundle():
     return jsonify({"id": collection.id, "name": collection.name, **stats}), 201
 
 
+# ponytail: the arXiv fetch and CPU embedding run synchronously on the single
+# worker, so seeds are capped; a background job if reviews need bigger seeds.
+_MAX_IMPORT_IDS = 100
+
+
+@api_bp.route("/collections/import-ids", methods=["POST"])
+def import_collection_ids():
+    """Seed a collection from arXiv ids/URLs/.bib text pasted as ``text``.
+
+    ``name`` is a collection name (created on miss) or a numeric id. Unlike the
+    onboarding bootstrap, no feedback rows are written, so the ranker is untouched.
+    """
+    from app.services.collection_share import BUNDLE_VERSION, import_collection
+    from app.services.mcp_tools import _resolve_or_create_collection
+    from app.services.onboarding import extract_arxiv_ids, fetch_arxiv_metadata
+    from app.services.summary import generate_summary
+
+    validate_csrf_token()
+    payload = request.get_json(silent=True) or {}
+    name = require_str(payload, "name")
+    ids = extract_arxiv_ids(require_str(payload, "text"))
+    if not ids:
+        return jsonify({"error": "No arXiv ids found"}), 400
+    if len(ids) > _MAX_IMPORT_IDS:
+        return jsonify({"error": f"Too many arXiv ids (max {_MAX_IMPORT_IDS})"}), 400
+    collection, _created = _resolve_or_create_collection(name)
+    if collection is None:
+        abort(404)
+
+    local = {p.arxiv_id: p for p in Paper.query.filter(Paper.arxiv_id.in_(ids))}
+    missing = [aid for aid in ids if aid not in local]
+    try:
+        fetched = fetch_arxiv_metadata(missing) if missing else []
+    except Exception:
+        return jsonify({"error": "arXiv fetch failed; try again later"}), 502
+    papers = [{"arxiv_id": p.arxiv_id, "title": p.title, "link": p.link} for p in local.values()]
+    papers += [
+        {
+            "arxiv_id": e["arxiv_id"],
+            "title": e["title"] or e["arxiv_id"],
+            "authors": ", ".join(e["authors"]),
+            "link": e["link"],
+            "pdf_link": e["pdf_link"],
+            "abstract_text": e["abstract"],
+            "summary_text": generate_summary(e["title"], e["abstract"]),
+            "publication_date": e["publication_date"],
+            "categories": e["categories"],
+        }
+        for e in fetched
+    ]
+    manifest = {"bundle_version": BUNDLE_VERSION, "collection": {"name": collection.name}, "papers": papers}
+    _collection, stats = import_collection(manifest, into=collection)
+    found = {entry["arxiv_id"] for entry in papers}
+    return jsonify({"collection_id": collection.id, **stats, "not_found": [aid for aid in ids if aid not in found]})
+
+
 @api_bp.route("/collections/<int:collection_id>/papers", methods=["POST"])
 def add_paper_to_collection(collection_id: int):
     validate_csrf_token()

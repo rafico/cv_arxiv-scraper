@@ -224,6 +224,17 @@
         </button>
     </div>
     <div id="collection-suggest-list" class="mt-2 px-2 space-y-2"></div>
+    <div class="mt-2 px-2">
+        <textarea id="collection-import-ids" rows="3" aria-label="Add by arXiv id, URL or .bib"
+                  class="input-base w-full text-xs font-mono"
+                  placeholder="Add by arXiv id / URL / .bib"></textarea>
+        <p class="mt-1 text-[11px] text-fg-subtle">arXiv ids only; venue-only .bib entries are skipped.</p>
+        <button id="collection-import-ids-btn" type="button"
+                class="mt-1 w-full px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Add papers
+        </button>
+        <p id="collection-import-ids-status" class="mt-1 text-[11px] text-fg-muted"></p>
+    </div>
     <div class="mt-2 px-2 flex gap-2">
         <a href="{{ url_for('api.export_bibtex', collection=current_filters.collection) }}"
            class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
@@ -307,6 +318,31 @@
         } catch (e) { /* non-fatal */ }
         button.disabled = false;
         button.textContent = "Suggest similar";
+    };
+
+    const importBtn = document.getElementById("collection-import-ids-btn");
+    const importStatus = document.getElementById("collection-import-ids-status");
+    importBtn.onclick = async function () {
+        const text = document.getElementById("collection-import-ids").value.trim();
+        if (!text) { importStatus.textContent = "Paste at least one arXiv id."; return; }
+        importBtn.disabled = true;
+        importStatus.textContent = "Fetching from arXiv…";
+        try {
+            const res = await fetch("/api/collections/import-ids", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ name: String(collectionId), text }),
+            });
+            const data = await res.json();
+            if (!res.ok) { importStatus.textContent = "Error: " + (data.error || "import failed"); return; }
+            const missed = data.not_found.length ? " Not found: " + data.not_found.join(", ") + "." : "";
+            importStatus.textContent = data.created + " new, " + data.linked + " already in library." + missed;
+            if (!data.not_found.length) window.location.reload();
+        } catch (e) {
+            importStatus.textContent = "Error: request failed";
+        } finally {
+            importBtn.disabled = false;
+        }
     };
 
     const collectionName = {{ (current_collection_name or '') | tojson }};
