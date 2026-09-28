@@ -35,3 +35,9 @@ class ShellTests(FlaskDBTestCase):
         self.assertIn("Recent NeRF", text)
         self.assertIn("Collections", text)
         self.assertIn("Saved searches", text)
+
+    def test_new_collection_entry_points_render_without_collections(self):
+        # Zero collections must still offer a way to create the first one.
+        text = self.client.get("/").get_data(as_text=True)
+        self.assertIn('id="new-collection-btn"', text)
+        self.assertIn("function newCollection(", text)

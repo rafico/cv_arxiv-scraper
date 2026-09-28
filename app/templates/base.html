@@ -63,8 +63,12 @@
                     {% if shell.saved_count %}<span class="text-[11px] tabular-nums {{ 'text-accent' if _saved_active else 'text-fg-subtle' }}">{{ shell.saved_count }}</span>{% endif %}
                 </a>
 
-                {% if shell.collections %}
-                <div class="side-heading">Collections</div>
+                <div class="side-heading flex items-center justify-between">
+                    <span>Collections</span>
+                    <button type="button" id="new-collection-btn" onclick="newCollection()"
+                            title="New collection" aria-label="New collection"
+                            class="text-sm leading-none text-fg-subtle hover:text-accent">+</button>
+                </div>
                 {% for col in shell.collections %}
                 <a href="{{ url_for('dashboard.index', collection=col.id, timeframe='all') }}"
                    class="side-link {{ 'side-link-active' if _collection == col.id }}">
@@ -72,7 +76,6 @@
                     <span class="flex-1 truncate">{{ col.name }}</span>
                 </a>
                 {% endfor %}
-                {% endif %}
 
                 {% if shell.saved_searches %}
                 <div class="side-heading">Saved searches</div>

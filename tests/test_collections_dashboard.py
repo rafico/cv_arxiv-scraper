@@ -1,7 +1,30 @@
 from __future__ import annotations
 
-from app.models import Collection, ScrapeRun, db
+from datetime import date, datetime, timezone
+from unittest.mock import patch
+
+from app.models import Collection, Paper, PaperCollection, ScrapeRun, db
 from tests.helpers import FlaskDBTestCase
+
+
+def _make_paper(idx: int, **overrides) -> Paper:
+    today = date.today()
+    defaults = dict(
+        arxiv_id=f"2607.{3000 + idx:04d}",
+        title=f"Collection Dashboard Paper {idx}",
+        authors="Author A",
+        link=f"https://arxiv.org/abs/2607.{3000 + idx:04d}",
+        pdf_link=f"https://arxiv.org/pdf/2607.{3000 + idx:04d}",
+        abstract_text="abstract",
+        match_type="Title",
+        is_hidden=False,
+        publication_date=today.isoformat(),
+        publication_dt=today,
+        scraped_date=today.isoformat(),
+        scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    defaults.update(overrides)
+    return Paper(**defaults)
 
 
 class CollectionDashboardTests(FlaskDBTestCase):
@@ -19,3 +42,40 @@ class CollectionDashboardTests(FlaskDBTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"No papers for this filter", response.data)
+
+    def test_collection_view_renders_manager_controls(self):
+        collection = Collection(name="Survey Seeds")
+        paper = _make_paper(1)
+        db.session.add_all([collection, paper])
+        db.session.flush()
+        db.session.add(PaperCollection(paper_id=paper.id, collection_id=collection.id))
+        db.session.commit()
+
+        text = self.client.get(f"/?collection={collection.id}&timeframe=all").get_data(as_text=True)
+
+        self.assertIn('id="collection-rename-btn"', text)
+        self.assertIn('id="collection-delete-btn"', text)
+        self.assertIn("data-remove-from-collection", text)
+        self.assertIn(f"removeFromCollection({paper.id}, {collection.id}", text)
+        self.assertIn('const collectionName = "Survey Seeds";', text)
+
+    def test_search_inside_collection_keeps_members_outside_global_top_hits(self):
+        collection = Collection(name="Review")
+        member = _make_paper(1, title="Sparse Voxel Occupancy")
+        outsider = _make_paper(2, title="Unrelated Paper")
+        db.session.add_all([collection, member, outsider])
+        db.session.flush()
+        db.session.add(PaperCollection(paper_id=member.id, collection_id=collection.id))
+        db.session.commit()
+
+        # The corpus-wide hybrid top-k misses the member entirely.
+        hits = [{"paper_id": outsider.id}]
+        with patch("app.services.search.search_hybrid", return_value=hits):
+            scoped = self.client.get(f"/?collection={collection.id}&timeframe=all&q=voxel")
+            inbox = self.client.get("/?timeframe=all&q=voxel")
+
+        self.assertIn(f'data-paper-id="{member.id}"', scoped.get_data(as_text=True))
+        self.assertNotIn(f'data-paper-id="{outsider.id}"', scoped.get_data(as_text=True))
+        # Unscoped views still trust the ranked ids alone.
+        self.assertIn(f'data-paper-id="{outsider.id}"', inbox.get_data(as_text=True))
+        self.assertNotIn(f'data-paper-id="{member.id}"', inbox.get_data(as_text=True))

@@ -67,6 +67,23 @@
         return meta ? meta.content : "";
     }
 
+    // Create a collection, optionally file paper id(s) into it, then open it.
+    // Shell-wide because the sidebar "+" renders on every page.
+    async function newCollection(paperIds) {
+        const name = (prompt("Name for the new collection:") || "").trim();
+        if (!name) return;
+        const headers = { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() };
+        const res = await fetch("/api/collections", { method: "POST", headers, body: JSON.stringify({ name }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(data.error || "Could not create the collection."); return; }
+        if (paperIds) {
+            await fetch(`/api/collections/${data.id}/papers`, {
+                method: "POST", headers, body: JSON.stringify({ paper_ids: [].concat(paperIds) }),
+            });
+        }
+        window.location.href = `/?collection=${data.id}&timeframe=all`;
+    }
+
     const BADGE_COLORS = {
         Author: "bg-accent-soft text-accent",
         Affiliation: "bg-accent-soft text-accent",

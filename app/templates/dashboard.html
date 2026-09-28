@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 
 {% block title %}Papers - ArXiv CV Scraper{% endblock %}
-{% block page_title %}{{ 'Saved' if current_filters.view == 'saved' else ('Collection' if current_filters.collection else 'Inbox') }}{% endblock %}
+{% set current_collection_name = shell.collections | selectattr('id', 'equalto', current_filters.collection) | map(attribute='name') | first %}
+{% block page_title %}{{ 'Saved' if current_filters.view == 'saved' else ((current_collection_name or 'Collection') if current_filters.collection else 'Inbox') }}{% endblock %}
 
 {# ── Match-type badge labels (one tinted chip per row) ── #}
 {% set BADGE = {
@@ -234,6 +235,16 @@
             Share
         </a>
     </div>
+    <div class="mt-2 px-2 flex gap-2">
+        <button id="collection-rename-btn" type="button"
+                class="flex-1 px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Rename
+        </button>
+        <button id="collection-delete-btn" type="button"
+                class="flex-1 px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Delete
+        </button>
+    </div>
 </div>
 <script>
 (function () {
@@ -296,6 +307,27 @@
         } catch (e) { /* non-fatal */ }
         button.disabled = false;
         button.textContent = "Suggest similar";
+    };
+
+    const collectionName = {{ (current_collection_name or '') | tojson }};
+    document.getElementById("collection-rename-btn").onclick = async function () {
+        const name = (prompt("Rename collection:", collectionName) || "").trim();
+        if (!name || name === collectionName) return;
+        const res = await fetch("/api/collections/" + collectionId, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+            body: JSON.stringify({ name }),
+        });
+        if (res.ok) window.location.reload();
+        else alert((await res.json().catch(() => ({}))).error || "Could not rename the collection.");
+    };
+    document.getElementById("collection-delete-btn").onclick = async function () {
+        if (!confirm(`Delete the collection "${collectionName}"? Its papers stay in your library.`)) return;
+        const res = await fetch("/api/collections/" + collectionId, {
+            method: "DELETE",
+            headers: { "X-CSRF-Token": getCsrfToken() },
+        });
+        if (res.ok) window.location.href = "/";
     };
 })();
 </script>
