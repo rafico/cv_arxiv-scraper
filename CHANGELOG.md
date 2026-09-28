@@ -33,8 +33,11 @@ Wave 5: collections as a literature-review workspace.
 - Imported papers are embedded right away (only the new ones, through the
   locked index path); bundles with more than 100 new papers leave it to
   `cv-arxiv-backfill embeddings`.
-- Saved-search digest alerts skip imported papers published long before the
-  last digest.
+- Digests (top papers, exploration slots and saved-search alerts) skip
+  imported papers published long before the digest window, so a seed or topic
+  import can't take over the email.
+- The `mcp` extra now needs `mcp>=1.3`, so the server can send its grounding
+  instructions (quote verbatim, cite arXiv ids, verify unknown ids).
 
 ### Fixed
 - Search inside a collection no longer drops members outside the global
@@ -42,6 +45,10 @@ Wave 5: collections as a literature-review workspace.
 - Follow author links to that author's papers instead of the plain inbox.
 - The sidebar "+" works on every page (the CSRF token is now injected
   shell-wide).
+- Profile bootstrap (and the new seed import) no longer stores arXiv's
+  "Error" entry as a paper when an id is malformed.
+- The MCP setup example points `CV_ARXIV_DATA_DIR` at a real data dir
+  (a source checkout's `instance/`).
 
 ## [0.6.0] — 2026-08-16
 

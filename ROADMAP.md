@@ -189,9 +189,19 @@ per scrape.
   cold 80/20 split per user.
 - One-time manual step: register the PyPI trusted publisher, then tag v0.5.0.
 
-## Wave 5 — literature review (September 2026, branch `feat/wave5-lit-review`, v0.7.0)
+## Wave 5 — Literature review (September 2026, branch `feat/wave5-lit-review`, v0.7.0)
 
-Turns collections into a working surface for a literature review:
+Method: a 28-agent read-only sweep — codebase mappers, an external scan (Elicit,
+Undermind, Asta/OpenScholar, PaperQA2, ResearchRabbit, Litmaps, Inciteful,
+ASReview, CoCites, S2/OpenAlex APIs), 4 ideation lenses (35 ideas → 16
+shortlisted), then one adversarial skeptic per idea checked against the code and
+the real DB.
+
+Core finding: a review couldn't be started in the UI (full collection CRUD in the
+backend, no template to create one) and older seed papers couldn't enter the
+3-month corpus. With 0 collections, 0 feedback and 0 saved searches in the real
+DB, the wave ships small and then measures. The app is the grounded source (scope
+→ seed → expand → read → export); synthesis happens in Claude Code over MCP.
 
 22. **Collection manager** ✅ — sidebar "+" (works with zero collections),
     rename/delete, remove-from-collection, bulk "Add to collection"; search
@@ -214,12 +224,45 @@ Deliberate ceilings (marked `ponytail:` in code): synchronous id import
 citation refresh per run, refreshed counts reach `paper_score` only on the
 next full rescore.
 
+### Owner actions (zero code)
+
+- **Register the MCP server** — `pip install '.[mcp]'` in the venv, then add
+  `cv-arxiv-mcp` to Claude Code/Desktop with `CV_ARXIV_DATA_DIR` pointing at
+  `instance/` (it has never run).
+- **Fill in the interest-profile description** — on its own this turns on
+  whitelist-free admission; the gate is inert while it is empty.
+- **Fix the digest recipient** — set one or disable digests (50 of 50 runs
+  failed with "No recipient configured").
+- **Optional: a Semantic Scholar API key** — unkeyed calls get 429s, which
+  starves the citation refresh and the Tier 2/3 S2 features below.
+
 ### Later: gated on evidence that collections get used
 
-Only if `select count(*) from paper_collections` is above 0 after 2-4 weeks:
-prior works (references cited by 2+ members), "Ask this collection" chat,
-paper-chat chunk cleanup; tier 3 (screening column, `near=` watch filter,
-matrix cells, S2 recommendations, outline.md) each only on a trigger.
+Checkpoint after 2-4 weeks:
+`sqlite3 'file:instance/arxiv_papers.db?mode=ro' "select count(*) from paper_collections"`.
+If it is still 0, stop — Tier 2 would have no users.
+
+Tier 2 (build in this order once collections are in use):
+
+- **Prior works** — references cited by 2+ members but missing from the
+  corpus, resolved with one S2 `/paper/batch` call; a button in "Expand this
+  collection". Needs item 26's refresh to keep `referenced_works` filled.
+- **Ask this collection** — corpus chat scoped by `collection_id` with exact
+  vector ranking and chunk excerpts; changes the documented saved-only contract.
+- **Paper-chat cleanup** — skip references/acknowledgments chunks and drop
+  quotes that don't appear verbatim (pays off once the LLM is on).
+
+Tier 3 (each only on its trigger):
+
+- **Screening decision column** — when collections regularly hold 50+
+  unscreened papers (e.g. after `--query` imports).
+- **`near=<collection>` watch filter** ("new similar this week") — when
+  collections are being revisited.
+- **Review-matrix LLM cells** — when the in-app LLM is actually on.
+- **S2 "outside your library" recommendations** — when collections are in use
+  and an S2 key is set.
+- **Related-work `outline.md`** — when `get_collection` over MCP proves
+  insufficient.
 
 ## Deliberately not doing
 
@@ -229,6 +272,17 @@ matrix cells, S2 recommendations, outline.md) each only on a trigger.
   here; a small labeled exploration quota suffices.
 - **Benchmark/SOTA tracking as a hard dependency** — post-PwC sources are fragile
   (CodeSOTA is a one-person project); revisit as a best-effort bet later.
+- **Auto-generated surveys** — synthesis belongs to the external agent
+  over MCP; the app stays the grounded source.
+- **In-app related-work writer** — mis-attribution risk from a small local model;
+  Claude Code over `get_collection`/`get_paper_text` does it better.
+- **Draft checker** ("consider citing" per sentence) — FTS AND-semantics return
+  nothing on real sentences, and a 3-month corpus makes a library audit misleading.
+- **Supporting/contrasting citation classifier** — cosine measures topic, not
+  stance, and it would dilute the "unverified" citation chip.
+- **PRISMA diagrams** — systematic-review reporting for a single-user exploratory
+  tool; the collection CSV already holds the screening record.
+- **Remote MCP endpoint** — it breaks the localhost, no-auth setup.
 
 ## Known technical debt (from the audit, for Wave 2 planning)
 
