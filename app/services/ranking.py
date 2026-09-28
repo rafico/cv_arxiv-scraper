@@ -355,9 +355,27 @@ def top_score_contributors(
     return top
 
 
+def score_paper(paper, *, config: dict | None, ranking_config=None) -> float:
+    """Score a stored Paper from its columns — the one Paper→compute_paper_score mapping."""
+    from app.services.implementation_readiness import implementation_readiness
+
+    return compute_paper_score(
+        match_types=paper.match_types,
+        matched_terms_count=len(paper.matched_terms_list),
+        publication_dt=paper.publication_dt,
+        resource_count=len(paper.resource_links_list),
+        llm_relevance_score=paper.llm_relevance_score,
+        citation_count=paper.citation_count,
+        acceptance_status=paper.acceptance_status,
+        interest_similarity=paper.interest_similarity,
+        readiness_score=implementation_readiness(paper).score,
+        config=config,
+        ranking_config=ranking_config,
+    )
+
+
 def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
     from app.models import Paper, db
-    from app.services.implementation_readiness import implementation_readiness
 
     updated = 0
     with app.app_context():
@@ -373,19 +391,7 @@ def recompute_all_paper_scores(app, *, batch_size: int = 500) -> int:
             if not papers:
                 break
             for paper in papers:
-                paper.paper_score = compute_paper_score(
-                    match_types=[part.strip() for part in (paper.match_type or "").split("+") if part.strip()],
-                    matched_terms_count=len(paper.matched_terms_list),
-                    publication_dt=paper.publication_dt,
-                    resource_count=len(paper.resource_links_list),
-                    llm_relevance_score=paper.llm_relevance_score,
-                    citation_count=paper.citation_count,
-                    acceptance_status=paper.acceptance_status,
-                    interest_similarity=paper.interest_similarity,
-                    readiness_score=implementation_readiness(paper).score,
-                    config=config,
-                    ranking_config=active_ranking_config,
-                )
+                paper.paper_score = score_paper(paper, config=config, ranking_config=active_ranking_config)
                 updated += 1
             db.session.commit()
             offset += batch_size

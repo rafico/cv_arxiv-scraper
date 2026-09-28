@@ -108,6 +108,28 @@ class BackfillCliTests(FlaskDBTestCase):
         )
         self.assertTrue(messages[-1].startswith("Citations batch"))
 
+    @patch("app.services.citations.fetch_citations_batch")
+    def test_backfill_rescore_keeps_readiness_bonus(self, mock_fetch):
+        from app.services.implementation_readiness import implementation_readiness
+        from app.services.ranking import recompute_all_paper_scores
+
+        paper = _paper("2601.00030")
+        paper.github_repo = "lab/model"
+        paper.github_stars = 500
+        db.session.add(paper)
+        db.session.commit()
+        mock_fetch.return_value = {"2601.00030": {"citation_count": 3}}
+
+        backfill_citations(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
+
+        stored = Paper.query.filter_by(arxiv_id="2601.00030").one()
+        self.assertGreater(implementation_readiness(stored).score, 0)
+        backfilled_score = stored.paper_score
+        # The canonical full recompute must agree — no readiness bonus dropped.
+        recompute_all_paper_scores(self.app)
+        db.session.expire_all()
+        self.assertEqual(Paper.query.filter_by(arxiv_id="2601.00030").one().paper_score, backfilled_score)
+
     @patch("app.services.openalex.fetch_openalex_batch")
     def test_backfill_openalex_updates_missing_papers(self, mock_fetch):
         db.session.add(_paper("2601.00002"))

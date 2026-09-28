@@ -36,19 +36,9 @@ def _positive_int(value: str) -> int:
 
 
 def _recompute_paper_score(paper: Paper, config: dict | None) -> float:
-    from app.services.ranking import compute_paper_score
+    from app.services.ranking import score_paper
 
-    paper.paper_score = compute_paper_score(
-        match_types=paper.match_types,
-        matched_terms_count=len(paper.matched_terms_list),
-        publication_dt=paper.publication_dt,
-        resource_count=len(paper.resource_links_list),
-        llm_relevance_score=paper.llm_relevance_score,
-        citation_count=paper.citation_count,
-        acceptance_status=paper.acceptance_status,
-        interest_similarity=paper.interest_similarity,
-        config=config,
-    )
+    paper.paper_score = score_paper(paper, config=config)
     return float(paper.paper_score or 0.0)
 
 
