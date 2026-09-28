@@ -239,7 +239,9 @@ class CollectionShareTests(FlaskDBTestCase):
 
         bad = {**payload, "s2_ids": {"1905.00001": "not-an-s2-id"}}
         self.assertEqual(self.client.post("/api/collections/import-ids", json=bad, headers=headers).status_code, 400)
-        with patch("app.services.onboarding.request_with_backoff", return_value=MagicMock(content=_ATOM_FEED)):
+        with patch(
+            "app.services.ingest.arxiv_api_backend.request_with_backoff", return_value=MagicMock(content=_ATOM_FEED)
+        ):
             res = self.client.post(
                 "/api/collections/import-ids",
                 json={**payload, "s2_ids": {"1905.00001": s2_new, "2601.00009": s2_local}},
