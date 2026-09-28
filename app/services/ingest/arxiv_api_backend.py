@@ -28,11 +28,18 @@ _ATOM_NS = {
 }
 
 
-def _build_query(categories: Sequence[str], start_dt: date, end_dt: date) -> str:
-    cat_query = " OR ".join(f"cat:{category}" for category in categories)
+def _build_query(categories: Sequence[str], start_dt: date, end_dt: date, query: str | None = None) -> str:
+    """AND an optional category filter, an optional raw arXiv search query and the date window."""
+    clauses = []
+    if categories:
+        cat_query = " OR ".join(f"cat:{category}" for category in categories)
+        clauses.append(f"({cat_query})")
+    if query:
+        clauses.append(f"({query})")
     from_ts = start_dt.strftime("%Y%m%d0000")
     to_ts = end_dt.strftime("%Y%m%d2359")
-    return f"({cat_query}) AND submittedDate:[{from_ts} TO {to_ts}]"
+    clauses.append(f"submittedDate:[{from_ts} TO {to_ts}]")
+    return " AND ".join(clauses)
 
 
 def _parse_atom_candidate(entry: ET.Element) -> PaperCandidate:
@@ -95,14 +102,15 @@ class ArxivApiBackend:
         resume_after_arxiv_id: str | None = None,
         progress_callback: ProgressCallback | None = None,
         user_agent: str | None = None,
+        query: str | None = None,
         **kwargs: Any,
     ) -> list[PaperCandidate]:
         del kwargs
 
-        if not categories or max_results <= 0:
+        if not (categories or query) or max_results <= 0:
             return []
 
-        query_str = _build_query(categories, start_dt, end_dt)
+        query_str = _build_query(categories, start_dt, end_dt, query)
         results: list[PaperCandidate] = []
         start = max(0, int(offset))
         resume_page = ((start // self.page_size) + 1) if resume_after_arxiv_id else None

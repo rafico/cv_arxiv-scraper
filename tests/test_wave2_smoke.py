@@ -7,7 +7,7 @@ their own test modules.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from flask import render_template
 
@@ -34,7 +34,7 @@ def _make_paper(**overrides) -> Paper:
         is_hidden=False,
         publication_date="2026-07-01",
         scraped_date="2026-07-01",
-        publication_dt=date(2026, 7, 1),
+        publication_dt=datetime.now(timezone.utc).date(),
         scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     defaults.update(overrides)

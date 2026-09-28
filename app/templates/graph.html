@@ -113,7 +113,7 @@
         network.on("doubleClick", function (params) {
             if (!params.nodes.length) return;
             const node = raw.nodes.find(function (n) { return n.id === params.nodes[0]; });
-            if (node) window.location = "/?timeframe=all&q=" + encodeURIComponent(node.title);
+            if (node) window.location = "/?ids=" + node.id;
         });
     }
 
@@ -143,8 +143,11 @@
     [yearMin, yearMax].forEach(function (el) { el.addEventListener("change", render); });
     hideIsolated.addEventListener("change", render);
 
-    loadCollections();
-    load();
+    loadCollections().then(function () {
+        const preset = new URLSearchParams(location.search).get("collection");
+        if (preset) collectionSelect.value = preset;
+        load();
+    });
 })();
 </script>
 {% endblock %}

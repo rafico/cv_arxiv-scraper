@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from flask import Flask
 
-from app.models import DigestRun, Paper, db
+from app.models import DigestRun, Paper, db, inbox_freshness_clause
 from app.services.ranking import combined_rank_score, rank_score_order_expr
 from app.services.secret_files import write_secret_file
 from app.services.text import now_utc, utc_today
@@ -860,7 +860,9 @@ def _query_exploration_papers(app: Flask, lookback_hours: int, exclude_ids: list
 
     cutoff = now_utc() - timedelta(hours=lookback_hours)
     with app.app_context():
-        query = Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
+        query = Paper.query.filter(
+            Paper.scraped_at >= cutoff, inbox_freshness_clause(cutoff), Paper.is_hidden.is_(False)
+        )
         if exclude_ids:
             query = query.filter(Paper.id.notin_(exclude_ids))
         return (
@@ -883,7 +885,11 @@ def _query_todays_papers(
     """Return papers scraped within the lookback window, ranked by score."""
     cutoff = now_utc() - timedelta(hours=lookback_hours)
     with app.app_context():
-        query = Paper.query.filter(Paper.scraped_at >= cutoff, Paper.is_hidden.is_(False))
+        # The freshness clause keeps seed/bundle imports and backfills (scraped now,
+        # published long ago) from taking over the digest.
+        query = Paper.query.filter(
+            Paper.scraped_at >= cutoff, inbox_freshness_clause(cutoff), Paper.is_hidden.is_(False)
+        )
         if min_score > 0:
             query = query.filter(rank_score_order_expr() >= min_score)
         query = query.order_by(

@@ -272,6 +272,32 @@
         } catch (error) { console.error("Collection add failed", error); }
     }
 
+    async function removeFromCollection(paperId, collectionId, button) {
+        try {
+            const response = await fetch(`/api/collections/${collectionId}/papers/${paperId}`, {
+                method: "DELETE",
+                headers: { "X-CSRF-Token": getCsrfToken() },
+            });
+            if (response.ok) button.closest('.paper-card').remove();
+        } catch (error) { console.error("Collection remove failed", error); }
+    }
+
+    // [id, name] pairs for the bulk bar's collection picker (tojson keeps names script-safe).
+    const BULK_COLLECTIONS = [{% for col in shell.collections %}[{{ col.id }}, {{ col.name | tojson }}],{% endfor %}];
+
+    async function bulkAddToCollection(value) {
+        const ids = Array.from(selectedPapers);
+        if (value === 'new') return newCollection(ids);
+        try {
+            const response = await fetch(`/api/collections/${value}/papers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+                body: JSON.stringify({ paper_ids: ids }),
+            });
+            if (response.ok) window.location.href = `/?collection=${value}&timeframe=all`;
+        } catch (error) { console.error('Bulk collection add failed', error); }
+    }
+
     /* ── Saved searches (serialized from the current URL params) ── */
     function promptSaveSearch() {
         const name = prompt("Name for this saved search:");
@@ -332,6 +358,19 @@
             <button onclick="bulkAction('skip')" class="px-3 py-1 text-xs rounded-lg bg-skip text-white hover:opacity-90">Skip All</button>
             <button onclick="bulkExportBibtex()" class="px-3 py-1 text-xs rounded-lg bg-surface-2 text-fg-muted hover:bg-edge">BibTeX</button>
         `;
+        // Built with Option() (not innerHTML) so collection names are never parsed as markup.
+        const picker = document.createElement('select');
+        picker.id = 'bulk-collection-select';
+        picker.className = 'px-2 py-1 text-xs rounded-lg bg-surface-2 text-fg-muted';
+        picker.add(new Option('Add to collection…', ''));
+        BULK_COLLECTIONS.forEach(([id, name]) => picker.add(new Option(name, id)));
+        picker.add(new Option('+ New collection…', 'new'));
+        picker.onchange = () => {
+            const value = picker.value;
+            picker.value = '';  // so re-picking after a cancelled prompt still fires
+            if (value) bulkAddToCollection(value);
+        };
+        bar.appendChild(picker);
     }
 
     async function bulkAction(action) {
@@ -441,7 +480,7 @@
             if (c.status === "verified") {
                 const chip = document.createElement("a");
                 chip.className = "badge bg-save-soft text-save hover:opacity-80";
-                chip.href = "/?q=" + encodeURIComponent(c.matched_title || c.ref || "");
+                chip.href = c.paper_id ? "/?ids=" + c.paper_id : "/?q=" + encodeURIComponent(c.matched_title || c.ref || "");
                 chip.title = "Found in your library — open it";
                 chip.textContent = "✓ " + label;
                 refsEl.appendChild(chip);

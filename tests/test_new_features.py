@@ -316,7 +316,7 @@ class BulkOperationsAPITests(FlaskDBTestCase, _CsrfMixin):
 
         response = self.client.get(f"/api/papers/bulk-bibtex?ids={p1.id}")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("@article{", response.get_data(as_text=True))
+        self.assertIn("@misc{", response.get_data(as_text=True))
 
 
 class AuthorSearchAPITests(FlaskDBTestCase):

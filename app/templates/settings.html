@@ -417,6 +417,7 @@
                     const data = await res.json();
                     bundleStatus.textContent = res.ok
                         ? 'Imported as "' + data.name + '": ' + data.created + " new papers, " + data.linked + " linked."
+                          + (data.embedded ? "" : " Run cv-arxiv-backfill embeddings to make the new papers searchable.")
                         : "Error: " + (data.error || "import failed");
                 } catch (e) { bundleStatus.textContent = "Error: request failed"; }
             });

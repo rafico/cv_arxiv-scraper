@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 
 {% block title %}Papers - ArXiv CV Scraper{% endblock %}
-{% block page_title %}{{ 'Saved' if current_filters.view == 'saved' else ('Collection' if current_filters.collection else 'Inbox') }}{% endblock %}
+{% set current_collection_name = shell.collections | selectattr('id', 'equalto', current_filters.collection) | map(attribute='name') | first %}
+{% block page_title %}{{ 'Saved' if current_filters.view == 'saved' else ((current_collection_name or 'Collection') if current_filters.collection else 'Inbox') }}{% endblock %}
 
 {# ── Match-type badge labels (one tinted chip per row) ── #}
 {% set BADGE = {
@@ -223,6 +224,17 @@
         </button>
     </div>
     <div id="collection-suggest-list" class="mt-2 px-2 space-y-2"></div>
+    <div class="mt-2 px-2">
+        <textarea id="collection-import-ids" rows="3" aria-label="Add by arXiv id, URL or .bib"
+                  class="input-base w-full text-xs font-mono"
+                  placeholder="Add by arXiv id / URL / .bib"></textarea>
+        <p class="mt-1 text-[11px] text-fg-subtle">arXiv ids only; venue-only .bib entries are skipped.</p>
+        <button id="collection-import-ids-btn" type="button"
+                class="mt-1 w-full px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Add papers
+        </button>
+        <p id="collection-import-ids-status" class="mt-1 text-[11px] text-fg-muted"></p>
+    </div>
     <div class="mt-2 px-2 flex gap-2">
         <a href="{{ url_for('api.export_bibtex', collection=current_filters.collection) }}"
            class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
@@ -233,6 +245,28 @@
            class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
             Share
         </a>
+    </div>
+    <div class="mt-2 px-2 flex gap-2">
+        <a href="{{ url_for('api.export_collection_csv', collection_id=current_filters.collection) }}"
+           title="Screening spreadsheet: one row per paper with venue, code, citations, your tags and notes"
+           class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Download CSV
+        </a>
+        <a id="collection-graph-link" href="{{ url_for('graph.index', collection=current_filters.collection) }}"
+           title="Citation graph of this collection"
+           class="flex-1 px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Graph
+        </a>
+    </div>
+    <div class="mt-2 px-2 flex gap-2">
+        <button id="collection-rename-btn" type="button"
+                class="flex-1 px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Rename
+        </button>
+        <button id="collection-delete-btn" type="button"
+                class="flex-1 px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Delete
+        </button>
     </div>
 </div>
 <script>
@@ -253,12 +287,12 @@
         } catch (e) { /* non-fatal */ }
     }
 
-    function render(results) {
+    function render(results, emptyText) {
         list.innerHTML = "";
         if (!results.length) {
             const empty = document.createElement("p");
             empty.className = "text-[11px] text-fg-subtle px-1";
-            empty.textContent = "No similar papers found yet — index more papers first.";
+            empty.textContent = emptyText || "No similar papers found yet — index more papers first.";
             list.append(empty);
             return;
         }
@@ -268,7 +302,7 @@
             const title = document.createElement("a");
             title.className = "text-xs font-medium text-fg line-clamp-2 hover:text-accent";
             title.textContent = p.title;
-            title.href = "/?view=all&q=" + encodeURIComponent(p.title);
+            title.href = "/?ids=" + p.id;
             const meta = document.createElement("div");
             meta.className = "mt-0.5 text-[11px] text-fg-muted line-clamp-1";
             meta.textContent = (p.authors || "") + " · " + Math.round((p.similarity_score || 0) * 100) + "% similar";
@@ -292,10 +326,64 @@
             if (res.ok) {
                 const data = await res.json();
                 render(data.results || []);
+            } else {
+                // 400 = no members to seed from (a new collection from the sidebar "+").
+                render([], res.status === 400
+                    ? "Add a paper to this collection first, then try Suggest similar."
+                    : "Couldn't load suggestions.");
             }
         } catch (e) { /* non-fatal */ }
         button.disabled = false;
         button.textContent = "Suggest similar";
+    };
+
+    const importBtn = document.getElementById("collection-import-ids-btn");
+    const importStatus = document.getElementById("collection-import-ids-status");
+    importBtn.onclick = async function () {
+        const text = document.getElementById("collection-import-ids").value.trim();
+        if (!text) { importStatus.textContent = "Paste at least one arXiv id."; return; }
+        importBtn.disabled = true;
+        importStatus.textContent = "Fetching from arXiv…";
+        try {
+            const res = await fetch("/api/collections/import-ids", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                body: JSON.stringify({ name: String(collectionId), text }),
+            });
+            const data = await res.json();
+            if (!res.ok) { importStatus.textContent = "Error: " + (data.error || "import failed"); return; }
+            const missed = data.not_found.length ? " Not found: " + data.not_found.join(", ") + "." : "";
+            const hidden = data.hidden.length
+                ? " Hidden (skipped earlier), un-skip to see them here: " + data.hidden.join(", ") + "." : "";
+            importStatus.textContent = data.created + " new, " + data.linked + " already in library." + missed + hidden;
+            if (!data.not_found.length && !data.hidden.length) window.location.reload();
+        } catch (e) {
+            importStatus.textContent = "Error: request failed";
+        } finally {
+            importBtn.disabled = false;
+        }
+    };
+
+    const collectionName = {{ (current_collection_name or '') | tojson }};
+    document.getElementById("collection-rename-btn").onclick = async function () {
+        const name = (prompt("Rename collection:", collectionName) || "").trim();
+        if (!name || name === collectionName) return;
+        const res = await fetch("/api/collections/" + collectionId, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+            body: JSON.stringify({ name }),
+        });
+        if (res.ok) window.location.reload();
+        else alert((await res.json().catch(() => ({}))).error || "Could not rename the collection.");
+    };
+    document.getElementById("collection-delete-btn").onclick = async function () {
+        if (!confirm(`Delete the collection "${collectionName}"? Its papers stay in your library.`)) return;
+        const res = await fetch("/api/collections/" + collectionId, {
+            method: "DELETE",
+            headers: { "X-CSRF-Token": getCsrfToken() },
+        });
+        if (res.ok) window.location.href = "/";
+        else alert((await res.json().catch(() => ({}))).error || "Could not delete the collection.");
     };
 })();
 </script>

@@ -25,7 +25,7 @@
                 </tr>
                 <tr>
                     <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-sync</code></td>
-                    <td class="px-6 py-3 text-sm text-fg-muted">Historical sync for backfilling older papers. Flags: <code>--from</code>, <code>--to</code>, <code>--category</code>, <code>--chunk-days</code></td>
+                    <td class="px-6 py-3 text-sm text-fg-muted">Historical sync for backfilling older papers. Flags: <code>--from</code>, <code>--to</code>, <code>--category</code>, <code>--chunk-days</code>. Or <code>--query</code> + <code>--collection</code> (optional <code>--max-results</code>, default 1000) to import an arXiv search into a collection</td>
                 </tr>
                 <tr>
                     <td class="px-6 py-3 text-sm font-medium"><code>cv-arxiv-backfill</code></td>
@@ -54,12 +54,12 @@
   "mcpServers": {
     "cv-arxiv": {
       "command": "cv-arxiv-mcp",
-      "env": { "CV_ARXIV_DATA_DIR": "~/.local/share/cv-arxiv" }
+      "env": { "CV_ARXIV_DATA_DIR": "/path/to/cv_arxiv-scraper/instance" }
     }
   }
 }</code></pre>
     </div>
-    <p class="text-sm text-fg-muted mt-4">Point <code>CV_ARXIV_DATA_DIR</code> at the directory holding your database, FAISS index, and <code>config.yaml</code> (the same one <code>cv-arxiv serve --data-dir</code> uses). Restart Claude Desktop and the tools appear: <code>search_papers</code>, <code>get_paper</code>, <code>get_summary</code>, <code>top_ranked_today</code>, <code>list_collections</code>, <code>ask_paper</code>, and <code>add_to_collection</code>. The <code>mcp</code> package is optional &mdash; the app and web server run without it.</p>
+    <p class="text-sm text-fg-muted mt-4">Point <code>CV_ARXIV_DATA_DIR</code> at the directory holding your database, FAISS index, and <code>config.yaml</code>: a source checkout's absolute <code>instance/</code> path, or <code>~/.local/share/cv-arxiv</code> for a default <code>cv-arxiv serve</code>. A path with no database silently starts a fresh, empty corpus. Restart Claude Desktop and the tools appear: <code>search_papers</code>, <code>get_paper</code>, <code>get_summary</code>, <code>top_ranked_today</code>, <code>list_collections</code>, <code>get_collection</code>, <code>get_paper_text</code>, <code>ask_paper</code>, and <code>add_to_collection</code>. The <code>mcp</code> package is optional &mdash; the app and web server run without it.</p>
 </section>
 
 <!-- Backfills -->

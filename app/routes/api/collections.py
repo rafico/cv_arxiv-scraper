@@ -1,6 +1,6 @@
 """Collections CRUD and membership endpoints."""
 
-from flask import abort, jsonify, request
+from flask import Response, abort, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.csrf import validate_csrf_token
@@ -98,7 +98,79 @@ def export_collection_bundle(collection_id: int):
     return response
 
 
+_CSV_COLUMNS = (
+    "arxiv_id",
+    "title",
+    "first_author",
+    "year",
+    "venue",
+    "acceptance_status",
+    "github_repo",
+    "github_stars",
+    "citation_count",
+    "readiness",
+    "user_tags",
+    "user_notes",
+    "reading_status",
+    "link",
+)
+
+
+def _csv_cell(value):
+    # Titles/notes are untrusted text: a spreadsheet evaluates a cell starting with
+    # = + - @ (or tab/CR) as a formula, so prefix an apostrophe to keep it literal.
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + value
+    return value
+
+
+@api_bp.route("/collections/<int:collection_id>/table.csv", methods=["GET"])
+def export_collection_csv(collection_id: int):
+    """One row per paper: the screening/extraction spreadsheet for a review."""
+    import csv
+    import io
+
+    from app.services.implementation_readiness import implementation_readiness
+    from app.services.preferences import first_author_name
+
+    db.session.get(Collection, collection_id) or abort(404)
+    papers = (
+        Paper.query.join(PaperCollection, PaperCollection.paper_id == Paper.id)
+        .filter(PaperCollection.collection_id == collection_id, Paper.is_hidden.is_(False))
+        .order_by(Paper.id)
+        .all()
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_CSV_COLUMNS)
+    for p in papers:
+        row = (
+            p.arxiv_id,
+            p.title,
+            first_author_name(p.authors),
+            p.publication_dt.year if p.publication_dt else None,
+            p.venue,
+            p.acceptance_status,
+            p.github_repo,
+            p.github_stars,
+            p.citation_count if p.citation_count is not None else p.openalex_cited_by_count,
+            implementation_readiness(p).tier,
+            "; ".join(p.user_tags_list),
+            p.user_notes,
+            p.reading_status,
+            p.link,
+        )
+        writer.writerow([_csv_cell(v) for v in row])
+    response = Response(buf.getvalue(), mimetype="text/csv")
+    response.headers["Content-Disposition"] = f'attachment; filename="collection-{collection_id}.csv"'
+    return response
+
+
 _MAX_BUNDLE_UPLOAD_BYTES = 64 * 1024 * 1024
+# ponytail: the arXiv fetch and CPU embedding run synchronously on the single
+# worker, so seeds are capped and bigger bundles skip embedding (left to
+# cv-arxiv-backfill embeddings); a background job if reviews need bigger seeds.
+_MAX_IMPORT_IDS = 100
 
 
 @api_bp.route("/collections/import", methods=["POST"])
@@ -109,10 +181,61 @@ def import_collection_bundle():
     request.max_content_length = _MAX_BUNDLE_UPLOAD_BYTES
     manifest = request.get_json(silent=True)
     try:
-        collection, stats = import_collection(manifest)
+        collection, stats = import_collection(manifest, embed_max=_MAX_IMPORT_IDS)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"id": collection.id, "name": collection.name, **stats}), 201
+
+
+@api_bp.route("/collections/import-ids", methods=["POST"])
+def import_collection_ids():
+    """Seed a collection from arXiv ids/URLs/.bib text pasted as ``text``.
+
+    ``name`` is a collection name (created on miss) or a numeric id. Unlike the
+    onboarding bootstrap, no feedback rows are written, so the ranker is untouched.
+    """
+    from app.services.collection_share import BUNDLE_VERSION, arxiv_bundle_entry, import_collection
+    from app.services.mcp_tools import _resolve_or_create_collection
+    from app.services.onboarding import extract_arxiv_ids, fetch_arxiv_metadata
+
+    validate_csrf_token()
+    payload = request.get_json(silent=True) or {}
+    name = require_str(payload, "name")
+    ids = extract_arxiv_ids(require_str(payload, "text"))
+    if not ids:
+        return jsonify({"error": "No arXiv ids found"}), 400
+    if len(ids) > _MAX_IMPORT_IDS:
+        return jsonify({"error": f"Too many arXiv ids (max {_MAX_IMPORT_IDS})"}), 400
+    collection, _created = _resolve_or_create_collection(name)
+    if collection is None:
+        abort(404)
+
+    local = {p.arxiv_id: p for p in Paper.query.filter(Paper.arxiv_id.in_(ids))}
+    # Hidden papers link but stay out of the collection view/.bib/MCP; report them.
+    hidden = [aid for aid, p in local.items() if p.is_hidden]
+    missing = [aid for aid in ids if aid not in local]
+    try:
+        fetched = fetch_arxiv_metadata(missing) if missing else []
+    except Exception:
+        return jsonify({"error": "arXiv fetch failed; try again later"}), 502
+    papers = [{"arxiv_id": p.arxiv_id, "title": p.title, "link": p.link} for p in local.values()]
+    papers += [
+        arxiv_bundle_entry(
+            e["arxiv_id"], e["title"], e["authors"], e["abstract"], e["publication_date"], e["categories"]
+        )
+        for e in fetched
+    ]
+    manifest = {"bundle_version": BUNDLE_VERSION, "collection": {"name": collection.name}, "papers": papers}
+    _collection, stats = import_collection(manifest, into=collection)
+    found = {entry["arxiv_id"] for entry in papers}
+    return jsonify(
+        {
+            "collection_id": collection.id,
+            **stats,
+            "not_found": [aid for aid in ids if aid not in found],
+            "hidden": hidden,
+        }
+    )
 
 
 @api_bp.route("/collections/<int:collection_id>/papers", methods=["POST"])

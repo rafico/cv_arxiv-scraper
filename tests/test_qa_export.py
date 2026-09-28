@@ -52,7 +52,7 @@ class BibtexFieldCompletenessTests(FlaskDBTestCase):
         db.session.commit()
 
         bib = paper_to_bibtex(paper)
-        self.assertIn("@article{", bib)
+        self.assertIn("@misc{", bib)
         self.assertIn("author = {", bib)
         self.assertIn("title = {", bib)
         self.assertIn("year = {", bib)
@@ -97,7 +97,7 @@ class BibtexEndpointTests(FlaskDBTestCase):
 
         response = self.client.get(f"/api/papers/{p.id}/bibtex")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("@article{", response.get_data(as_text=True))
+        self.assertIn("@misc{", response.get_data(as_text=True))
 
     def test_bulk_bibtex_endpoint(self):
         p1 = _make_paper(0)
@@ -108,7 +108,7 @@ class BibtexEndpointTests(FlaskDBTestCase):
         response = self.client.get(f"/api/papers/bulk-bibtex?ids={p1.id},{p2.id}")
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
-        self.assertEqual(text.count("@article{"), 2)
+        self.assertEqual(text.count("@misc{"), 2)
 
     def test_bibtex_export_all_timeframe(self):
         p = _make_paper(0)
@@ -118,7 +118,7 @@ class BibtexEndpointTests(FlaskDBTestCase):
         response = self.client.get("/api/export/bibtex?timeframe=all")
         self.assertEqual(response.status_code, 200)
         self.assertIn("application/x-bibtex", response.content_type)
-        self.assertIn("@article{", response.get_data(as_text=True))
+        self.assertIn("@misc{", response.get_data(as_text=True))
 
     def test_bibtex_export_saved_view(self):
         p1 = _make_paper(0, title="Saved Export")

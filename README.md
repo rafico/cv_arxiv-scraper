@@ -186,9 +186,9 @@ opening the PDF:
 | **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · learned interest profile · per-paper "why it ranked" explanations + optional inline score-factor bars · optional AI relevance scoring |
 | **Chat & cold-start** | Chat with your saved papers (grounded, cited RAG answers) · seed your profile from a pasted list of arXiv IDs · active-learning prompts surface borderline papers to sharpen ranking |
 | **Summaries** | Extractive TL;DR with no API needed · optional AI TL;DR + structured insights when an LLM is enabled |
-| **Organization** | Save / skip / prioritize / share to train rankings · collections · custom tags · notes · reading status · saved searches |
+| **Organization** | Save / skip / prioritize / share to train rankings · collections (create, rename, bulk add) seeded from pasted arXiv ids/URLs/.bib or an arXiv search · custom tags · notes · reading status · saved searches |
 | **Citation graph** | Your library as a force-directed network of real citation edges (Semantic Scholar + OpenAlex reference lists) · node size = PageRank influence within your corpus · color by year · collection & year filters |
-| **Export & sync** | BibTeX (single, bulk, or per collection) · shareable collection bundles (plain JSON — import on another instance without duplicating papers) · Mendeley · Zotero · HTML report · daily Gmail digest · one-click full backup & restore (DB + search index + config) |
+| **Export & sync** | BibTeX (single, bulk, or per collection; `@misc` preprint, or `@inproceedings`/`@article` once accepted) · per-collection CSV screening spreadsheet · shareable collection bundles (plain JSON — import on another instance without duplicating papers) · Mendeley · Zotero · HTML report · daily Gmail digest · one-click full backup & restore (DB + search index + config) |
 | **Enrichment** | Citation counts (Semantic Scholar, OpenAlex) · topic classifications & open-access status · GitHub repo stars/license · PDF thumbnails · related-paper recommendations · corpus analytics (clusters & emerging trends) |
 
 ---
@@ -202,7 +202,7 @@ After `pip install -e .`:
 | `cv-arxiv serve` | Launch the web server against one `--data-dir` (also `cv-arxiv --version`) |
 | `cv-arxiv-scrape` | One-shot scrape, prints matches to terminal |
 | `cv-arxiv-digest` | Send email digest (`--dry-run`, `--send-only`) |
-| `cv-arxiv-sync` | Historical sync (`--from`, `--to`, `--category`) |
+| `cv-arxiv-sync` | Historical sync (`--from`, `--to`, `--category`), or `--query` + `--collection` to import an arXiv search into a collection |
 | `cv-arxiv-backfill` | Enrichment backfills (`embeddings`, `citations`, `citation-edges`, `openalex`, `thumbnails`, `all`) |
 
 Standalone scripts (`python scrape_cli.py`, `python export_cli.py`, etc.) also work without
@@ -219,7 +219,7 @@ Full REST API at `/api/`. Key endpoints:
 | Scraping | `POST /api/scrape`, `GET /api/scrape/stream` |
 | Search | `GET /api/search?q=...&mode=hybrid` |
 | Papers | `/api/papers/<id>/feedback`, `explain`, `notes`, `tags`, `bibtex` |
-| Collections | `GET/POST /api/collections`, manage papers in collections, `GET .../export` + `POST /api/collections/import` bundles |
+| Collections | `GET/POST /api/collections`, manage papers in collections, `GET .../export` + `POST /api/collections/import` bundles, `POST /api/collections/import-ids` (seed from arXiv ids/URLs/.bib), `GET .../table.csv` |
 | Citation graph | `GET /api/graph?collection=<id>` — nodes with PageRank + citation edges |
 | Saved searches | `GET/POST /api/saved-searches`, `POST .../run` |
 | Corpus | `/api/corpus/clusters`, `emerging`, `neighbors`, `POST /api/corpus/chat` |
@@ -254,14 +254,16 @@ Edit Config):
   "mcpServers": {
     "cv-arxiv": {
       "command": "cv-arxiv-mcp",
-      "env": { "CV_ARXIV_DATA_DIR": "~/.local/share/cv-arxiv" }
+      "env": { "CV_ARXIV_DATA_DIR": "/path/to/cv_arxiv-scraper/instance" }
     }
   }
 }
 ```
 
 Point `CV_ARXIV_DATA_DIR` at the directory that holds your `arxiv_papers.db`,
-vector index, and `config.yaml` (the same dir `cv-arxiv serve --data-dir` uses).
+vector index, and `config.yaml`: a source checkout's absolute `instance/` path (as
+above), or `~/.local/share/cv-arxiv` if you run `cv-arxiv serve` with its default
+data dir. A path with no DB in it silently starts a fresh, empty corpus.
 Restart Claude Desktop and the tools appear:
 
 | Tool | What it does |
@@ -272,6 +274,8 @@ Restart Claude Desktop and the tools appear:
 | `top_ranked_today` | Today's top-ranked fresh papers (optional interest-profile lens) |
 | `list_collections` | Your collections and their paper counts |
 | `ask_paper` | Grounded Q&A over one paper's own text, with section citations |
+| `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes (paged) |
+| `get_paper_text` | A paper's section table of contents + abstract, then any section's verbatim text (paged) |
 | `add_to_collection` | The one write tool — file a paper into a collection (idempotent) |
 
 The `mcp` package is an **optional extra**: the core install and web server work

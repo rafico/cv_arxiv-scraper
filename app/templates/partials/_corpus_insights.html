@@ -79,7 +79,9 @@
             if (samples.length) {
                 const titles = el("div", "mt-2 space-y-1");
                 samples.forEach(function (paper) {
-                    titles.appendChild(el("div", "text-xs text-fg-muted truncate", "• " + (paper.title || "Untitled")));
+                    const link = el("a", "block text-xs text-fg-muted truncate hover:text-accent", "• " + (paper.title || "Untitled"));
+                    link.href = "/?ids=" + paper.id;
+                    titles.appendChild(link);
                 });
                 card.appendChild(titles);
             }

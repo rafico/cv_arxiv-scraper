@@ -46,6 +46,22 @@ _ARXIV_API_BASE_DELAY = 2.0
 _NEW_ID_RE = re.compile(r"(\d{4}\.\d{4,5})")
 _OLD_ID_RE = re.compile(r"([a-z][a-z\-]*)(?:\.[a-z][a-z\-]*)?/(\d{7})", re.IGNORECASE)
 
+# Finds ids inside free text (a pasted list, URLs, a .bib). New-scheme ids need a
+# real month (YYMM) and no digit/"digit." before them, so DOIs such as
+# 10.1109/TPAMI.2019.2929257 don't match. Legacy ids must name one of arXiv's
+# fixed pre-2007 archives and, when bare, not follow a path/DOI character, since
+# "word/1234567" is too common.
+_LEGACY_ARCHIVES = (
+    "acc-phys|adap-org|alg-geom|ao-sci|astro-ph|atom-ph|bayes-an|chao-dyn|chem-ph|cmp-lg|comp-gas|cond-mat|cs"
+    "|dg-ga|funct-an|gr-qc|hep-ex|hep-lat|hep-ph|hep-th|math|math-ph|mtrl-th|nlin|nucl-ex|nucl-th|patt-sol"
+    "|physics|plasm-ph|q-alg|q-bio|quant-ph|solv-int|supr-con"
+)
+_TEXT_ID_RE = re.compile(
+    r"(?<!\d)(?<!\d\.)(\d{2}(?:0[1-9]|1[0-2])\.\d{4,5})(?!\d)"
+    rf"|(?:arxiv:|arxiv\.org/(?:abs|pdf)/|(?<![\w/.-]))((?:{_LEGACY_ARCHIVES})(?:\.[a-z][a-z\-]*)?/\d{{7}})(?!\d)",
+    re.IGNORECASE,
+)
+
 
 def normalize_arxiv_id(raw: str) -> str | None:
     """Normalize a raw arXiv reference to a canonical id (no version/URL/prefix).
@@ -74,6 +90,18 @@ def normalize_arxiv_id(raw: str) -> str | None:
     if old_match:
         return f"{old_match.group(1).lower()}/{old_match.group(2)}"
     return None
+
+
+def extract_arxiv_ids(text: str) -> list[str]:
+    """Canonical arXiv ids found anywhere in ``text``, deduped in first-seen order.
+
+    ponytail: a DOI suffix such as ``2012.01234`` (year 2012 reads as a valid
+    YYMM) can still false-match, and .bib entries without an arXiv id
+    (venue-only) are skipped rather than resolved; add a DOI/title lookup if
+    seeds need them.
+    """
+    ids = (normalize_arxiv_id(new or old) for new, old in _TEXT_ID_RE.findall(text or ""))
+    return list(dict.fromkeys(aid for aid in ids if aid))
 
 
 def _build_embed_text(title: str, abstract: str) -> str:
@@ -107,6 +135,9 @@ def fetch_arxiv_metadata(arxiv_ids: list[str]) -> list[dict]:
     entries: list[dict] = []
     for entry in feed.entries:
         link = getattr(entry, "id", "") or getattr(entry, "link", "")
+        if "/api/errors" in link:
+            # A malformed id comes back as an "Error" entry, not a paper.
+            continue
         arxiv_id = normalize_arxiv_id(link) or normalize_arxiv_id(getattr(entry, "title", ""))
         if not arxiv_id:
             continue

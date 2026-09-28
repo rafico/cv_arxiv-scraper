@@ -4,7 +4,7 @@
 <!-- BibTeX -->
 <section id="bibtex" class="scroll-mt-6">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">BibTeX Export</h2>
-    <p class="text-sm text-fg-muted mb-4">Use BibTeX export when you want citation entries immediately, without setting up a reference-manager sync.</p>
+    <p class="text-sm text-fg-muted mb-4">Use BibTeX export when you want citation entries immediately, without setting up a reference-manager sync. Entries are <code>@misc</code> arXiv preprints, or <code>@inproceedings</code>/<code>@article</code> once an accepted venue is detected; cite keys never change.</p>
     <div class="grid gap-4 md:grid-cols-2">
         <div class="rounded-xl bg-surface-2 p-5 border border-edge">
             <h3 class="text-sm font-bold text-fg mb-2">Single paper</h3>
@@ -16,7 +16,7 @@
         </div>
         <div class="rounded-xl bg-surface-2 p-5 border border-edge">
             <h3 class="text-sm font-bold text-fg mb-2">Per collection</h3>
-            <p class="text-sm text-fg-muted">Open a collection and click <strong>Export .bib</strong> in the sidebar to download exactly that collection&rsquo;s papers &mdash; a ready-made bibliography for the paper you&rsquo;re writing. Also via <code>GET /api/export/bibtex?collection=&lt;id&gt;</code>.</p>
+            <p class="text-sm text-fg-muted">Open a collection and click <strong>Export .bib</strong> in the sidebar to download exactly that collection&rsquo;s papers &mdash; a ready-made bibliography for the paper you&rsquo;re writing. Also via <code>GET /api/export/bibtex?collection=&lt;id&gt;</code>. <strong>Download CSV</strong> gives the collection as a screening spreadsheet (venue, code, citations, your tags and notes).</p>
         </div>
     </div>
 </section>

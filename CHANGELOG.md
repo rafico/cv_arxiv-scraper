@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/), and the project aims to
 follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-09-28
+
+Wave 5: collections as a literature-review workspace.
+
+### Added
+- **Collection manager**: a sidebar "+" (also with zero collections),
+  rename/delete, remove-from-collection on cards, and a bulk "Add to
+  collection" picker.
+- **Seed a collection** from pasted arXiv ids, URLs or a .bib
+  (`POST /api/collections/import-ids`, up to 100 ids; old-scheme ids such as
+  `hep-th/9901001` included). Hidden papers are reported, not silently linked
+  out of sight. No feedback rows are written, so the ranker is untouched.
+- **`cv-arxiv-sync --query ... --collection NAME [--max-results 1000]`**
+  imports an arXiv search into a collection without touching sync state.
+- **Collection CSV** (`GET /api/collections/<id>/table.csv`): a screening
+  spreadsheet with venue, code, citations, readiness, tags and notes.
+- **MCP tools** `get_collection` and `get_paper_text` (requires `mcp>=1.3`).
+- **Paper permalinks** via `/?ids=1,2`, used by the graph, suggestions and
+  citation chips.
+- **Stale citation refresh**: the daily scrape re-fetches Semantic Scholar
+  counts and references older than 7 days.
+
+### Changed
+- BibTeX entries are `@misc` arXiv preprints (eprint, primaryclass, arXiv
+  DOI), or `@inproceedings`/`@article` once an accepted venue is detected;
+  cite keys are unchanged. Private notes and tags are never written to the .bib.
+- Imported papers are embedded right away (only the new ones, through the
+  locked index path); bundles with more than 100 new papers leave it to
+  `cv-arxiv-backfill embeddings`.
+- Digests (top papers, exploration slots and saved-search alerts) skip
+  imported papers published long before the digest window, so a seed or topic
+  import can't take over the email.
+- The `mcp` extra now needs `mcp>=1.3`, so the server can send its grounding
+  instructions (quote verbatim, cite arXiv ids, verify unknown ids).
+
+### Fixed
+- Search inside a collection no longer drops members outside the global
+  top-100 hits.
+- Follow author links to that author's papers instead of the plain inbox.
+- The sidebar "+" works on every page (the CSRF token is now injected
+  shell-wide).
+- Profile bootstrap (and the new seed import) no longer stores arXiv's
+  "Error" entry as a paper when an id is malformed.
+- The MCP setup example points `CV_ARXIV_DATA_DIR` at a real data dir
+  (a source checkout's `instance/`).
+
 ## [0.6.0] — 2026-08-16
 
 Research-library features adopted from studying

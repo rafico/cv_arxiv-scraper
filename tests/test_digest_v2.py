@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -42,7 +42,7 @@ def _make_paper(**overrides) -> Paper:
         is_hidden=False,
         publication_date="2026-07-01",
         scraped_date="2026-07-01",
-        publication_dt=date(2026, 7, 1),
+        publication_dt=datetime.now(timezone.utc).date(),
         scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     defaults.update(overrides)
@@ -462,6 +462,25 @@ class NotifyOnMatchTests(FlaskDBTestCase):
                 link="https://arxiv.org/abs/2607.50004",
                 paper_score=0.0,
                 scraped_at=now_utc() - timedelta(days=2),
+            )
+        )
+        db.session.commit()
+
+        preview = build_digest_preview(self.app)
+        self.assertEqual(preview["alerts"], [])
+
+    def test_imported_old_papers_are_not_alerted_as_new(self):
+        # Imports (import-ids, sync --query) get scraped_at=now whatever their age.
+        db.session.add(
+            SavedSearch(name="Tracking watch", include_keywords=["Tracking"], notify_on_match=True, is_active=True)
+        )
+        db.session.add(
+            _make_paper(
+                title="Tracking Classic",
+                link="https://arxiv.org/abs/1603.00001",
+                paper_score=0.0,
+                publication_dt=datetime(2016, 3, 1).date(),
+                match_type="import",
             )
         )
         db.session.commit()

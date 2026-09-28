@@ -446,8 +446,14 @@ def index():
         view = "inbox"
 
     collection_id = request.args.get("collection", type=int)
+    # Permalink (?ids=1,2): exact papers whatever their age, mutes or hidden state.
+    # Lenient: junk is dropped, and >18 digits would overflow SQLite INTEGER (a 500).
+    raw_ids = (x.strip() for x in request.args.get("ids", "").split(","))
+    paper_ids = [int(x) for x in raw_ids if x.isdecimal() and len(x) <= 18]
 
     query = Paper.query
+    if paper_ids:
+        query = query.filter(Paper.id.in_(paper_ids))
     if collection_id:
         query = query.join(
             PaperCollection,
@@ -458,13 +464,13 @@ def index():
             PaperFeedback,
             db.and_(PaperFeedback.paper_id == Paper.id, PaperFeedback.action == FeedbackAction.SAVE.value),
         )
-    query = _apply_muted_filters(query, config, active=view != "saved" and not collection_id)
+    query = _apply_muted_filters(query, config, active=view != "saved" and not collection_id and not paper_ids)
 
     include_hidden = request.args.get("include_hidden") == "1"
-    if not include_hidden:
+    if not include_hidden and not paper_ids:
         query = query.filter(Paper.is_hidden.is_(False))
 
-    default_timeframe = "all" if view == "saved" else "daily"
+    default_timeframe = "all" if view == "saved" or paper_ids else "daily"
     timeframe = request.args.get("timeframe", default_timeframe)
     if timeframe not in TIMEFRAME_DAYS:
         timeframe = default_timeframe
@@ -476,8 +482,8 @@ def index():
 
     q = request.args.get("q", "").strip()
     search_mode = request.args.get("search_mode", "hybrid").strip()
-    hybrid_search_used = False
     if q:
+        hybrid_ids: list[int] = []
         # Try hybrid/semantic search when available
         if search_mode in ("hybrid", "semantic"):
             try:
@@ -489,27 +495,28 @@ def index():
                 else:
                     hybrid_results = search_hybrid(q, top_k=100)
                     hybrid_ids = [r["paper_id"] for r in hybrid_results]
-
-                if hybrid_ids:
-                    query = query.filter(Paper.id.in_(hybrid_ids))
-                    hybrid_search_used = True
             except Exception:
                 pass
 
-        if not hybrid_search_used:
-            escaped_q = _escape_like_term(q)
-            search = f"%{escaped_q}%"
-            query = query.filter(
-                db.or_(
-                    Paper.title.ilike(search, escape="\\"),
-                    Paper.authors.ilike(search, escape="\\"),
-                    Paper.abstract_text.ilike(search, escape="\\"),
-                    db.cast(Paper.matched_terms, db.Text).ilike(search, escape="\\"),
-                    Paper.summary_text.ilike(search, escape="\\"),
-                    db.cast(Paper.topic_tags, db.Text).ilike(search, escape="\\"),
-                    db.cast(Paper.user_tags, db.Text).ilike(search, escape="\\"),
-                )
-            )
+        search = f"%{_escape_like_term(q)}%"
+        like_clause = db.or_(
+            Paper.title.ilike(search, escape="\\"),
+            Paper.authors.ilike(search, escape="\\"),
+            Paper.abstract_text.ilike(search, escape="\\"),
+            db.cast(Paper.matched_terms, db.Text).ilike(search, escape="\\"),
+            Paper.summary_text.ilike(search, escape="\\"),
+            db.cast(Paper.topic_tags, db.Text).ilike(search, escape="\\"),
+            db.cast(Paper.user_tags, db.Text).ilike(search, escape="\\"),
+        )
+        if not hybrid_ids:
+            query = query.filter(like_clause)
+        elif collection_id or view == "saved":
+            # The ranked ids are the corpus-wide top 100, so inside a collection or the
+            # saved view members ranked below that cut would silently vanish; keep
+            # their keyword hits too.
+            query = query.filter(db.or_(Paper.id.in_(hybrid_ids), like_clause))
+        else:
+            query = query.filter(Paper.id.in_(hybrid_ids))
 
     reading_status = request.args.get("reading_status", "").strip()
     if reading_status:

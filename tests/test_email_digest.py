@@ -13,6 +13,7 @@ from app.models import Paper, db
 from app.services.email_digest import (
     _build_email_body,
     _get_email_config,
+    _query_exploration_papers,
     _query_todays_papers,
     _render_paper_html,
 )
@@ -37,7 +38,7 @@ def _make_paper(**overrides) -> Paper:
         is_hidden=False,
         publication_date="2026-03-13",
         scraped_date="2026-03-13",
-        publication_dt=date(2026, 3, 13),
+        publication_dt=datetime.now(timezone.utc).date(),
         scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     defaults.update(overrides)
@@ -116,6 +117,14 @@ class QueryTodaysPapersTests(FlaskDBTestCase):
         papers = _query_todays_papers(self.app)
         titles = [paper.title for paper in papers]
         self.assertLess(titles.index("Boosted"), titles.index("Unboosted"))
+
+    def test_old_papers_imported_today_stay_out_of_the_digest(self):
+        # A seeded/bundle import or backfill arrives now but was published long ago.
+        db.session.add(_make_paper(title="Seed", publication_dt=date(2019, 5, 1), match_type="import"))
+        db.session.commit()
+
+        self.assertEqual(_query_todays_papers(self.app), [])
+        self.assertEqual(_query_exploration_papers(self.app, 24, [], 5), [])
 
 
 class GetEmailConfigTests(FlaskDBTestCase):

@@ -153,7 +153,6 @@
 
 {# ── Footer links ── #}
 <div class="pt-3 border-t border-edge flex items-center gap-2">
-    {% if shell.collections %}
     <div class="relative" data-collection-dropdown>
         <button type="button" onclick="toggleCollectionDropdown(this)"
                 class="btn-ghost px-2 py-1.5 text-xs">
@@ -164,9 +163,15 @@
             <button type="button" onclick="togglePaperCollection({{ paper.id }}, {{ col.id }}, this)"
                     class="block w-full text-left px-3 py-1.5 text-xs text-fg-muted hover:bg-surface-2">{{ col.name }}</button>
             {% endfor %}
+            <button type="button" onclick="newCollection({{ paper.id }})"
+                    class="block w-full text-left px-3 py-1.5 text-xs text-fg-muted hover:bg-surface-2">+ New collection…</button>
+            {% if current_filters is defined and current_filters.collection %}
+            <button type="button" data-remove-from-collection
+                    onclick="removeFromCollection({{ paper.id }}, {{ current_filters.collection }}, this)"
+                    class="block w-full text-left px-3 py-1.5 text-xs text-fg-muted hover:bg-surface-2 border-t border-edge">Remove from collection</button>
+            {% endif %}
         </div>
     </div>
-    {% endif %}
     {% if mendeley_connected %}
     {% if paper.mendeley_doc_id %}
     <button type="button"

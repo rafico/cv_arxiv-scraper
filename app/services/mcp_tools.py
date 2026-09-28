@@ -24,7 +24,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.enums import SortOption
-from app.models import Collection, Paper, PaperCollection, db, inbox_freshness_clause
+from app.models import Collection, Paper, PaperCollection, PaperSection, db, inbox_freshness_clause
+from app.services.bibtex import _make_cite_key
 from app.services.implementation_readiness import implementation_readiness
 from app.services.preferences import first_author_name
 
@@ -34,6 +35,9 @@ _MAX_LIMIT = 50
 _DEFAULT_LIMIT = 10
 _ABSTRACT_CHARS = 600
 _SUMMARY_CHARS = 1500
+# Full-text paging: sections run to ~278k chars, so text is only ever served in pages.
+_TEXT_PAGE_CHARS = 8000
+_TEXT_MAX_CHARS = 20_000
 
 SEARCH_MODES = ("hybrid", "semantic", "keyword")
 
@@ -338,6 +342,92 @@ def list_collections() -> dict[str, Any]:
     return {"count": len(collections), "collections": collections}
 
 
+def get_collection(collection_name_or_id: str | int, offset: int = 0, limit: int = _MAX_LIMIT) -> dict[str, Any]:
+    """Return one collection's papers (by id or exact name; never created here).
+
+    Members mirror the collection's Export .bib (hidden papers excluded, rank
+    order) and carry that export's ``cite_key`` plus the user's notes, so an
+    assistant's citations resolve against the same .bib. Paged by
+    ``offset``/``limit`` (``limit`` capped at 50); follow ``next_offset``.
+    """
+    from app.services.ranking import rank_score_order_expr
+
+    collection, _created = _resolve_or_create_collection(collection_name_or_id, create=False)
+    if collection is None:
+        return {"error": "not_found", "resource": "collection", "identifier": str(collection_name_or_id)}
+
+    start = max(0, offset)
+    query = (
+        Paper.query.join(PaperCollection, PaperCollection.paper_id == Paper.id)
+        .filter(PaperCollection.collection_id == collection.id, Paper.is_hidden.is_(False))
+        .order_by(rank_score_order_expr().desc(), Paper.id)
+    )
+    total = query.count()
+    papers = query.offset(start).limit(_clamp_limit(limit, default=_MAX_LIMIT)).all()
+    end = start + len(papers)
+    return {
+        "id": collection.id,
+        "name": collection.name,
+        "description": collection.description or "",
+        "count": total,
+        "offset": start,
+        "next_offset": end if end < total else None,
+        "papers": [
+            {**_paper_brief(paper), "cite_key": _make_cite_key(paper), "user_notes": paper.user_notes or ""}
+            for paper in papers
+        ],
+    }
+
+
+def get_paper_text(
+    paper_id: str | int, order_index: int | None = None, offset: int = 0, max_chars: int = _TEXT_PAGE_CHARS
+) -> dict[str, Any]:
+    """Read one paper's extracted full text verbatim, a page at a time.
+
+    Without ``order_index``: the section table of contents (``order_index``,
+    ``section_type``, ``chars``) plus the full abstract. With it: that section's
+    ``text[offset:offset + max_chars]`` (``max_chars`` capped at 20k) and a
+    ``next_offset`` to continue from (``None`` at the end). Papers never
+    extracted return ``has_full_text=False`` and an empty contents list.
+    """
+    paper = _resolve_paper(paper_id)
+    if paper is None:
+        return {"error": "not_found", "identifier": str(paper_id)}
+    head = {"id": paper.id, "arxiv_id": paper.arxiv_id, "title": paper.title, "link": paper.link}
+
+    if order_index is None:
+        rows = (
+            db.session.query(PaperSection.order_index, PaperSection.section_type, db.func.length(PaperSection.text))
+            .filter(PaperSection.paper_id == paper.id)
+            .order_by(PaperSection.order_index)
+            .all()
+        )
+        sections = [{"order_index": idx, "section_type": kind, "chars": int(chars or 0)} for idx, kind, chars in rows]
+        return {
+            **head,
+            "has_full_text": bool(sections),
+            "abstract": (paper.abstract_text or "").strip(),
+            "sections": sections,
+        }
+
+    section = PaperSection.query.filter_by(paper_id=paper.id, order_index=order_index).first()
+    if section is None:
+        return {"error": "not_found", "resource": "section", "identifier": f"{paper.id}:{order_index}"}
+    text = section.text or ""
+    start = max(0, offset)
+    page = min(max_chars, _TEXT_MAX_CHARS) if max_chars > 0 else _TEXT_PAGE_CHARS
+    end = min(start + page, len(text))
+    return {
+        **head,
+        "order_index": section.order_index,
+        "section_type": section.section_type,
+        "total_chars": len(text),
+        "offset": start,
+        "text": text[start:end],
+        "next_offset": end if end < len(text) else None,
+    }
+
+
 def ask_paper(paper_id: str | int, question: str) -> dict[str, Any]:
     """Grounded Q&A over ONE paper's own indexed text (see :mod:`app.services.paper_chat`).
 
@@ -399,11 +489,13 @@ def add_to_collection(collection_name_or_id: str | int, paper_id: str | int) -> 
     }
 
 
-def _resolve_or_create_collection(collection_name_or_id: str | int) -> tuple[Collection | None, bool]:
+def _resolve_or_create_collection(
+    collection_name_or_id: str | int, *, create: bool = True
+) -> tuple[Collection | None, bool]:
     """Resolve a collection by id (never created) or by name (created on miss).
 
     Returns ``(collection, created)``; ``(None, False)`` when a numeric id has no
-    matching collection.
+    matching collection, or a name misses with ``create=False`` (read-only lookup).
     """
     if isinstance(collection_name_or_id, bool):
         return None, False
@@ -417,7 +509,7 @@ def _resolve_or_create_collection(collection_name_or_id: str | int) -> tuple[Col
         return db.session.get(Collection, int(raw)), False
 
     existing = Collection.query.filter_by(name=raw).first()
-    if existing is not None:
+    if existing is not None or not create:
         return existing, False
     collection = Collection(name=raw)
     db.session.add(collection)

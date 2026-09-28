@@ -6,7 +6,7 @@ import stat
 import sys
 import tempfile
 import unittest
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from email import message_from_bytes
 from email.header import decode_header, make_header
 from pathlib import Path
@@ -42,7 +42,7 @@ def _make_paper(**overrides) -> Paper:
         is_hidden=False,
         publication_date="2026-04-07",
         scraped_date="2026-04-07",
-        publication_dt=date(2026, 4, 7),
+        publication_dt=datetime.now(timezone.utc).date(),
         scraped_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     defaults.update(overrides)

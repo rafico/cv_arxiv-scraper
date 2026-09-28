@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from app.services.arxiv_adapter import result_to_entry
 from app.services.enrichment import parse_feed_entries, query_arxiv_api
 from app.services.ingest import ArxivApiBackend, PaperCandidate, RssFeedBackend
+from app.services.ingest.arxiv_api_backend import _build_query
 from app.services.ingest.base import clean_abstract, parse_publication_dt
 
 RSS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -180,6 +181,28 @@ class ArxivApiBackendTests(TestCase):
         )
         self.assertEqual(mock_request.call_args.kwargs["params"]["max_results"], 25)
         self.assertEqual(mock_request.call_args.kwargs["params"]["start"], 0)
+
+    def test_build_query_ands_optional_categories_and_topic_query(self):
+        start, end = date(2019, 1, 1), date(2019, 1, 2)
+        dates = "submittedDate:[201901010000 TO 201901022359]"
+        self.assertEqual(_build_query(["cs.CV"], start, end), f"(cat:cs.CV) AND {dates}")
+        self.assertEqual(_build_query([], start, end, 'abs:"ovs"'), f'(abs:"ovs") AND {dates}')
+        self.assertEqual(
+            _build_query(["cs.CV", "cs.LG"], start, end, "ti:seg OR abs:seg"),
+            f"(cat:cs.CV OR cat:cs.LG) AND (ti:seg OR abs:seg) AND {dates}",
+        )
+
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_fetch_runs_a_query_without_categories(self, mock_request):
+        mock_request.return_value = Mock(text=ARXIV_API_XML_PAGE_ONE)
+        window = {"start_dt": date(2019, 1, 1), "end_dt": date(2026, 4, 2)}
+
+        self.assertEqual(ArxivApiBackend().fetch(categories=[], **window), [])  # nothing to search
+        candidates = ArxivApiBackend().fetch(categories=[], query='abs:"ovs"', **window)
+
+        self.assertEqual([c.arxiv_id for c in candidates], ["2604.00002"])
+        mock_request.assert_called_once()
+        self.assertTrue(mock_request.call_args.kwargs["params"]["search_query"].startswith('(abs:"ovs") AND '))
 
     @patch("app.services.ingest.arxiv_api_backend.request_with_backoff", side_effect=RuntimeError("network down"))
     def test_fetch_propagates_request_errors(self, mock_request):

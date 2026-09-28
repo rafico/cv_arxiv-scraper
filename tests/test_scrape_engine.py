@@ -6,7 +6,7 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import Mock, patch
 
-from app.models import Paper, ScrapeRun, db
+from app.models import Paper, PaperRelation, ScrapeRun, db
 from app.services.ranking import compute_paper_score
 from app.services.summary import generate_summary
 from app.services.text import now_utc
@@ -420,6 +420,7 @@ class GuardTests(FlaskDBTestCase):
             patch("app.services.scrape_engine.parse_feed_entries", return_value=[]),
             patch("app.services.scrape_engine.enrich_entries_with_api_metadata"),
             patch("app.services.scrape_engine._process_entries_with_pipeline", return_value=iter([])),
+            patch("app.services.citations.fetch_citations_batch", return_value={}),  # stale-citation refresh
         ):
             result = execute_scrape(self.app)
 
@@ -929,6 +930,107 @@ class FilteredAndProgressTotalTests(FlaskDBTestCase):
         # Denominator must be the NEW count (1), not the raw feed size (2), so the bar fills.
         for data in progress_events:
             self.assertEqual(data["total"], 1)
+
+
+class StaleCitationRefreshTests(FlaskDBTestCase):
+    def _paper(self, arxiv_id: str, updated_at, **fields) -> Paper:
+        paper = Paper(
+            arxiv_id=arxiv_id,
+            title=f"Paper {arxiv_id}",
+            authors="A",
+            link=f"https://arxiv.org/abs/{arxiv_id}",
+            pdf_link=f"https://arxiv.org/pdf/{arxiv_id}.pdf",
+            match_type="title",
+            matched_terms=["Vision"],
+            paper_score=0.0,
+            publication_date="2026-01-01",
+            scraped_date="2026-01-01",
+            citation_updated_at=updated_at,
+            **fields,
+        )
+        db.session.add(paper)
+        return paper
+
+    @patch("app.services.citations.fetch_citations_batch")
+    def test_refreshes_stale_rows_without_wiping_counts(self, mock_fetch):
+        from app.services.scrape_engine import _refresh_stale_citations
+
+        stale = self._paper("2601.00001", now_utc() - timedelta(days=8), citation_count=1, referenced_works=["W1"])
+        never = self._paper("2601.00002", None, citation_count=5, citation_source="openalex")
+        self._paper("2601.00003", now_utc() - timedelta(days=1))  # fresh: not refetched
+        db.session.commit()
+        mock_fetch.return_value = {
+            "2601.00001": {"citation_count": 42, "semantic_scholar_id": "s2a", "references": ["W1", "s2x"]},
+            "2601.00002": {"citation_count": None, "semantic_scholar_id": "s2b", "references": ["s2y"]},
+        }
+
+        _refresh_stale_citations(self.app, session=None)
+
+        self.assertEqual(sorted(mock_fetch.call_args.args[0]), ["2601.00001", "2601.00002"])
+        db.session.expire_all()
+        self.assertEqual(stale.citation_count, 42)
+        self.assertEqual(stale.citation_source, "semantic_scholar")
+        self.assertEqual(stale.referenced_works, ["W1", "s2x"])
+        self.assertGreater(stale.citation_updated_at, now_utc() - timedelta(minutes=1))
+        # S2's None count leaves the OpenAlex count alone; ids and refs still fill in.
+        self.assertEqual((never.citation_count, never.citation_source), (5, "openalex"))
+        self.assertEqual((never.semantic_scholar_id, never.referenced_works), ("s2b", ["s2y"]))
+
+    @patch("app.services.citations.fetch_citations_batch")
+    def test_refresh_keeps_the_stored_score(self, mock_fetch):
+        # Re-scoring only S2-indexed papers against today's recency (and without the
+        # readiness bonus) would sink them below unindexed peers of the same age.
+        from app.services.scrape_engine import _refresh_stale_citations
+
+        stale = self._paper("2601.00001", None, publication_dt=date.today() - timedelta(days=20), github_repo="o/r")
+        stale.paper_score = 12.5
+        db.session.commit()
+        mock_fetch.return_value = {"2601.00001": {"citation_count": 42}}
+
+        _refresh_stale_citations(self.app, session=None)
+
+        db.session.expire_all()
+        self.assertEqual((stale.citation_count, stale.paper_score), (42, 12.5))
+
+    @patch("app.services.citations.fetch_citations_batch")
+    def test_each_chunk_commits_before_the_next_request(self, mock_fetch):
+        # Pending rows would be autoflushed by the next chunk's cache lookup, holding
+        # SQLite's write lock through that chunk's S2 request.
+        from app.services.scrape_engine import _refresh_stale_citations
+
+        for i in range(501):
+            self._paper(f"2601.{i:05d}", None)
+        db.session.commit()
+        dirty_at_request = []
+
+        def fetch(ids, session=None):
+            dirty_at_request.append(bool(db.session.dirty))
+            return {aid: {"citation_count": 1} for aid in ids}
+
+        mock_fetch.side_effect = fetch
+
+        _refresh_stale_citations(self.app, session=None)
+
+        self.assertEqual(dirty_at_request, [False, False])
+
+    @patch("app.services.citations.fetch_citations_batch")
+    def test_daily_scrape_turns_refreshed_refs_into_edges(self, mock_fetch):
+        from app.services import scrape_engine
+
+        citing = self._paper("2601.00001", None)
+        cited = self._paper("2601.00002", now_utc(), semantic_scholar_id="s2b")
+        db.session.commit()
+        mock_fetch.return_value = {"2601.00001": {"citation_count": 0, "references": ["s2b"]}}
+
+        with (
+            patch.object(scrape_engine, "parse_feed_entries", return_value=[]),
+            patch.object(scrape_engine, "enrich_entries_with_api_metadata"),
+            patch.object(scrape_engine, "_process_entries_with_pipeline", return_value=iter([])),
+        ):
+            scrape_engine.execute_scrape(self.app, force=True)
+
+        edge = PaperRelation.query.filter_by(relation_type="cites").one()
+        self.assertEqual((edge.paper_id, edge.related_paper_id), (citing.id, cited.id))
 
 
 if __name__ == "__main__":

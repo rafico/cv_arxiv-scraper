@@ -305,6 +305,56 @@ def _sync_citation_edges(app) -> None:
         LOGGER.warning("Citation edge sync failed: %s", exc)
 
 
+def _refresh_stale_citations(app, session) -> None:
+    """Re-fetch S2 counts and references for papers not refreshed in 7 days (the
+    S2 cache TTL). Scrape day is usually before S2 has indexed a paper, so without
+    this its counts stay NULL and its reference list empty for good. Non-fatal.
+
+    paper_score is left alone: re-scoring only S2-indexed papers against today's
+    recency would sink them below unindexed peers. sort=citations reads the count.
+
+    # ponytail: the whole stale corpus is refreshed per run (~corpus/500 POSTs at
+    # bulk pacing); add a LIMIT once the corpus passes ~50k papers.
+    # ponytail: counts reach paper_score only on the next recompute_all_paper_scores
+    # (settings/profile save); add a scrape-day-anchored citation delta if ranking
+    # should react sooner.
+    """
+    from app.models import Paper, db
+    from app.services.citations import fetch_citations_batch
+
+    try:
+        with app.app_context():
+            now = now_utc()
+            papers = Paper.query.filter(
+                Paper.arxiv_id.is_not(None),
+                db.or_(Paper.citation_updated_at.is_(None), Paper.citation_updated_at < now - timedelta(days=7)),
+            ).all()
+            # Chunked here too so each IN (...) lookup stays under SQLite's bound-variable cap.
+            for start in range(0, len(papers), 500):
+                chunk = papers[start : start + 500]
+                citation_data = fetch_citations_batch([paper.arxiv_id for paper in chunk], session=session)
+                for paper in chunk:
+                    data = citation_data.get(paper.arxiv_id)
+                    if not data:
+                        continue
+                    paper.semantic_scholar_id = data.get("semantic_scholar_id") or paper.semantic_scholar_id
+                    # Merge, don't overwrite: OpenAlex "W…" ids share this list.
+                    refs = data.get("references") or []
+                    paper.referenced_works = list(dict.fromkeys([*paper.referenced_works, *refs]))
+                    if data.get("citation_count") is None:
+                        continue  # never wipe an OpenAlex count with S2's None
+                    paper.citation_count = data["citation_count"]
+                    paper.influential_citation_count = data.get("influential_citation_count")
+                    paper.citation_source = "semantic_scholar"
+                    paper.citation_provenance = {"source": "semantic_scholar", "updated_at": now.isoformat()}
+                    paper.citation_updated_at = now
+                # Commit per chunk: pending rows would otherwise be autoflushed by the
+                # next chunk's cache lookup and hold SQLite's write lock through its request.
+                db.session.commit()
+    except Exception as exc:
+        LOGGER.warning("Stale citation refresh failed: %s", exc)
+
+
 def _save_results(app, results: list[dict]) -> tuple[int, int]:
     from app.models import Paper, db
     from app.services.related import find_duplicates
@@ -1445,6 +1495,10 @@ def execute_scrape(app, event_callback: EventCallback = None, force: bool = Fals
             interest_profile=interest_profile,
         )
 
+        # Daily runs only, and before today's papers are saved (they were just
+        # fetched); _finalize_results' edge sync then picks up the refreshed refs.
+        _emit(event_callback, "status", {"phase": "saving", "message": "Refreshing citation counts..."})
+        _refresh_stale_citations(app, session)
         summary = _finalize_results(
             app,
             results,
