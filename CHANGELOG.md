@@ -25,6 +25,12 @@ Wave 5: collections as a literature-review workspace.
   citation chips.
 - **Stale citation refresh**: the daily scrape re-fetches Semantic Scholar
   counts and references older than 7 days.
+- **Prior works** (`GET /api/collections/<id>/prior-works`): outside papers
+  that 2+ members cite, resolved in one Semantic Scholar batch call, with
+  one-click Add. It degrades to a 502 with `{results: [], error}`, never a 500.
+- **Ask this collection**: an optional `collection_id` on
+  `POST /api/corpus/chat` (Discover `?collection=`) answers from that
+  collection's visible members only.
 
 ### Changed
 - BibTeX entries are `@misc` arXiv preprints (eprint, primaryclass, arXiv
@@ -38,6 +44,21 @@ Wave 5: collections as a literature-review workspace.
   import can't take over the email.
 - The `mcp` extra now needs `mcp>=1.3`, so the server can send its grounding
   instructions (quote verbatim, cite arXiv ids, verify unknown ids).
+- **Breaking for API clients:** `POST /api/corpus/chat` no longer returns
+  `no_saved_papers` or `message`. It adds `scope` (`collection`, `saved` or
+  `corpus`) and `sources[].n` and `sources[].section`. With nothing saved it
+  answers from the whole library (`scope: "corpus"`) instead of refusing.
+  Skipped papers are never used as sources.
+- Chat excerpts come from the best-matching body section rather than the
+  abstract. Numeric in-text citations such as `[3]` are removed, so they
+  can't be mistaken for source numbers.
+- Paper chat skips reference and acknowledgment chunks and drops quotes that
+  don't appear verbatim in the excerpt.
+- The citation, OpenAlex, comments, Hugging Face, GitHub and insights
+  backfills rescore the whole library once when they change anything, rather
+  than rescoring each updated paper. Rescoring a paper on its own used the
+  current date for recency, which pushed it below papers that were not
+  rescored.
 
 ### Fixed
 - Search inside a collection no longer drops members outside the global
@@ -49,6 +70,10 @@ Wave 5: collections as a literature-review workspace.
   "Error" entry as a paper when an id is malformed.
 - The MCP setup example points `CV_ARXIV_DATA_DIR` at a real data dir
   (a source checkout's `instance/`).
+- Newly scraped papers, and papers updated by the Hugging Face and GitHub
+  backfills, now include the implementation-readiness bonus in their score.
+- The onboarding and Settings text no longer says a profile description adds
+  papers beyond your whitelists while learned ranking is switched off.
 
 ## [0.6.0] — 2026-08-16
 

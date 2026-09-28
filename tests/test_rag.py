@@ -128,10 +128,37 @@ class RetrieveSavedContextTests(FlaskDBTestCase):
         self.assertEqual(result["scope"], "corpus")
         self.assertEqual([s["paper_id"] for s in result["sources"]], [unsaved.id])
 
+    def test_corpus_scope_skips_hidden_papers(self):
+        PaperFeedback.query.delete()
+        skipped = self.papers[3]
+        skipped.is_hidden = True  # what a skip sets
+        db.session.commit()
+        hits = [{"paper_id": skipped.id, "rrf_score": 0.9}, {"paper_id": self.papers[0].id, "rrf_score": 0.5}]
+        with patch("app.services.rag.search_hybrid", return_value=hits):
+            result = rag.retrieve_saved_context("anything", top_k=1)
+
+        self.assertEqual([s["paper_id"] for s in result["sources"]], [self.papers[0].id])
+
+    def test_excerpt_drops_numeric_in_text_citations(self):
+        # A body "[3]" would read as source [3] and survive grounding.
+        paper = self.papers[0]
+        db.session.add(
+            PaperSection(
+                paper_id=paper.id, section_type="method", text="We follow DeiT [3] and [4, 5] here.", order_index=1
+            )
+        )
+        db.session.commit()
+        with _patch_embeddings(FakeEmbeddingService()):
+            result = rag.retrieve_saved_context("distillation", top_k=6, paper_ids=[paper.id])
+
+        self.assertIn("Excerpt (method): We follow DeiT and here.", result["context"])
+
     def test_excerpt_is_best_body_section_never_references(self):
         paper = self.papers[0]
         db.session.add_all(
             [
+                # Extractors store the abstract at order_index 0; it must not win the excerpt slot.
+                PaperSection(paper_id=paper.id, section_type="abstract", text="We propose a thing.", order_index=0),
                 PaperSection(paper_id=paper.id, section_type="method", text="We lift features to 3D.", order_index=1),
                 PaperSection(paper_id=paper.id, section_type="references", text="[1] Voxel nets.", order_index=9),
             ]
@@ -310,6 +337,22 @@ class ChatEndpointTests(FlaskDBTestCase):
         self.assertEqual(data["scope"], "collection")
         self.assertEqual([s["paper_id"] for s in data["sources"]], [member.id])
         self.assertNotIn(saved.id, [s["paper_id"] for s in data["sources"]])
+
+    def test_chat_collection_skips_hidden_members(self):
+        member, skipped = _make_paper(1), _make_paper(2, is_hidden=True)
+        collection = Collection(name="Review")
+        db.session.add_all([member, skipped, collection])
+        db.session.flush()
+        db.session.add_all([PaperCollection(paper_id=p.id, collection_id=collection.id) for p in (member, skipped)])
+        db.session.commit()
+
+        response = self.client.post(
+            "/api/corpus/chat",
+            json={"query": "anything", "collection_id": collection.id},
+            headers={"X-CSRF-Token": self.csrf_token},
+        )
+
+        self.assertEqual([s["paper_id"] for s in response.get_json()["sources"]], [member.id])
 
     def test_chat_rejects_unknown_or_malformed_collection(self):
         headers = {"X-CSRF-Token": self.csrf_token}

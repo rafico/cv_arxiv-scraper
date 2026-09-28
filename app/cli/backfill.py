@@ -35,11 +35,20 @@ def _positive_int(value: str) -> int:
     return ivalue
 
 
-def _recompute_paper_score(paper: Paper, config: dict | None) -> float:
-    from app.services.ranking import score_paper
+def _rescore_all(app, updated: int) -> None:
+    """Re-anchor every paper's score to today once a backfill changed any input.
 
-    paper.paper_score = score_paper(paper, config=config)
-    return float(paper.paper_score or 0.0)
+    score_paper decays recency from today, so rescoring only the updated papers
+    would sink them below peers still holding their scrape-day score; this is
+    the same full recompute a settings save runs.
+
+    # ponytail: `all` recomputes once per rescoring backfill; hoist to one call
+    # at the end of run_all_backfills if the corpus makes that slow.
+    """
+    if updated:
+        from app.services.ranking import recompute_all_paper_scores
+
+        recompute_all_paper_scores(app)
 
 
 def _paper_index_paths(index_dir: Path) -> tuple[Path, Path]:
@@ -129,7 +138,6 @@ def backfill_citations(
 
     try:
         with app.app_context():
-            scraper_config = app.config.get("SCRAPER_CONFIG")
             while True:
                 papers = (
                     Paper.query.filter(
@@ -165,7 +173,6 @@ def backfill_citations(
                             "updated_at": timestamp.isoformat(),
                         }
                         paper.citation_updated_at = timestamp
-                        _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()
@@ -179,6 +186,7 @@ def backfill_citations(
     finally:
         session.close()
 
+    _rescore_all(app, total_updated)
     return total_updated
 
 
@@ -198,7 +206,6 @@ def backfill_openalex(
 
     try:
         with app.app_context():
-            scraper_config = app.config.get("SCRAPER_CONFIG")
             while True:
                 papers = (
                     Paper.query.filter(
@@ -240,7 +247,6 @@ def backfill_openalex(
                             "updated_at": timestamp.isoformat(),
                         }
                         paper.citation_updated_at = timestamp
-                        _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()
@@ -254,6 +260,7 @@ def backfill_openalex(
     finally:
         session.close()
 
+    _rescore_all(app, total_updated)
     return total_updated
 
 
@@ -416,7 +423,6 @@ def backfill_comments(
 
     try:
         with app.app_context():
-            scraper_config = app.config.get("SCRAPER_CONFIG")
             while True:
                 papers = (
                     Paper.query.filter(
@@ -451,7 +457,6 @@ def backfill_comments(
 
                     new_links = extract_resource_links(paper.abstract_text, comment, data.get("doi", ""))
                     paper.resource_links = merge_resource_links(paper.resource_links_list, new_links)
-                    _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()
@@ -465,6 +470,7 @@ def backfill_comments(
     finally:
         session.close()
 
+    _rescore_all(app, total_updated)
     return total_updated
 
 
@@ -485,7 +491,6 @@ def backfill_github(
 
     try:
         with app.app_context():
-            scraper_config = app.config.get("SCRAPER_CONFIG")
             while True:
                 papers = (
                     Paper.query.filter(
@@ -521,7 +526,6 @@ def backfill_github(
                     paper.github_repo = data.get("github_repo")
                     paper.github_stars = data.get("github_stars")
                     paper.github_license = data.get("github_license")
-                    _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()
@@ -544,6 +548,7 @@ def backfill_github(
     finally:
         session.close()
 
+    _rescore_all(app, total_updated)
     return total_updated
 
 
@@ -564,7 +569,6 @@ def backfill_huggingface(
 
     try:
         with app.app_context():
-            scraper_config = app.config.get("SCRAPER_CONFIG")
             while True:
                 papers = (
                     Paper.query.filter(
@@ -601,8 +605,6 @@ def backfill_huggingface(
                             paper.resource_links = merged
                         if not paper.github_repo:
                             paper.github_repo = extract_github_repo(hf_links)
-                    # After every field is set: upvotes and the repo feed the readiness bonus.
-                    _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()
@@ -625,6 +627,7 @@ def backfill_huggingface(
     finally:
         session.close()
 
+    _rescore_all(app, total_updated)
     return total_updated
 
 
@@ -731,7 +734,6 @@ def backfill_insights(app, *, limit: int = 200, emit: Emit = print) -> int:
             .all()
         )
         emit(f"Analyzing {len(papers)} papers (newest first, limit {limit})...")
-        scraper_config = app.config.get("SCRAPER_CONFIG")
 
         for index, paper in enumerate(papers, start=1):
             insights = llm_client.analyze_paper(
@@ -750,7 +752,6 @@ def backfill_insights(app, *, limit: int = 200, emit: Emit = print) -> int:
             paper.llm_insights = {
                 key: insights[key] for key in ("tasks", "datasets", "method_type", "backbone", "why_matched")
             }
-            _recompute_paper_score(paper, scraper_config)
             total_updated += 1
 
             if index % 25 == 0:
@@ -760,6 +761,7 @@ def backfill_insights(app, *, limit: int = 200, emit: Emit = print) -> int:
         db.session.commit()
 
     emit(f"Insights backfill complete: {total_updated} papers updated")
+    _rescore_all(app, total_updated)
     return total_updated
 
 

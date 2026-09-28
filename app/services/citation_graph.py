@@ -65,8 +65,9 @@ def missing_references(paper_ids: list[int], limit: int = 15, request_fn=None) -
     """Outside works cited by >= 2 of ``paper_ids``: the prior works they build on.
 
     Counts stored Semantic Scholar paperIds only (OpenAlex W-ids aren't S2
-    resolvable), drops ones already local, and resolves the top ids in one S2
-    /paper/batch call. Any failure degrades to an error payload, never raises.
+    resolvable), resolves the top ids in one S2 /paper/batch call, and drops
+    ones already local (by S2 id, then by the resolved arXiv id). Any failure
+    degrades to an error payload, never raises.
 
     # ponytail: uncached live S2 call per click; lru_cache it if clicked a lot.
     """
@@ -117,6 +118,11 @@ def missing_references(paper_ids: list[int], limit: int = 15, request_fn=None) -
                     else f"https://www.semanticscholar.org/paper/{ref}",
                 }
             )
+        # Papers seeded by arXiv id (import-ids, sync --query, Add) have no S2 id
+        # until a later scrape, so the S2-id filter above misses them.
+        arxiv_ids = [r["arxiv_id"] for r in results if r["arxiv_id"]]
+        have = {a for (a,) in db.session.query(Paper.arxiv_id).filter(Paper.arxiv_id.in_(arxiv_ids))}
+        results = [r for r in results if r["arxiv_id"] not in have]
         results.sort(key=lambda r: (r["cited_by"], r["citation_count"] or 0), reverse=True)
     except Exception as exc:
         LOGGER.warning("Prior-works lookup failed: %s", exc)

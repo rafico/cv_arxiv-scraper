@@ -273,7 +273,14 @@ def _build_onboarding_steps(config: dict, *, positive_count: int, has_successful
     # Whitelist-free Interest admission turns on then too, or earlier once the
     # active profile has a non-empty description (the candidate interest gate).
     remaining = max(0, MIN_POSITIVE_FEEDBACK - positive_count)
-    if (get_active_profile().description or "").strip():
+    learned = get_preferences(config)["learned"]
+    if not learned["enabled"] or int(learned["candidate_top_k"]) <= 0:
+        # The gate returns early here: neither saves nor a description admit anything.
+        beyond_whitelists = (
+            f"Save {remaining} more to train your ranking. Recommendations beyond your "
+            "whitelists are switched off in your learned-ranking settings."
+        )
+    elif (get_active_profile().description or "").strip():
         beyond_whitelists = (
             f"Save {remaining} more to switch on learned ranking — your profile "
             "description already brings in recommendations beyond your whitelists."

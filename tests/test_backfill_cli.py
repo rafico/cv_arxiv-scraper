@@ -402,6 +402,29 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertEqual(repos, {"2601.00009": "lab/model"})
 
     @patch("app.enrich.GitHubProvider")
+    def test_backfill_github_does_not_sink_updated_paper_below_peers(self, mock_provider_cls):
+        # score_paper decays recency from today: rescoring only the updated paper
+        # would sink it below a peer still holding its scrape-day score.
+        from datetime import date, timedelta
+
+        updated, peer = _paper("2601.00009"), _paper("2601.00008")
+        updated.resource_links = [{"type": "code", "label": "Code", "url": "https://github.com/lab/model"}]
+        for paper in (updated, peer):
+            paper.publication_dt = date.today() - timedelta(days=28)
+            paper.paper_score = 100.0  # scored on scrape day, before four weeks of decay
+        db.session.add_all([updated, peer])
+        db.session.commit()
+        mock_provider_cls.return_value.fetch_batch.return_value = {
+            "2601.00009": {"github_repo": "lab/model", "github_stars": 250, "github_license": "MIT"}
+        }
+        mock_provider_cls.return_value.rate_limited = False
+
+        backfill_github(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
+
+        scores = {p.arxiv_id: p.paper_score for p in Paper.query.all()}
+        self.assertGreaterEqual(scores["2601.00009"], scores["2601.00008"])
+
+    @patch("app.enrich.GitHubProvider")
     def test_backfill_github_stops_on_rate_limit_without_advancing(self, mock_provider_cls):
         # With batch_size=1 and two papers, a rate-limited first batch must stop the
         # run (one fetch_batch call) rather than advancing the cursor through the

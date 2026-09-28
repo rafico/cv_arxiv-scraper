@@ -64,6 +64,26 @@ class OnboardingActivationThresholdTests(FlaskDBTestCase):
         self.assertNotIn("add a profile description", description)
         self.assertIn("profile description", description)
 
+    def test_description_is_not_promised_while_learned_ranking_is_off(self):
+        # The interest gate returns early when learned ranking is disabled, so a
+        # description admits nothing; neither the copy nor Settings may claim it does.
+        from app.services.profiles import get_active_profile, update_description
+
+        update_description(get_active_profile().id, "Robot learning from video")
+        config = {"whitelists": {}, "preferences": {"learned": {"enabled": False}}}
+
+        description = _save_step(_build_onboarding_steps(config, positive_count=1, has_successful_scrape=True))[
+            "description"
+        ]
+        self.assertNotIn("profile description", description)
+        self.assertIn("switched off", description)
+
+        self.app.config["SCRAPER_CONFIG"]["preferences"] = config["preferences"]
+        text = self.app.test_client().get("/settings").get_data(as_text=True)
+        self.assertIn("Beyond Whitelists", text)
+        self.assertNotIn("unless the active profile has a description", text)
+        self.assertNotIn("or a profile description", text)
+
     def test_digest_step_appears_only_without_a_recipient(self):
         without = _build_onboarding_steps({"whitelists": {}}, positive_count=0, has_successful_scrape=True)
         self.assertIn("Set a digest recipient", [step["label"] for step in without])

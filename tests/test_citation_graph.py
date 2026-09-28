@@ -210,6 +210,24 @@ class MissingReferencesTests(FlaskDBTestCase):
 
         self.assertEqual(len(missing_references(ids, limit=1, request_fn=fake_request)["results"]), 1)
 
+    def test_local_paper_without_s2_id_is_not_a_prior_work(self):
+        from app.services.citation_graph import missing_references
+
+        _collection, ids = self._members()
+        db.session.add(_paper("1706.03762"))  # seeded by arXiv id: no semantic_scholar_id yet
+        db.session.commit()
+
+        def fake_request(method, url, **kwargs):
+            return _FakeResponse(
+                [
+                    {"title": "T", "citationCount": 1, "externalIds": {"ArXiv": "1706.03762"} if i == _s2(2) else {}}
+                    for i in kwargs["json"]["ids"]
+                ]
+            )
+
+        rows = missing_references(ids, request_fn=fake_request)["results"]
+        self.assertEqual(sorted(r["s2_id"] for r in rows), [_s2(1), _s2(3)])
+
     def test_no_candidates_skips_the_network(self):
         from app.services.citation_graph import missing_references
 

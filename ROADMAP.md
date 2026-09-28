@@ -236,21 +236,24 @@ next full rescore.
 - **Optional: a Semantic Scholar API key** — unkeyed calls get 429s, which
   starves the citation refresh and the Tier 2/3 S2 features below.
 
+### Tier 2 (built ahead of the usage gate, at the owner's call)
+
+- **Prior works** ✅ — references cited by 2+ members but missing from the
+  library (matched by S2 id and arXiv id), resolved with one S2 `/paper/batch`
+  call; a button in "Expand this collection". Needs item 26's refresh to keep
+  `referenced_works` filled.
+- **Ask this collection** ✅ — corpus chat scoped by `collection_id` with exact
+  vector ranking and body-section excerpts; with nothing saved it answers from
+  the whole library and labels the scope. Skipped papers never become sources.
+- **Paper-chat cleanup** ✅ — skip references/acknowledgments chunks, drop
+  quotes that don't appear verbatim, and strip numeric in-text citations that
+  would collide with the `[n]` labels.
+
 ### Later: gated on evidence that collections get used
 
 Checkpoint after 2-4 weeks:
 `sqlite3 'file:instance/arxiv_papers.db?mode=ro' "select count(*) from paper_collections"`.
-If it is still 0, stop — Tier 2 would have no users.
-
-Tier 2 (build in this order once collections are in use):
-
-- **Prior works** — references cited by 2+ members but missing from the
-  corpus, resolved with one S2 `/paper/batch` call; a button in "Expand this
-  collection". Needs item 26's refresh to keep `referenced_works` filled.
-- **Ask this collection** — corpus chat scoped by `collection_id` with exact
-  vector ranking and chunk excerpts; changes the documented saved-only contract.
-- **Paper-chat cleanup** — skip references/acknowledgments chunks and drop
-  quotes that don't appear verbatim (pays off once the LLM is on).
+If it is still 0, stop — Tier 3 would have no users.
 
 Tier 3 (each only on its trigger):
 

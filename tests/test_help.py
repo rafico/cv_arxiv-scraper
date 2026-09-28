@@ -65,6 +65,11 @@ class HelpRouteTests(FlaskDBTestCase):
         ]:
             self.assertIn(feature, full_text, f"Missing feature in help: {feature}")
 
+    def test_organization_help_documents_prior_works(self):
+        text = self.client.get("/help/organization").get_data(as_text=True)
+        self.assertIn("Prior works", text)
+        self.assertIn("Semantic Scholar API key", text)
+
     def test_cli_help_documents_sync_query_import(self):
         text = self.client.get("/help/cli").get_data(as_text=True)
         for flag in ("--query", "--collection", "--max-results"):

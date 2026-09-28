@@ -1150,6 +1150,8 @@
                 </div>
 
                 {% if feature_status %}
+                {#- The interest gate admits nothing while learned ranking or its candidate limit is off. -#}
+                {% set interest_gate_on = preferences.learned.enabled and preferences.learned.candidate_top_k > 0 %}
                 <div class="rounded-2xl border border-edge bg-surface p-5">
                     <h3 class="text-base font-semibold text-fg">Feature Status</h3>
                     <p class="mt-1 text-sm text-fg-muted">Whether each feature is actually receiving data. A healthy server can still have an idle feature.</p>
@@ -1162,12 +1164,12 @@
                         <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
                             <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Learned Ranking</div>
                             <div class="mt-2 text-sm font-semibold {{ 'text-fg' if feature_status.interest_signal_ready else 'text-priority' }}">{% if feature_status.interest_signal_ready %}Active{% else %}{{ feature_status.positive_feedback_needed }} more saved paper{{ 's' if feature_status.positive_feedback_needed != 1 }} needed{% endif %}</div>
-                            <div class="mt-1 text-xs text-fg-muted">{{ feature_status.positive_feedback }} positive rating{{ 's' if feature_status.positive_feedback != 1 }} so far. Below the threshold the ranker and the interest profile stay off, and so do off-whitelist recommendations unless the active profile has a description.</div>
+                            <div class="mt-1 text-xs text-fg-muted">{{ feature_status.positive_feedback }} positive rating{{ 's' if feature_status.positive_feedback != 1 }} so far. Below the threshold the ranker and the interest profile stay off{% if interest_gate_on %}, and so do off-whitelist recommendations unless the active profile has a description{% endif %}.</div>
                         </div>
                         <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
                             <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Beyond Whitelists</div>
                             <div class="mt-2 text-sm font-semibold {{ 'text-fg' if feature_status.dense_retrieval_papers else 'text-priority' }}">{{ feature_status.dense_retrieval_papers }} papers</div>
-                            <div class="mt-1 text-xs text-fg-muted">Found by interest similarity rather than an author/title/affiliation match. Needs learned ranking active or a profile description.</div>
+                            <div class="mt-1 text-xs text-fg-muted">Found by interest similarity rather than an author/title/affiliation match. {% if interest_gate_on %}Needs learned ranking active or a profile description.{% else %}Switched off in your learned-ranking settings.{% endif %}</div>
                         </div>
                         <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
                             <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Enrichment</div>

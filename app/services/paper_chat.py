@@ -64,6 +64,10 @@ _SYNTHESIS_SYSTEM_PROMPT = (
 )
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
+# Numeric \cite markers ("[3]", "[3, 12]", "[4-6]") in extracted body text would read
+# as our [n] excerpt/source labels and survive grounding, so chunks drop them.
+# ponytail: also eats bracketed number lists like "[0, 1]"; LaTeXML cite spans if that bites.
+_BODY_CITE_RE = re.compile(r"\s*\[\d{1,3}(?:\s*[,–-]\s*\d{1,3})*\]")
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -80,7 +84,7 @@ def _paper_chunks(paper: Paper) -> list[dict]:
     if abstract:
         chunks.append({"section_type": "abstract", "order_index": -1, "text": abstract, "score": None})
     for section in paper.sections.order_by(PaperSection.order_index).all():
-        text = (section.text or "").strip()
+        text = _BODY_CITE_RE.sub("", section.text or "").strip()
         if text and section.section_type not in _SKIP_SECTION_TYPES:
             chunks.append(
                 {

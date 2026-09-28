@@ -31,7 +31,8 @@ LOGGER = logging.getLogger(__name__)
 _ABSTRACT_CHAR_BUDGET = 250
 _EXCERPT_CHAR_BUDGET = 900
 _SNIPPET_CHAR_BUDGET = 320
-_SKIP_SECTIONS = {"references", "acknowledgments"}
+# The abstract has its own "Abstract:" line; the excerpt comes from the body.
+_SKIP_SECTIONS = {"abstract", "references", "acknowledgments"}
 
 _SYSTEM_PROMPT = (
     "You are a research assistant answering questions about a reader's papers. "
@@ -77,7 +78,7 @@ def _build_paper_block(n: int, paper: Paper, query: str) -> tuple[str, str | Non
     abstract = (paper.abstract_text or paper.summary_text or "").strip()
     if abstract:
         parts.append(f"Abstract: {_truncate(abstract, _ABSTRACT_CHAR_BUDGET)}")
-    body = [c for c in _paper_chunks(paper) if c["order_index"] >= 0 and c["section_type"] not in _SKIP_SECTIONS]
+    body = [c for c in _paper_chunks(paper) if c["section_type"] not in _SKIP_SECTIONS]
     best = _rank_chunks(query, body, top_k=1)
     if not best:
         return "\n".join(parts), None
@@ -106,11 +107,15 @@ def retrieve_saved_context(query: str, *, top_k: int = 6, paper_ids: list[int] |
         scope = "saved" if ids else "corpus"
 
     if scope == "corpus":
-        ranked = [(r["paper_id"], r.get("rrf_score", 0.0)) for r in search_hybrid(query, top_k=top_k)]
+        # Over-fetch: skipped hits are dropped below.
+        ranked = [(r["paper_id"], r.get("rrf_score", 0.0)) for r in search_hybrid(query, top_k=top_k * 2)]
     else:
-        ranked = _rank_scope(query, ids)[:top_k]
+        ranked = _rank_scope(query, ids)
 
-    papers_by_id = {p.id: p for p in Paper.query.filter(Paper.id.in_([pid for pid, _ in ranked])).all()}
+    # Skipped (hidden) papers never become sources, as in the collection view, .bib and MCP.
+    # ponytail: loads every scoped row; filter ids first if collections reach thousands.
+    visible = Paper.query.filter(Paper.id.in_([pid for pid, _ in ranked]), Paper.is_hidden.is_(False))
+    papers_by_id = {p.id: p for p in visible.all()}
 
     sources: list[dict] = []
     blocks: list[str] = []
@@ -118,6 +123,8 @@ def retrieve_saved_context(query: str, *, top_k: int = 6, paper_ids: list[int] |
         paper = papers_by_id.get(pid)
         if paper is None:
             continue
+        if len(sources) == top_k:
+            break
         n = len(sources) + 1
         block, section = _build_paper_block(n, paper, query)
         sources.append(
