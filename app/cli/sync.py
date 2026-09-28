@@ -193,7 +193,7 @@ def run_query_import(
                 emit("WARNING: Semantic Scholar has no author search; au: names were matched as title/abstract words.")
         if len(candidates) >= max_results:
             emit(
-                f"WARNING: hit --max-results {max_results}. arXiv returns newest first, so the OLDEST "
+                f"WARNING: hit --max-results {max_results}. Results come newest first, so the OLDEST "
                 "matches were dropped. Narrow the query or --from/--to, or raise --max-results."
             )
         papers = [
