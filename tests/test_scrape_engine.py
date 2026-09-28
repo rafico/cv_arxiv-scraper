@@ -677,6 +677,40 @@ class PdfLinkEnrichmentTests(FlaskDBTestCase):
         self.assertEqual(result["paper_score"], baseline_score)
 
 
+class SavedScoreReadinessTests(FlaskDBTestCase):
+    def test_finalize_rescores_saved_rows_after_github_enrichment(self):
+        # Result dicts are scored before save, before GitHub/HF data exists; the
+        # stored score must still carry the readiness bonus score_paper applies.
+        from app.services import scrape_engine
+        from app.services.ranking import score_paper
+
+        config = self.app.config["SCRAPER_CONFIG"]
+
+        def enrich_github(app, results, session, config):
+            with app.app_context():
+                paper = Paper.query.filter_by(arxiv_id="0013").one()
+                paper.github_repo, paper.github_stars = "lab/model", 500
+                db.session.commit()
+
+        with patch.multiple(
+            scrape_engine,
+            _enrich_results_with_citations=Mock(),
+            _enrich_results_with_openalex=Mock(),
+            _enrich_results_with_huggingface=Mock(),
+            _enrich_results_with_github=enrich_github,
+            _generate_thumbnails=Mock(),
+            _generate_figures=Mock(),
+            _generate_embeddings=Mock(),
+            _extract_sections=Mock(),
+        ):
+            scrape_engine._finalize_results(
+                self.app, [_make_result("https://arxiv.org/abs/0013")], None, config, pre_filtered=0, total_entries=1
+            )
+
+        stored = Paper.query.filter_by(arxiv_id="0013").one()
+        self.assertEqual(stored.paper_score, score_paper(stored, config=config))
+
+
 class PrefetchAffiliationTextTests(unittest.TestCase):
     WHITELISTS = {"authors": [], "titles": ["Vision"], "affiliations": ["MIT"]}
 

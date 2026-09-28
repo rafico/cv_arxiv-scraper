@@ -181,6 +181,7 @@ def bulk_feedback():
 @api_bp.route("/papers/<int:paper_id>/explain", methods=["GET"])
 def paper_explain(paper_id: int):
     """Return ranking explanations for a paper."""
+    from app.services.implementation_readiness import implementation_readiness
     from app.services.ranking import explain_score, generate_ranking_explanation
 
     paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
@@ -195,6 +196,7 @@ def paper_explain(paper_id: int):
         citation_count=paper.citation_count,
         acceptance_status=paper.acceptance_status,
         interest_similarity=paper.interest_similarity,
+        readiness_score=implementation_readiness(paper).score,
         feedback_score=int(paper.feedback_score or 0),
         config=config,
     )

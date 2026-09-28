@@ -310,6 +310,19 @@ class ExplainEndpointTests(FlaskDBTestCase):
         self.assertIn("rank_score", data)
         self.assertIn("recency_multiplier", data)
 
+    def test_explain_base_score_includes_readiness(self):
+        # The stored score carries the readiness bonus, so the breakdown must too.
+        from app.services.ranking import score_paper
+
+        paper = db.session.get(Paper, self.paper_id)
+        paper.github_repo = "lab/model"
+        db.session.commit()
+
+        data = self.client.get(f"/api/papers/{self.paper_id}/explain").get_json()
+
+        self.assertGreater(data["readiness_bonus"], 0)
+        self.assertEqual(data["base_score"], score_paper(paper, config=self.app.config["SCRAPER_CONFIG"]))
+
     def test_explain_paper_not_found(self):
         response = self.client.get("/api/papers/99999/explain")
         self.assertEqual(response.status_code, 404)

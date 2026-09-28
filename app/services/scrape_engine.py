@@ -30,7 +30,7 @@ from app.services.llm_client import LLMClient, resolve_api_key
 from app.services.matching import check_author_match, check_whitelist_match
 from app.services.pipeline import WeightedSumRanker, WhitelistCandidateGenerator
 from app.services.preferences import get_preferences
-from app.services.ranking import compute_paper_score
+from app.services.ranking import compute_paper_score, score_paper
 from app.services.summary import extract_topic_tags, generate_llm_summary, generate_summary
 from app.services.text import now_utc
 
@@ -926,7 +926,13 @@ def _create_llm_client(app) -> tuple[LLMClient | None, str]:
 
 
 def _rescore_result(res: dict, config: dict | None) -> None:
-    """Recompute the paper score after enrichment added new signals (in-place)."""
+    """Recompute the paper score after enrichment added new signals (in-place).
+
+    ponytail: no readiness_score here (nor in the pipeline ranker) — result dicts
+    lack the GitHub/HF fields until after save; _rescore_saved_papers then applies
+    the canonical score_paper to the stored rows. Score dicts with readiness only
+    if the pre-save sort order ever needs it.
+    """
     res["paper_score"] = compute_paper_score(
         match_types=res.get("match_types", []),
         matched_terms_count=len(res.get("matches", [])),
@@ -1120,6 +1126,24 @@ def _enrich_results_with_huggingface(app, results: list[dict], session: requests
                 res["resource_links"] = merge_resource_links(res.get("resource_links"), hf_links)
     except Exception:
         LOGGER.warning("Hugging Face Papers enrichment failed (non-fatal)", exc_info=True)
+
+
+def _rescore_saved_papers(app, results: list[dict], config: dict) -> None:
+    """Rescore this run's saved rows once GitHub/HF enrichment filled the readiness
+    inputs, so a new paper carries the same score a full recompute would give it.
+    Non-fatal: the pre-save dict score stays on failure."""
+    links = [res["link"] for res in results if res.get("link")]
+    if not links:
+        return
+    try:
+        from app.models import Paper, db
+
+        with app.app_context():
+            for paper in Paper.query.filter(Paper.link.in_(links)).all():
+                paper.paper_score = score_paper(paper, config=config)
+            db.session.commit()
+    except Exception:
+        LOGGER.warning("Post-enrichment rescore failed (non-fatal)", exc_info=True)
 
 
 def _enrich_results_with_pdf_links(results: list[dict], config: dict | None) -> None:
@@ -1367,6 +1391,7 @@ def _finalize_results(
     _sync_citation_edges(app)
     _enrich_results_with_huggingface(app, results, session, config)
     _enrich_results_with_github(app, results, session, config)
+    _rescore_saved_papers(app, results, config)
 
     _emit(event_callback, "status", {"phase": "thumbnails", "message": "Generating PDF thumbnails..."})
     _generate_thumbnails(app, results, session)
