@@ -325,6 +325,25 @@ class BackfillHuggingFaceTests(FlaskDBTestCase):
         self.assertEqual(stored.hf_upvotes, 4)
 
     @patch("app.enrich.HuggingFaceProvider")
+    def test_backfill_rescore_sees_repo_and_upvotes(self, mock_provider_cls):
+        from app.services.ranking import score_paper
+
+        db.session.add_all([_paper("2601.00006"), _paper("2601.00007")])
+        db.session.commit()
+        mock_provider_cls.return_value.fetch_batch.return_value = {
+            # The repo must be set before the rescore, or its readiness bonus is lost.
+            "2601.00006": {"hf_upvotes": 40, "github_repo_url": "https://github.com/lab/model"},
+            # Upvotes alone (no new links) still move the readiness bonus.
+            "2601.00007": {"hf_upvotes": 40},
+        }
+        mock_provider_cls.return_value.rate_limited = False
+
+        backfill_huggingface(self.app, batch_size=10, delay_seconds=0, emit=lambda _: None)
+
+        for stored in Paper.query.all():
+            self.assertEqual(stored.paper_score, score_paper(stored, config=self.app.config["SCRAPER_CONFIG"]))
+
+    @patch("app.enrich.HuggingFaceProvider")
     def test_backfill_skips_cached_misses(self, mock_provider_cls):
         db.session.add(_paper("2601.00003"))
         db.session.commit()

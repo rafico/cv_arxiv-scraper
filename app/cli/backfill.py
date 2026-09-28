@@ -485,6 +485,7 @@ def backfill_github(
 
     try:
         with app.app_context():
+            scraper_config = app.config.get("SCRAPER_CONFIG")
             while True:
                 papers = (
                     Paper.query.filter(
@@ -520,6 +521,7 @@ def backfill_github(
                     paper.github_repo = data.get("github_repo")
                     paper.github_stars = data.get("github_stars")
                     paper.github_license = data.get("github_license")
+                    _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()
@@ -597,9 +599,10 @@ def backfill_huggingface(
                         merged = merge_resource_links(paper.resource_links_list, hf_links)
                         if len(merged) != len(paper.resource_links_list):
                             paper.resource_links = merged
-                            _recompute_paper_score(paper, scraper_config)
                         if not paper.github_repo:
                             paper.github_repo = extract_github_repo(hf_links)
+                    # After every field is set: upvotes and the repo feed the readiness bonus.
+                    _recompute_paper_score(paper, scraper_config)
                     updated_now += 1
 
                 db.session.commit()

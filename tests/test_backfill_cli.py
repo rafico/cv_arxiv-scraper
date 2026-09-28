@@ -9,7 +9,7 @@ import numpy as np
 
 from app.models import Paper, db
 from app.services.embeddings import EmbeddingService, reset_embedding_service
-from app.services.ranking import compute_paper_score
+from app.services.ranking import compute_paper_score, score_paper
 from backfill_cli import (
     backfill_abstracts,
     backfill_citation_edges,
@@ -396,6 +396,8 @@ class BackfillCliTests(FlaskDBTestCase):
         self.assertEqual(stored.github_repo, "lab/model")
         self.assertEqual(stored.github_stars, 250)
         self.assertEqual(stored.github_license, "MIT")
+        # Repo/stars/license feed the readiness bonus, so the stored score must carry it.
+        self.assertEqual(stored.paper_score, score_paper(stored, config=self.app.config["SCRAPER_CONFIG"]))
         repos = mock_provider_cls.return_value.fetch_batch.call_args.kwargs["repos_by_arxiv_id"]
         self.assertEqual(repos, {"2601.00009": "lab/model"})
 
