@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.services.enrichment import _fetch_api_metadata_batch
+from app.services.enrichment import _fetch_api_metadata, _fetch_api_metadata_batch
 from app.services.ingest.arxiv_api_backend import ArxivRefused
 
 
@@ -23,15 +23,14 @@ class FetchApiMetadataBatch429Tests(unittest.TestCase):
     best-effort metadata, so a 429 should log + return without recursing.
     """
 
-    @patch("app.services.enrichment.fetch_oai_records", return_value={})
+    @patch("app.services.enrichment.fetch_oai_records", return_value=({}, []))
     @patch("app.services.enrichment.time.sleep")
     @patch("app.services.enrichment.request_arxiv_api")
     def test_429_does_not_recurse_split(self, mock_request, _mock_sleep, oai):
         # request_arxiv_api turns a 429 that outlived its retries into ArxivRefused.
         mock_request.side_effect = ArxivRefused(429)
 
-        metadata: dict[str, dict] = {}
-        _fetch_api_metadata_batch([f"2604.0000{i}" for i in range(8)], metadata)
+        metadata = _fetch_api_metadata([f"2604.0000{i}" for i in range(8)])
 
         # Exactly one attempt: no recursive halving on a rate-limit error; one OAI fallback instead.
         self.assertEqual(mock_request.call_count, 1)

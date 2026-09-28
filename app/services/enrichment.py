@@ -334,16 +334,7 @@ def _fetch_api_metadata_batch(
     try:
         response = request_arxiv_api(params, session=session)
     except ArxivRefused:
-        # Refused or rate-limited (429 after retries): halving would only multiply the
-        # requests arXiv is refusing, so ask OAI-PMH for the whole batch instead.
-        for arxiv_id, candidate in fetch_oai_records(arxiv_ids, _session_user_agent(session)).items():
-            metadata[arxiv_id] = {
-                "api_affiliations": candidate.api_affiliations,
-                "categories": candidate.categories,
-                "comment": candidate.comment,
-                "doi": candidate.doi,
-            }
-        return
+        raise  # halving would only multiply the requests arXiv is refusing; the caller asks OAI-PMH
     except Exception as exc:
         if len(arxiv_ids) == 1:
             LOGGER.warning("arXiv API metadata request failed for %s: %s", arxiv_ids[0], exc)
@@ -382,25 +373,40 @@ def _fetch_api_metadata(arxiv_ids: list[str], session: requests.Session | None =
         if index > 0:
             time.sleep(_ARXIV_API_DELAY)
         batch = deduped_ids[index : index + _ARXIV_METADATA_BATCH_SIZE]
-        _fetch_api_metadata_batch(batch, metadata, session=session)
+        try:
+            _fetch_api_metadata_batch(batch, metadata, session=session)
+        except ArxivRefused:
+            # Refused or rate-limited (429 after retries): ask OAI-PMH once for every id left, so
+            # a struggling OAI fails once rather than once per batch.
+            # ponytail: one GetRecord per id at 1 request / 3 s (~15 min for 300 RSS-only ids;
+            # OAI-listed entries skip this). Upgrade: ListRecords the feed's category instead.
+            records, _deferred = fetch_oai_records(deduped_ids[index:], _session_user_agent(session))
+            for arxiv_id, candidate in records.items():
+                metadata[arxiv_id] = {
+                    "api_affiliations": candidate.api_affiliations,
+                    "categories": candidate.categories,
+                    "comment": candidate.comment,
+                    "doi": candidate.doi,
+                }
+            break
 
     return metadata
 
 
 def enrich_entries_with_api_metadata(entries: list[dict], session: requests.Session | None = None) -> None:
-    arxiv_ids = [entry["arxiv_id"] for entry in entries if entry.get("arxiv_id")]
-    if not arxiv_ids:
-        return
-
-    LOGGER.info("Querying arXiv API metadata for %d papers...", len(arxiv_ids))
-    metadata = _fetch_api_metadata(arxiv_ids, session=session)
+    # An OAI-listed entry already carries the metadata; looking it up again costs a GetRecord each.
+    arxiv_ids = [entry["arxiv_id"] for entry in entries if entry.get("arxiv_id") and not entry.get("has_api_metadata")]
+    metadata: dict[str, dict] = {}
+    if arxiv_ids:
+        LOGGER.info("Querying arXiv API metadata for %d papers...", len(arxiv_ids))
+        metadata = _fetch_api_metadata(arxiv_ids, session=session)
 
     enriched = 0
     for entry in entries:
         arxiv_id = entry.get("arxiv_id")
         if not arxiv_id:
             continue
-        data = metadata.get(arxiv_id)
+        data = entry if entry.get("has_api_metadata") else metadata.get(arxiv_id)
 
         # Resource-link extraction only needs the feed abstract (always present),
         # so run it for every entry regardless of whether the API metadata match
@@ -421,7 +427,7 @@ def enrich_entries_with_api_metadata(entries: list[dict], session: requests.Sess
         entry["doi"] = data.get("doi", "")
         enriched += 1
 
-    LOGGER.info("arXiv API metadata enriched %d/%d papers", enriched, len(arxiv_ids))
+    LOGGER.info("arXiv API metadata enriched %d/%d papers", enriched, sum(1 for e in entries if e.get("arxiv_id")))
 
 
 def extract_affiliation_text(

@@ -165,31 +165,69 @@ class ExtractArxivIdsTests(unittest.TestCase):
         self.assertEqual(extract_arxiv_ids(text), [])
 
 
-@patch.object(arxiv_api_backend, "_refused", (0.0, 0))
-class FetchArxivMetadataTests(unittest.TestCase):
-    def test_falls_back_to_oai_when_arxiv_refuses(self):
-        refused = requests.HTTPError(response=MagicMock(status_code=406))
-        oai = MagicMock(content=oai_response("GetRecord", OAI_RECORD_2609_22706))
-        with patch("app.services.ingest.arxiv_api_backend.request_with_backoff", side_effect=[refused, oai]) as fetch:
-            entries = fetch_arxiv_metadata(["arXiv:2609.22706v1"])
+_S2_ATTENTION = {
+    "paperId": "204e3073870fae3d05bcbc2f6a8e263d9b72e776",
+    "externalIds": {"ArXiv": "1706.03762", "DBLP": "journals/corr/VaswaniSPUJGKP17"},
+    "title": "Attention is All you Need",
+    "abstract": "The dominant sequence transduction models are based on complex recurrent networks.",
+    "authors": [{"authorId": "40348417", "name": "Ashish Vaswani"}, {"authorId": "1846258", "name": "Noam Shazeer"}],
+    "publicationDate": "2017-06-12",
+}
 
-        self.assertEqual(fetch.call_args.args[1], "https://oaipmh.arxiv.org/oai")
-        self.assertEqual(len(entries), 1)
-        entry = entries[0]
+
+@patch.object(arxiv_api_backend, "_refused", (0.0, 0))
+@patch("app.services.secret_files.resolve_data_source_key", return_value="s2-key")
+class FetchArxivMetadataTests(unittest.TestCase):
+    @patch("app.services.http_client.request_with_backoff")
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_refused_lookup_asks_semantic_scholar_first_then_oai(self, arxiv, s2, _key):
+        refused = requests.HTTPError(response=MagicMock(status_code=406))
+        arxiv.side_effect = [refused, MagicMock(content=oai_response("GetRecord", OAI_RECORD_2609_22706))]
+        s2.return_value = MagicMock(json=MagicMock(return_value=[_S2_ATTENTION, None]))
+
+        entries, deferred = fetch_arxiv_metadata(["1706.03762", "arXiv:2609.22706v1"])
+
+        # One S2 batch POST for every id; OAI only for the id S2 didn't know.
+        self.assertEqual(s2.call_args.kwargs["json"], {"ids": ["ARXIV:1706.03762", "ARXIV:2609.22706"]})
+        self.assertEqual(s2.call_args.kwargs["headers"], {"x-api-key": "s2-key"})
+        self.assertEqual(arxiv.call_args.kwargs["params"]["identifier"], "oai:arXiv.org:2609.22706")
+        self.assertEqual(deferred, [])
+        by_id = {entry["arxiv_id"]: entry for entry in entries}
+        keys = ("authors", "categories", "link", "pdf_link", "publication_date", "semantic_scholar_id")
         self.assertEqual(
-            {key: entry[key] for key in ("arxiv_id", "authors", "categories", "link", "pdf_link", "publication_date")},
+            {key: by_id["1706.03762"][key] for key in keys},
             {
-                "arxiv_id": "2609.22706",
+                "authors": ["Ashish Vaswani", "Noam Shazeer"],
+                "categories": [],  # S2 has no arXiv categories
+                "link": "https://arxiv.org/abs/1706.03762",
+                "pdf_link": "https://arxiv.org/pdf/1706.03762",
+                "publication_date": "2017-06-12",
+                "semantic_scholar_id": "204e3073870fae3d05bcbc2f6a8e263d9b72e776",
+            },
+        )
+        self.assertEqual(
+            {key: by_id["2609.22706"][key] for key in keys},
+            {
                 "authors": ["Hao Wang"],
                 "categories": ["cs.CV", "cs.IR"],
                 "link": "https://arxiv.org/abs/2609.22706",
                 "pdf_link": "https://arxiv.org/pdf/2609.22706",
                 "publication_date": "2026-09-19",
+                "semantic_scholar_id": None,
             },
         )
-        self.assertTrue(entry["title"].startswith("DOA-SORT"))
+        self.assertTrue(by_id["2609.22706"]["title"].startswith("DOA-SORT"))
 
-    def test_skips_api_error_entries(self):
+    @patch("app.services.onboarding._REFUSED_LOOKUP_BUDGET_SECONDS", 0)
+    @patch("app.services.http_client.request_with_backoff", side_effect=requests.ConnectionError("S2 down"))
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_ids_left_when_the_budget_runs_out_are_deferred_not_missing(self, arxiv, _s2, _key):
+        arxiv.side_effect = [requests.HTTPError(response=MagicMock(status_code=403))]
+
+        self.assertEqual(fetch_arxiv_metadata(["2609.22706", "2609.12871"]), ([], ["2609.22706", "2609.12871"]))
+        self.assertEqual(arxiv.call_count, 1)  # the refused API call; no OAI request past the budget
+
+    def test_skips_api_error_entries(self, _key):
         error_feed = b"""<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
@@ -202,7 +240,7 @@ class FetchArxivMetadataTests(unittest.TestCase):
         with patch(
             "app.services.ingest.arxiv_api_backend.request_with_backoff", return_value=_fake_response(error_feed)
         ):
-            self.assertEqual(fetch_arxiv_metadata(["2401.01234"]), [])
+            self.assertEqual(fetch_arxiv_metadata(["2401.01234"]), ([], []))
 
 
 class BootstrapTests(FlaskDBTestCase):
@@ -246,6 +284,14 @@ class BootstrapTests(FlaskDBTestCase):
 
         # The recompute ran exactly once after the loop.
         recompute.assert_called_once()
+
+    @patch("app.services.interest_model.recompute_interest_similarities", return_value=0)
+    @patch("app.services.onboarding.fetch_arxiv_metadata", return_value=([], ["2401.00002"]))
+    def test_bootstrap_reports_deferred_ids_apart_from_failures(self, _fetch, _recompute):
+        # Deferred ids were never looked up (arXiv refusing, out of time): a retry fixes them.
+        summary = bootstrap_from_arxiv_ids(["2401.00002", "2401.00003"], app=self.app)
+
+        self.assertEqual((summary["deferred"], summary["failed"]), (["2401.00002"], ["2401.00003"]))
 
     def test_bootstrap_dedupes_existing_arxiv_id(self):
         existing = _make_paper("2401.00001")

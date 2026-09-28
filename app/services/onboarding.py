@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 import feedparser
 
 from app.services.embeddings import get_embedding_service
+from app.services.enrichment_providers.semantic_scholar import lookup_arxiv_papers
 from app.services.ingest.arxiv_api_backend import ArxivRefused, fetch_oai_records, request_arxiv_api
 from app.services.ingest.base import (
     clean_abstract,
@@ -40,6 +42,11 @@ LOGGER = logging.getLogger(__name__)
 # separately so it can be dropped — see normalize_arxiv_id.
 _NEW_ID_RE = re.compile(r"(\d{4}\.\d{4,5})")
 _OLD_ID_RE = re.compile(r"([a-z][a-z\-]*)(?:\.[a-z][a-z\-]*)?/(\d{7})", re.IGNORECASE)
+
+# ponytail: the id lookups run inside synchronous routes (import-ids, bootstrap), so while arXiv
+# refuses the API, OAI-PMH gets ~30 s (about 10 ids at 1 request / 3 s) and the rest come back
+# deferred for the user's retry. Upgrade: a background job if people paste many S2-unknown ids.
+_REFUSED_LOOKUP_BUDGET_SECONDS = 30
 
 # Finds ids inside free text (a pasted list, URLs, a .bib). New-scheme ids need a
 # real month (YYMM) and no digit/"digit." before them, so DOIs such as
@@ -104,22 +111,27 @@ def _build_embed_text(title: str, abstract: str) -> str:
     return f"{title} {abstract or ''}"
 
 
-def fetch_arxiv_metadata(arxiv_ids: list[str]) -> list[dict]:
+def fetch_arxiv_metadata(arxiv_ids: list[str]) -> tuple[list[dict], list[str]]:
     """Fetch metadata for ``arxiv_ids`` via the arXiv API ``id_list`` query.
 
-    Returns a list of entry dicts (one per resolved id) with keys
+    Returns ``(entries, deferred)``: entry dicts (one per resolved id) with keys
     ``arxiv_id, title, authors, abstract, link, pdf_link, categories,
-    published, publication_dt, publication_date``. Ids the API does not resolve
-    are simply absent from the result. When arXiv refuses the API, OAI-PMH answers
-    instead (capped per call, see ``fetch_oai_records``).
+    published, publication_dt, publication_date`` (plus ``semantic_scholar_id`` when S2
+    answered), and the ids left unlooked-up for a retry. Ids arXiv does not resolve are
+    simply absent from both. When arXiv refuses the API, one Semantic Scholar batch request
+    answers first (no categories) and OAI-PMH takes the leftovers within a time budget.
     """
     normalized = [nid for nid in (normalize_arxiv_id(raw) for raw in arxiv_ids) if nid]
     if not normalized:
-        return []
+        return [], []
 
+    deadline = time.monotonic() + _REFUSED_LOOKUP_BUDGET_SECONDS
     try:
         response = request_arxiv_api({"id_list": ",".join(normalized), "max_results": len(normalized)})
     except ArxivRefused:
+        found = lookup_arxiv_papers(normalized)
+        records, deferred = fetch_oai_records([i for i in normalized if i not in found], deadline=deadline)
+        found.update(records)
         return [
             {
                 "arxiv_id": arxiv_id,
@@ -132,9 +144,10 @@ def fetch_arxiv_metadata(arxiv_ids: list[str]) -> list[dict]:
                 "published": c.published,
                 "publication_dt": c.publication_dt,
                 "publication_date": c.publication_date,
+                "semantic_scholar_id": c.semantic_scholar_id,
             }
-            for arxiv_id, c in fetch_oai_records(normalized).items()
-        ]
+            for arxiv_id, c in found.items()
+        ], deferred
     feed = feedparser.parse(response.content)
 
     entries: list[dict] = []
@@ -171,7 +184,7 @@ def fetch_arxiv_metadata(arxiv_ids: list[str]) -> list[dict]:
                 "publication_date": publication_date,
             }
         )
-    return entries
+    return entries, []
 
 
 def _resolve_app(app):
@@ -208,6 +221,7 @@ def _insert_paper(entry: dict):
         paper_score=0.0,
         publication_date=entry.get("publication_date") or "Date Unknown",
         publication_dt=entry.get("publication_dt"),
+        semantic_scholar_id=entry.get("semantic_scholar_id"),
         scraped_date=now.date().isoformat(),
         scraped_at=now,
     )
@@ -264,7 +278,7 @@ def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
 
     Returns a summary dict::
 
-        {"requested", "ingested", "already_present", "failed",
+        {"requested", "ingested", "already_present", "failed", "deferred",
          "profile_active", "saved_total"}
     """
     from app.services.feedback import apply_feedback_action
@@ -281,6 +295,7 @@ def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
         "ingested": [],
         "already_present": [],
         "failed": [],
+        "deferred": [],  # not looked up while arXiv refuses us; retry in a minute
         "profile_active": False,
         "saved_total": 0,
     }
@@ -290,9 +305,12 @@ def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
     # Resolve metadata only for ids that aren't already stored.
     to_fetch = [aid for aid in unique_ids if _find_existing_paper(aid) is None]
     fetched_by_id: dict[str, dict] = {}
+    deferred: list[str] = []
     if to_fetch:
         try:
-            fetched_by_id = {entry["arxiv_id"]: entry for entry in fetch_arxiv_metadata(to_fetch)}
+            fetched, deferred = fetch_arxiv_metadata(to_fetch)
+            summary["deferred"] = deferred
+            fetched_by_id = {entry["arxiv_id"]: entry for entry in fetched}
         except Exception:
             LOGGER.warning("Bootstrap arXiv fetch failed (non-fatal)", exc_info=True)
             fetched_by_id = {}
@@ -303,7 +321,8 @@ def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
         if paper is None:
             entry = fetched_by_id.get(arxiv_id)
             if entry is None:
-                summary["failed"].append(arxiv_id)
+                if arxiv_id not in deferred:
+                    summary["failed"].append(arxiv_id)
                 continue
             try:
                 paper = _insert_paper(entry)

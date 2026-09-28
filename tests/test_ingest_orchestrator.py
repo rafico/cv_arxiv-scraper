@@ -37,6 +37,27 @@ class IngestOrchestratorTests(TestCase):
             ["rss:https://rss.arxiv.org/rss/cs.CV", "recent-new:https://rss.arxiv.org/rss/cs.CV"],
         )
 
+    def test_daily_watch_rss_twin_keeps_the_oai_listing_metadata(self):
+        # Under a refusal the rolling window is an OAI listing; its metadata must survive the RSS
+        # precedence, or enrichment fetches it again one GetRecord per paper.
+        listed = _candidate("0001", "oai")
+        listed.categories, listed.comment, listed.doi = ["cs.CV"], "Code: https://github.com/x/y", "10.1/x"
+        listed.api_affiliations, listed.has_api_metadata = "MIT", True
+        orchestrator = IngestOrchestrator(
+            rss_candidate_fetcher=lambda feed_url, *, session=None: [_candidate("0001", "rss")],
+            rolling_window_fetcher=lambda days, feed_url, *, session=None: [listed],
+        )
+
+        [merged] = orchestrator.fetch(
+            mode=IngestMode.DAILY_WATCH, feed_urls=["https://rss.arxiv.org/rss/cs.CV"], rolling_window_days=2
+        )
+
+        self.assertEqual(
+            (merged.title, merged.categories, merged.comment, merged.doi, merged.api_affiliations),
+            ("rss", ["cs.CV"], "Code: https://github.com/x/y", "10.1/x", "MIT"),
+        )
+        self.assertTrue(merged.has_api_metadata)
+
     def test_daily_watch_raises_when_all_feeds_fail(self):
         def failing_fetcher(feed_url, *, session=None):
             raise RuntimeError(f"boom:{feed_url}")

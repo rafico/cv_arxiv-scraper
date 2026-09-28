@@ -240,7 +240,7 @@ def import_collection_ids():
     hidden = [aid for aid, p in local.items() if p.is_hidden]
     missing = [aid for aid in ids if aid not in local]
     try:
-        fetched = fetch_arxiv_metadata(missing) if missing else []
+        fetched, deferred = fetch_arxiv_metadata(missing) if missing else ([], [])
     except Exception:
         return jsonify({"error": "arXiv fetch failed; try again later"}), 502
     papers = [{"arxiv_id": p.arxiv_id, "title": p.title, "link": p.link} for p in local.values()]
@@ -248,10 +248,11 @@ def import_collection_ids():
         arxiv_bundle_entry(
             e["arxiv_id"], e["title"], e["authors"], e["abstract"], e["publication_date"], e["categories"]
         )
+        | {"semantic_scholar_id": e.get("semantic_scholar_id")}
         for e in fetched
     ]
     for entry in papers:
-        entry["semantic_scholar_id"] = s2_ids.get(entry["arxiv_id"])
+        entry["semantic_scholar_id"] = s2_ids.get(entry["arxiv_id"]) or entry.get("semantic_scholar_id")
     manifest = {"bundle_version": BUNDLE_VERSION, "collection": {"name": collection.name}, "papers": papers}
     _collection, stats = import_collection(manifest, into=collection)
     found = {entry["arxiv_id"] for entry in papers}
@@ -259,7 +260,8 @@ def import_collection_ids():
         {
             "collection_id": collection.id,
             **stats,
-            "not_found": [aid for aid in ids if aid not in found],
+            "not_found": [aid for aid in ids if aid not in found and aid not in deferred],
+            "deferred": deferred,  # arXiv is refusing us and the lookup ran out of time; retry
             "hidden": hidden,
         }
     )

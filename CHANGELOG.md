@@ -71,11 +71,15 @@ Wave 5: collections as a literature-review workspace.
   its rolling window came back empty; seed import returned 502 and profile
   bootstrap resolved none of the pasted ids; historical sync and
   `cv-arxiv-sync --query` failed. A refusal is now remembered for 30 minutes
-  and every path falls back: arXiv OAI-PMH for id lookups (~1 per second, 25
-  per request; retry for the rest) and date windows, Semantic Scholar search
-  for `--query` (Computer Science only; a non-cs category or a `cat:`-only
-  query is refused, not guessed). A historical sync reaching too far back for
-  OAI-PMH fails instead of leaving a silent gap.
+  and every path falls back: date windows list arXiv OAI-PMH (arXivRaw, kept by
+  v1 date, so revised papers keep their submission date and window), id lookups
+  ask Semantic Scholar's batch endpoint and then OAI-PMH within a 30 s budget at
+  arXiv's 1 request per 3 s (ids not reached are reported as `deferred`, "try
+  again in a minute"), and `--query` uses Semantic Scholar search (Computer
+  Science only; a non-cs category or a `cat:`-only query is refused, not
+  guessed; `ANDNOT` stays a negation). Papers the OAI listing already
+  described aren't looked up again one by one. A historical sync reaching too
+  far back for OAI-PMH fails up front instead of leaving a silent gap.
 - `/api/search` (every mode) and MCP `search_papers` in hybrid and semantic
   mode no longer return skipped papers, matching the dashboard and exports;
   MCP over-fetches so skipped top hits don't leave the page empty.

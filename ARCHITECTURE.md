@@ -74,11 +74,16 @@ bonus (result dicts get their GitHub/HF inputs only after save), so
 **arXiv refusals.** Every export-API call goes through `request_arxiv_api`
 (`ingest/arxiv_api_backend.py`). A 403/406, or a 429 that outlives the retries,
 is remembered in-process for 30 minutes and raised as `ArxivRefused`, so every
-later caller goes straight to its fallback: id lookups (scrape metadata, seed
-import, bootstrap) use OAI-PMH `GetRecord` (~1 req/s, 25 ids per call); date
-windows (rolling window, backfill/catch-up) use OAI-PMH `ListRecords` from the
-window start, raising past 10 pages rather than leaving a gap; `cv-arxiv-sync
---query` uses Semantic Scholar bulk search (Computer Science only).
+later caller goes straight to its fallback. OAI-PMH is read in the `arXivRaw`
+format (its v1 `<version>` date is the submission date) at arXiv's 1 request / 3 s.
+Date windows (rolling window, backfill/catch-up) use `ListRecords` from the window
+start, keeping records by v1 date; a start more than ~60 days back (or a listing
+past 10 pages) raises rather than leaving a gap. Listed entries carry their
+metadata (`has_api_metadata`), so scrape enrichment runs `GetRecord` only for
+RSS-only entries. Seed import and bootstrap ask Semantic Scholar's batch endpoint
+first, then `GetRecord` for the leftovers within a 30 s budget; ids not reached
+come back as `deferred` (retry), not `not_found`. `cv-arxiv-sync --query` uses
+Semantic Scholar bulk search (Computer Science only).
 
 Errors from ingest backends **propagate** by design (no catch-all swallow). The
 background job manager converts them to a `scrape_error` SSE event; the

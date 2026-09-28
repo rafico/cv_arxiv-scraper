@@ -19,8 +19,9 @@ production ranker recipe and an 800k-rating public dataset), PaperQA2 / `paper-q
 - **arXiv's export API throttles by host** (since Sept 2026): every uncached request
   gets HTTP 406 with an empty body (or 429s that outlive the retries), and waiting
   minutes doesn't clear it. Chosen fallbacks, taken for 30 minutes after a refusal:
-  arXiv OAI-PMH (`GetRecord` for ids at ~1 req/s, `ListRecords` for date windows) and
-  Semantic Scholar bulk search for topic queries (CS only, no arXiv categories). Deep
+  Semantic Scholar's batch endpoint then arXiv OAI-PMH (`GetRecord`, 1 req / 3 s) for ids,
+  OAI-PMH `ListRecords` (arXivRaw, by v1 date) for date windows, and Semantic Scholar bulk
+  search for topic queries (CS only, no arXiv categories). Deep
   backfill still points at the Kaggle dump above.
 - **Papers with Code shut down** (July 2025). The app never depended on it (verified),
   but the *replacement* opportunity matters: **HF Papers API** for ongoing code links +

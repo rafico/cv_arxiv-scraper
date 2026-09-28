@@ -404,6 +404,11 @@
                         });
                         const out = await res.json();
                         if (res.ok && out.hidden.length) { add.textContent = "Added, but hidden (skipped earlier)"; return; }
+                        if (res.ok && out.deferred.length) {
+                            add.disabled = false;
+                            add.textContent = "arXiv busy, try again in a minute";
+                            return;
+                        }
                         if (res.ok && !out.not_found.length) { card.remove(); return; }
                     } catch (e) { /* fall through */ }
                     add.disabled = false;
@@ -433,10 +438,13 @@
             const data = await res.json();
             if (!res.ok) { importStatus.textContent = "Error: " + (data.error || "import failed"); return; }
             const missed = data.not_found.length ? " Not found: " + data.not_found.join(", ") + "." : "";
+            const deferred = data.deferred.length
+                ? " arXiv is busy, try again in a minute for: " + data.deferred.join(", ") + "." : "";
             const hidden = data.hidden.length
                 ? " Hidden (skipped earlier), un-skip to see them here: " + data.hidden.join(", ") + "." : "";
-            importStatus.textContent = data.created + " new, " + data.linked + " already in library." + missed + hidden;
-            if (!data.not_found.length && !data.hidden.length) window.location.reload();
+            importStatus.textContent =
+                data.created + " new, " + data.linked + " already in library." + missed + deferred + hidden;
+            if (!data.not_found.length && !data.deferred.length && !data.hidden.length) window.location.reload();
         } catch (e) {
             importStatus.textContent = "Error: request failed";
         } finally {

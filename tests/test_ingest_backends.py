@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 from types import SimpleNamespace
 from unittest import TestCase
@@ -15,6 +16,7 @@ from app.services.ingest.arxiv_api_backend import (
     _build_query,
     _oai_set,
     fetch_oai_records,
+    list_oai_candidates,
     request_arxiv_api,
 )
 from app.services.ingest.base import clean_abstract, parse_publication_dt
@@ -317,39 +319,177 @@ class ArxivAdapterTests(TestCase):
         self.assertEqual(entry["categories"], ["cs.CV"])
 
 
-# Two more live OAI records (abstracts trimmed) that a cs.CV harvest from 2026-09-11 returns but the
-# window must drop: an old paper whose metadata was revised, and a 2508 paper whose <created> is its
-# v2 date (arXiv's OAI feed reports a later version's date there, not v1's).
+# More live arXivRaw records (abstracts trimmed) that a cs.CV harvest from 2026-09-11 returns: an old
+# paper revised since (2303.15533), a 2508 paper whose v2 landed in the window (2508.11450), and a
+# paper submitted in the window and revised after it (2609.12825). 1706.03762's seven versions show
+# the v1 date wins (the arXiv format's <created> says 2023); 2609.28194 has numbered affiliations.
 OAI_RECORD_2303_15533 = """<record>
-    <header><identifier>oai:arXiv.org:2303.15533</identifier><datestamp>2026-09-24</datestamp></header>
-    <metadata>
-        <arXiv xmlns="http://arxiv.org/OAI/arXiv/">
+                <header>
+        <identifier>oai:arXiv.org:2303.15533</identifier>
+        <datestamp>2026-09-24</datestamp>
+            <setSpec>cs:cs:LG</setSpec>
+            <setSpec>cs:cs:CV</setSpec>
+    </header>
+            <metadata>
+                        <arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <id>2303.15533</id>
-        <created>2023-03-27</created>
-            <updated>2026-09-24</updated>
-        <authors><author><keyname>Pathak</keyname><forenames>Arkanath</forenames></author></authors>
+        <submitter>Arkanath Pathak</submitter>
+            <version version="v1">
+                <date>Mon, 27 Mar 2023 18:18:15 GMT</date>
+                <size>3279kb</size>
+                    <source_type>D</source_type>
+            </version>
         <title>Sequential training of GANs against GAN-classifiers reveals correlated &#34;knowledge gaps&#34; present among independently trained GAN instances</title>
-            <categories>cs.LG cs.CV</categories>
+        <authors>Arkanath Pathak, Nicholas Dufour</authors>
+        <categories>cs.LG cs.CV</categories>
+            <journal-ref>2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)</journal-ref>
             <doi>10.1109/CVPR52729.2023.02343</doi>
+            <license>http://creativecommons.org/licenses/by/4.0/</license>
             <abstract>Modern Generative Adversarial Networks (GANs) generate realistic images remarkably well.</abstract>
-    </arXiv>
-    </metadata>
-</record>"""
+    </arXivRaw>
+            </metadata>
+        </record>"""
 
 OAI_RECORD_2508_11450 = """<record>
-    <header><identifier>oai:arXiv.org:2508.11450</identifier><datestamp>2026-09-14</datestamp></header>
-    <metadata>
-        <arXiv xmlns="http://arxiv.org/OAI/arXiv/">
+                <header>
+        <identifier>oai:arXiv.org:2508.11450</identifier>
+        <datestamp>2026-09-14</datestamp>
+            <setSpec>eess:eess:IV</setSpec>
+            <setSpec>cs:cs:CV</setSpec>
+    </header>
+            <metadata>
+                        <arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <id>2508.11450</id>
-        <created>2026-09-11</created>
-            <updated>2026-09-14</updated>
-        <authors><author><keyname>Lee</keyname><forenames>Augustine X. W.</forenames></author></authors>
+        <submitter>Augustine Lee</submitter>
+            <version version="v1">
+                <date>Fri, 15 Aug 2025 12:57:35 GMT</date>
+                <size>857kb</size>
+                    <source_type>A</source_type>
+            </version>
+            <version version="v2">
+                <date>Fri, 11 Sep 2026 06:31:45 GMT</date>
+                <size>1312kb</size>
+            </version>
         <title>Subcortical Masks Generation in CT Images via Ensemble-Based Cross-Domain Label Transfer</title>
-            <categories>eess.IV cs.CV</categories>
-            <abstract>Subcortical segmentation in neuroimages plays an important role in understanding brain anatomy.</abstract>
-    </arXiv>
-    </metadata>
-</record>"""
+        <authors>Augustine X. W. Lee, Pak-Hei Yeung and Jagath C. Rajapakse</authors>
+        <categories>eess.IV cs.CV</categories>
+            <comments>Accepted by Annual Conference on Medical Image Understanding and Analysis (MIUA) 2025 (Oral)</comments>
+            <doi>10.1007/978-3-031-98694-9_12</doi>
+            <license>http://creativecommons.org/licenses/by-nc-sa/4.0/</license>
+            <abstract>Subcortical segmentation in neuroimages plays an important role in understanding brain anatomy and facilitating computer-aided diagnosis of traumatic brain injuries and neurodegenerative disorders.</abstract>
+    </arXivRaw>
+            </metadata>
+        </record>"""
+
+OAI_RECORD_2609_12825 = r"""<record>
+                <header>
+        <identifier>oai:arXiv.org:2609.12825</identifier>
+        <datestamp>2026-09-24</datestamp>
+            <setSpec>cs:cs:CV</setSpec>
+    </header>
+            <metadata>
+                        <arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <id>2609.12825</id>
+        <submitter>Mustafa Bora Celik</submitter>
+            <version version="v1">
+                <date>Fri, 11 Sep 2026 13:21:59 GMT</date>
+                <size>3041kb</size>
+            </version>
+            <version version="v2">
+                <date>Wed, 23 Sep 2026 11:01:12 GMT</date>
+                <size>3041kb</size>
+            </version>
+        <title>SCDM: Spatial-Contextual Disentanglement Mamba via Differential Inference for Efficient Image Classification</title>
+        <authors>Mustafa Bora \c{C}elik, Hayriye Akta\c{s} Din\c{c}er, Ayse Keles</authors>
+        <categories>cs.CV</categories>
+            <comments>9 pages, 5 figures</comments>
+            <license>http://creativecommons.org/licenses/by/4.0/</license>
+            <abstract>State Space Models (SSMs), particularly VMamba, have emerged as efficient alternatives for modeling long-range dependencies in medical image analysis.</abstract>
+    </arXivRaw>
+            </metadata>
+        </record>"""
+
+OAI_RECORD_1706_03762 = """<record>
+                <header>
+        <identifier>oai:arXiv.org:1706.03762</identifier>
+        <datestamp>2023-08-03</datestamp>
+            <setSpec>cs:cs:CL</setSpec>
+            <setSpec>cs:cs:LG</setSpec>
+    </header>
+            <metadata>
+                        <arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <id>1706.03762</id>
+        <submitter>Llion Jones</submitter>
+            <version version="v1">
+                <date>Mon, 12 Jun 2017 17:57:34 GMT</date>
+                <size>1102kb</size>
+                    <source_type>D</source_type>
+            </version>
+            <version version="v2">
+                <date>Mon, 19 Jun 2017 16:49:45 GMT</date>
+                <size>1124kb</size>
+                    <source_type>D</source_type>
+            </version>
+            <version version="v3">
+                <date>Tue, 20 Jun 2017 05:20:02 GMT</date>
+                <size>1124kb</size>
+                    <source_type>D</source_type>
+            </version>
+            <version version="v4">
+                <date>Fri, 30 Jun 2017 17:29:30 GMT</date>
+                <size>1124kb</size>
+                    <source_type>D</source_type>
+            </version>
+            <version version="v5">
+                <date>Wed, 06 Dec 2017 03:30:32 GMT</date>
+                <size>1123kb</size>
+                    <source_type>D</source_type>
+            </version>
+            <version version="v6">
+                <date>Mon, 24 Jul 2023 00:48:54 GMT</date>
+                <size>1124kb</size>
+                    <source_type>D</source_type>
+            </version>
+            <version version="v7">
+                <date>Wed, 02 Aug 2023 00:41:18 GMT</date>
+                <size>1124kb</size>
+                    <source_type>D</source_type>
+            </version>
+        <title>Attention Is All You Need</title>
+        <authors>Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin</authors>
+        <categories>cs.CL cs.LG</categories>
+            <comments>15 pages, 5 figures</comments>
+            <license>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</license>
+            <abstract>The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration.</abstract>
+    </arXivRaw>
+            </metadata>
+        </record>"""
+
+OAI_RECORD_2609_28194 = """<record>
+                <header>
+        <identifier>oai:arXiv.org:2609.28194</identifier>
+        <datestamp>2026-09-24</datestamp>
+            <setSpec>cs:cs:LG</setSpec>
+            <setSpec>cs:cs:CV</setSpec>
+            <setSpec>eess:eess:IV</setSpec>
+    </header>
+            <metadata>
+                        <arXivRaw xmlns="http://arxiv.org/OAI/arXivRaw/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <id>2609.28194</id>
+        <submitter>Thomas Ratsakatika</submitter>
+            <version version="v1">
+                <date>Wed, 23 Sep 2026 14:33:19 GMT</date>
+                <size>4057kb</size>
+            </version>
+        <title>Geospatial embeddings detect old-growth forests but buffered spatial validation narrows their advantage over Sentinel features</title>
+        <authors>Thomas Ratsakatika (1), Mihai Zotta (2), Srinivasan Keshav (3), Emily R. Lines (1) ((1) Department of Geography, University of Cambridge, Cambridge, UK, (2) Fundatia Conservation Carpathia, Brasov, Romania, (3) Department of Computer Science and Technology, University of Cambridge, Cambridge, UK)</authors>
+        <categories>cs.LG cs.CV eess.IV</categories>
+            <comments>34 pages, including supplementary material (19-page main article with 7 figures and 3 tables; 15-page supplement with 9 figures and 21 tables). Submitted for publication. Data: https://doi.org/10.5281/zenodo.22693148 (embargoed until publication); code: https://github.com/ratsakatika/detecting-old-growth-forests</comments>
+            <license>http://creativecommons.org/licenses/by/4.0/</license>
+            <abstract>Old-growth forests develop over centuries under minimal anthropogenic disturbance, producing structurally complex and biodiverse stands.</abstract>
+    </arXivRaw>
+            </metadata>
+        </record>"""
 
 
 def _http_error(status: int) -> requests.HTTPError:
@@ -372,57 +512,88 @@ class ArxivRefusalTests(TestCase):
 
         self.assertEqual(mock_request.call_count, 2)  # the remembered refusal never reached arXiv
 
-    @patch.object(arxiv_api_backend, "_OAI_LOOKUP_CAP", 2)
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff", side_effect=_http_error(429))
+    def test_429_that_outlives_the_retries_is_a_refusal(self, mock_request):
+        # Otherwise a 429 would fall into _fetch_api_metadata_batch's halving recursion.
+        for _ in range(2):
+            with self.assertRaises(ArxivRefused) as refused:
+                request_arxiv_api({"id_list": "2609.22706"})
+            self.assertEqual(refused.exception.status, 429)
+        self.assertEqual(mock_request.call_count, 1)
+
     @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
-    def test_fetch_oai_records_parses_the_live_record_shape(self, mock_request):
+    def test_fetch_oai_records_parses_the_live_arxivraw_shape(self, mock_request):
         mock_request.side_effect = [
-            Mock(content=oai_response("GetRecord", OAI_RECORD_2609_22706)),
+            Mock(content=oai_response("GetRecord", OAI_RECORD_1706_03762)),
             Mock(
                 content=b'<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"><error code="idDoesNotExist"/></OAI-PMH>'
             ),
+            Mock(content=oai_response("GetRecord", OAI_RECORD_2609_28194)),
         ]
 
-        records = fetch_oai_records(["2609.22706", "2609.99999", "2609.00001"])
+        records, deferred = fetch_oai_records(["1706.03762", "2609.99999", "2609.28194"])
 
-        self.assertEqual(list(records), ["2609.22706"])  # unknown id absent, third id past the cap
-        paper = records["2609.22706"]
+        self.assertEqual((list(records), deferred), (["1706.03762", "2609.28194"], []))  # unknown id absent
+        attention = records["1706.03762"]
         self.assertEqual(
-            (paper.title, paper.authors_list, paper.categories, paper.link, paper.publication_dt),
-            (
-                "DOA-SORT: Directional Occlusion-Aware Multi-Object Tracking with Distributional Observations",
-                ["Hao Wang"],
-                ["cs.CV", "cs.IR"],
-                "https://arxiv.org/abs/2609.22706",
-                date(2026, 9, 19),
-            ),
+            (attention.title, attention.authors_list[:2], len(attention.authors_list), attention.publication_dt),
+            ("Attention Is All You Need", ["Ashish Vaswani", "Noam Shazeer"], 8, date(2017, 6, 12)),  # v1, not v7
         )
-        self.assertTrue(paper.abstract.startswith("Identity association in multi-object tracking"))
-        self.assertEqual((paper.comment, paper.doi), ("", ""))
-        self.assertEqual(mock_request.call_count, 2)
+        self.assertEqual(
+            (attention.categories, attention.comment, attention.doi), (["cs.CL", "cs.LG"], "15 pages, 5 figures", "")
+        )
+        forests = records["2609.28194"]
+        self.assertEqual(
+            forests.authors_list, ["Thomas Ratsakatika", "Mihai Zotta", "Srinivasan Keshav", "Emily R. Lines"]
+        )
+        self.assertTrue(forests.api_affiliations.startswith("(1) Department of Geography, University of Cambridge"))
+        self.assertIn("https://github.com/ratsakatika/detecting-old-growth-forests", forests.comment)
+        self.assertTrue(forests.has_api_metadata)
         self.assertEqual(
             mock_request.call_args_list[0].kwargs["params"],
-            {"verb": "GetRecord", "identifier": "oai:arXiv.org:2609.22706", "metadataPrefix": "arXiv"},
+            {"verb": "GetRecord", "identifier": "oai:arXiv.org:1706.03762", "metadataPrefix": "arXivRaw"},
         )
+        # arXiv's 1 request / 3 s (the limiter the export API shares), full retries without a deadline.
+        self.assertEqual({c.kwargs["rate_limit_profile"] for c in mock_request.call_args_list}, {"bulk"})
+        self.assertEqual({c.kwargs["attempts"] for c in mock_request.call_args_list}, {4})
 
     @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
-    def test_refused_listing_falls_back_to_an_oai_window(self, mock_request):
+    def test_fetch_oai_records_defers_what_the_deadline_or_a_failure_cuts_off(self, mock_request):
+        ids = ["2609.22706", "2609.12871", "2609.28194"]
+        self.assertEqual(fetch_oai_records(ids, deadline=time.monotonic() - 1), ({}, ids))
+        mock_request.assert_not_called()
+
+        mock_request.side_effect = [Mock(content=oai_response("GetRecord", OAI_RECORD_2609_22706)), _http_error(503)]
+        records, deferred = fetch_oai_records(ids, deadline=time.monotonic() + 60)
+
+        self.assertEqual((list(records), deferred), (["2609.22706"], ["2609.12871", "2609.28194"]))
+        self.assertEqual({c.kwargs["attempts"] for c in mock_request.call_args_list}, {1})  # interactive: no retries
+
+    @patch("app.services.ingest.arxiv_api_backend.utc_today", return_value=date(2026, 9, 28))
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_refused_listing_falls_back_to_an_oai_window(self, mock_request, _today):
         mock_request.side_effect = [
             _http_error(406),
             Mock(content=oai_response("ListRecords", OAI_RECORD_2303_15533, OAI_RECORD_2508_11450, token="tok1")),
-            Mock(content=oai_response("ListRecords", OAI_RECORD_2609_22706, OAI_RECORD_2609_12871, token="")),
+            Mock(
+                content=oai_response(
+                    "ListRecords", OAI_RECORD_2609_22706, OAI_RECORD_2609_12871, OAI_RECORD_2609_12825, token=""
+                )
+            ),
         ]
         window = {"start_dt": date(2026, 9, 11), "end_dt": date(2026, 9, 18)}
 
         candidates = ArxivApiBackend().fetch(categories=["cs.CV"], max_results=25, user_agent="MyApp/9.9", **window)
 
-        # 2303.15533: created long ago; 2508.11450: created in the window is its v2, the id says August 2025;
-        # 2609.22706: created the day after the window.
-        self.assertEqual([c.arxiv_id for c in candidates], ["2609.12871"])
+        # By v1 date: 2303.15533 is from 2023 and 2508.11450 from 2025 (only their revisions are recent),
+        # 2609.22706 is the day after the window, and 2609.12825 counts although its v2 came after it.
+        self.assertEqual([c.arxiv_id for c in candidates], ["2609.12871", "2609.12825"])
         self.assertEqual(candidates[0].comment, 'Paper accompanying the dataset "7V-Scanario"')
+        self.assertTrue(all(c.has_api_metadata for c in candidates))
         self.assertEqual(
             [call.kwargs["params"] for call in mock_request.call_args_list[1:]],
             [
-                {"verb": "ListRecords", "metadataPrefix": "arXiv", "set": "cs:cs:CV", "from": "2026-09-11"},
+                {"verb": "ListRecords", "metadataPrefix": "arXivRaw", "set": "cs:cs:CV", "from": "2026-09-11"},
                 {"verb": "ListRecords", "resumptionToken": "tok1"},
             ],
         )
@@ -430,6 +601,14 @@ class ArxivRefusalTests(TestCase):
         with self.assertRaises(ArxivRefused):  # a search has no OAI equivalent; the caller decides
             ArxivApiBackend().fetch(categories=["cs.CV"], query="ti:x", **window)
         self.assertEqual(mock_request.call_count, 3)
+
+    @patch("app.services.ingest.arxiv_api_backend.utc_today", return_value=date(2026, 9, 28))
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_oai_listing_refuses_a_deep_window_before_downloading(self, mock_request, _today):
+        # The listing covers every record revised since the start, whatever the window's width.
+        with self.assertRaisesRegex(RuntimeError, "use a later start date"):
+            list_oai_candidates(["cs.CV"], date(2026, 6, 1), date(2026, 6, 1), 25)
+        mock_request.assert_not_called()
 
     def test_oai_set_names_follow_the_archive_group(self):
         self.assertEqual(

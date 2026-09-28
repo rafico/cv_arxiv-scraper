@@ -189,6 +189,8 @@ def run_query_import(
                     "WARNING: Semantic Scholar has no arXiv categories; --category/cat: filters were "
                     "replaced by all of Computer Science."
                 )
+            if re.search(r"\bau:", query):
+                emit("WARNING: Semantic Scholar has no author search; au: names were matched as title/abstract words.")
         if len(candidates) >= max_results:
             emit(
                 f"WARNING: hit --max-results {max_results}. arXiv returns newest first, so the OLDEST "
@@ -196,6 +198,7 @@ def run_query_import(
             )
         papers = [
             arxiv_bundle_entry(c.arxiv_id, c.title, c.authors_list, c.abstract, c.publication_date, c.categories)
+            | {"semantic_scholar_id": c.semantic_scholar_id}
             for c in candidates
             if c.arxiv_id
         ]

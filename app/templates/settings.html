@@ -141,9 +141,11 @@
                     const data = await res.json();
                     if (!res.ok) { status.textContent = data.error || 'Failed.'; return; }
                     const profile = data.profile_active ? ' Learned profile is now active.' : '';
+                    const deferred = data.deferred.length
+                        ? ` arXiv is busy, try again in a minute for ${data.deferred.length} ID(s).` : '';
                     status.textContent =
                         `Saved ${data.saved_total} (added ${data.ingested.length}, ` +
-                        `already had ${data.already_present.length}, failed ${data.failed.length}).${profile}`;
+                        `already had ${data.already_present.length}, failed ${data.failed.length}).${profile}${deferred}`;
                 } catch (e) {
                     status.textContent = 'Network error.';
                 } finally {

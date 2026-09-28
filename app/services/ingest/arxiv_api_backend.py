@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable, Sequence
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 import defusedxml.ElementTree as ET
@@ -15,7 +16,7 @@ from app.constants import ARXIV_API_BATCH_SIZE as _ARXIV_API_BATCH_SIZE
 from app.constants import ARXIV_API_DELAY as _ARXIV_API_DELAY
 from app.services.http_client import request_with_backoff
 from app.services.ingest.base import PaperCandidate, clean_abstract, extract_arxiv_id, parse_publication_dt
-from app.services.text import clean_whitespace
+from app.services.text import clean_whitespace, utc_today
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,17 +42,15 @@ _REFUSAL_MEMO_SECONDS = 30 * 60
 _refused: tuple[float, int] = (0.0, 0)
 
 _OAI_URL = "https://oaipmh.arxiv.org/oai"
-_OAI_NS = {"oai": "http://www.openarchives.org/OAI/2.0/", "arxiv": "http://arxiv.org/OAI/arXiv/"}
-# ~1 request/s through the shared token bucket, for GetRecord's one-request-per-id loop.
-_OAI_PACE = {"ingest": {"rate_limit": {"requests_per_second": 1.0, "burst": 1}}}
-# ponytail: GetRecord is one request per id, so one call resolves at most this many (~30 s,
-# which keeps the synchronous import-ids route bearable); the rest come back unresolved and
-# a retry picks them up, since callers only look up ids they don't store yet. Upgrade:
-# Semantic Scholar's batch endpoint (500 ids per request, no arXiv categories).
-_OAI_LOOKUP_CAP = 25
+_OAI_NS = {"oai": "http://www.openarchives.org/OAI/2.0/", "raw": "http://arxiv.org/OAI/arXivRaw/"}
 # A ListRecords page holds ~1300 records (~4 MB).
 _OAI_MAX_PAGES = 10
+# A listing costs every record touched since its start (cs.CV: ~150 a day), so a start further
+# back than this can't be listed in _OAI_MAX_PAGES; refuse it before downloading anything.
+_OAI_MAX_DAYS = 60
 _OAI_GROUPS = frozenset({"cs", "econ", "eess", "math", "q-bio", "q-fin", "stat"})
+# A top-level "(...)" in an arXivRaw author string, one nesting level deep: "A (1), B (2) ((1) MIT, (2) ETH)".
+_AUTHOR_PARENS_RE = re.compile(r"\(((?:[^()]|\([^()]*\))*)\)")
 
 
 class ArxivRefused(requests.HTTPError):
@@ -88,16 +87,17 @@ def request_arxiv_api(params: dict[str, str | int], **kwargs: Any) -> requests.R
         raise ArxivRefused(status, response=exc.response) from exc
 
 
-def _oai_root(params: dict[str, str], user_agent: str | None = None) -> ET.Element:
-    # No session: its limiter/UA would be retuned to _OAI_PACE. The caller passes its UA.
+def _oai_root(params: dict[str, str], user_agent: str | None = None, attempts: int = _ARXIV_API_ATTEMPTS) -> ET.Element:
+    # arXiv's 1 request / 3 s covers OAI-PMH too: the "bulk" limiter is the one the export API
+    # shares. No session: its limiter/UA would be retuned. The caller passes its UA.
     response = request_with_backoff(
         "GET",
         _OAI_URL,
         params=params,
         timeout=_ARXIV_API_TIMEOUT,
-        attempts=_ARXIV_API_ATTEMPTS,
+        attempts=attempts,
         base_delay=_ARXIV_API_BASE_DELAY,
-        scraper_config=_OAI_PACE,
+        rate_limit_profile="bulk",
         user_agent=user_agent,
         max_bytes=25 * 1024 * 1024,
     )
@@ -105,62 +105,66 @@ def _oai_root(params: dict[str, str], user_agent: str | None = None) -> ET.Eleme
 
 
 def _parse_oai_record(meta: ET.Element) -> PaperCandidate:
-    """Map an OAI-PMH ``arXiv``-format record onto the candidate shape the Atom API yields.
+    """Map an OAI-PMH ``arXivRaw`` record onto the candidate shape the Atom API yields.
 
-    ``<created>`` stands in for the Atom ``<published>`` (v1) date, but arXiv's OAI feed
-    reports a later version's date there for revised papers.
+    arXivRaw because its v1 ``<version>`` date is the Atom ``<published>`` date; the ``arXiv``
+    format's ``<created>`` is often a later version's (1706.03762: 2023, not 2017). Authors come
+    as one string whose parenthesised groups are the affiliations Atom splits out.
     """
 
-    def text(tag: str) -> str:
-        return clean_whitespace(meta.findtext(f"arxiv:{tag}", "", _OAI_NS))
+    def text(path: str) -> str:
+        return clean_whitespace(meta.findtext(path, "", _OAI_NS))
 
-    authors: list[str] = []
-    affiliations: list[str] = []
-    for author in meta.iterfind("arxiv:authors/arxiv:author", _OAI_NS):
-        names = (author.findtext(f"arxiv:{tag}", "", _OAI_NS) for tag in ("forenames", "keyname", "suffix"))
-        authors.append(clean_whitespace(" ".join(names)))
-        affiliations += [clean_whitespace(el.text or "") for el in author.iterfind("arxiv:affiliation", _OAI_NS)]
-    link = f"https://arxiv.org/abs/{text('id')}"
-    created = text("created")
-    publication_dt, publication_date = parse_publication_dt(created or None)
+    authors = text("raw:authors")
+    names = re.split(r",\s*(?:and\s+)?|\s+and\s+", _AUTHOR_PARENS_RE.sub("", authors))
+    authors_list = [clean_whitespace(name) for name in names if name.strip()]
+    affiliations = [a for a in _AUTHOR_PARENS_RE.findall(authors) if not re.fullmatch(r"[\d,\s]*", a)]  # not "(1, 2)"
+    link = f"https://arxiv.org/abs/{text('raw:id')}"
+    published = text("raw:version[@version='v1']/raw:date")
+    publication_dt, publication_date = parse_publication_dt(published or None)
     return PaperCandidate(
         arxiv_id=extract_arxiv_id(link),
         link=link,
-        title=text("title"),
-        author=", ".join(authors),
-        authors_list=authors,
-        abstract=clean_abstract(meta.findtext("arxiv:abstract", "", _OAI_NS)),
-        published=created or None,
+        title=text("raw:title"),
+        author=", ".join(authors_list),
+        authors_list=authors_list,
+        abstract=clean_abstract(meta.findtext("raw:abstract", "", _OAI_NS)),
+        published=published or None,
         publication_dt=publication_dt,
         publication_date=publication_date,
-        categories=text("categories").split(),
-        comment=text("comments"),
-        doi=text("doi"),
-        api_affiliations="\n".join(dict.fromkeys(filter(None, affiliations))),
+        categories=text("raw:categories").split(),
+        comment=text("raw:comments"),
+        doi=text("raw:doi"),
+        api_affiliations="\n".join(dict.fromkeys(clean_whitespace(a) for a in affiliations)),
+        has_api_metadata=True,
     )
 
 
-def fetch_oai_records(arxiv_ids: Sequence[str], user_agent: str | None = None) -> dict[str, PaperCandidate]:
+def fetch_oai_records(
+    arxiv_ids: Sequence[str], user_agent: str | None = None, deadline: float | None = None
+) -> tuple[dict[str, PaperCandidate], list[str]]:
     """Look ids up via OAI-PMH GetRecord, the fallback when the export API refuses us.
 
-    Best effort, like the id_list query: unknown ids are absent from the result, and a
-    request that still fails after its retries ends the loop (OAI is struggling too).
+    One request per id, paced at arXiv's 1 request / 3 s. Returns the records found (unknown
+    ids are absent, like the id_list query) and the ids deferred for a retry: those left once
+    ``deadline`` (a ``time.monotonic()`` value, for synchronous callers) passes or a request
+    fails (OAI is struggling too). Callers with a deadline get one attempt per request.
     """
-    if len(arxiv_ids) > _OAI_LOOKUP_CAP:
-        LOGGER.warning("arXiv OAI-PMH fallback resolves %d of %d ids this call", _OAI_LOOKUP_CAP, len(arxiv_ids))
     found: dict[str, PaperCandidate] = {}
-    for arxiv_id in arxiv_ids[:_OAI_LOOKUP_CAP]:
-        params = {"verb": "GetRecord", "identifier": f"oai:arXiv.org:{arxiv_id}", "metadataPrefix": "arXiv"}
+    for index, arxiv_id in enumerate(arxiv_ids):
+        if deadline is not None and time.monotonic() >= deadline:
+            return found, list(arxiv_ids[index:])
+        params = {"verb": "GetRecord", "identifier": f"oai:arXiv.org:{arxiv_id}", "metadataPrefix": "arXivRaw"}
         try:
-            root = _oai_root(params, user_agent)
+            root = _oai_root(params, user_agent, attempts=1 if deadline is not None else _ARXIV_API_ATTEMPTS)
         except Exception as exc:
-            LOGGER.warning("arXiv OAI-PMH lookup failed at %s; stopping the fallback: %s", arxiv_id, exc)
-            break
-        for meta in root.iterfind(".//arxiv:arXiv", _OAI_NS):
+            LOGGER.warning("arXiv OAI-PMH lookup failed at %s; deferring the rest: %s", arxiv_id, exc)
+            return found, list(arxiv_ids[index:])
+        for meta in root.iterfind(".//raw:arXivRaw", _OAI_NS):
             candidate = _parse_oai_record(meta)
             if candidate.arxiv_id:
                 found[candidate.arxiv_id] = candidate
-    return found
+    return found, []
 
 
 def _oai_set(category: str) -> str:
@@ -177,41 +181,38 @@ def list_oai_candidates(
 
     OAI datestamps are last-modified, so this harvests from ``start_dt`` with no ``until`` (a
     paper submitted in the window and revised since carries a later datestamp) and keeps the
-    records whose ``<created>`` falls in the window. ``<created>`` can be a revision's date, so
-    the id's YYMM must also fall in the window (plus a month of announcement lag); that drops
-    old papers revised in the window. Newest first and capped, like the API listing.
+    records whose v1 date falls in the window. Newest first and capped, like the API listing.
 
-    ponytail: the cost is every record revised since ``start_dt`` — fine for the rolling
-    window, catch-up and recent sync chunks; a deeper window raises past _OAI_MAX_PAGES rather
-    than return a silent gap, and a paper revised after its window closed is missed
-    (end = today loses nothing). Upgrade: arXiv's bulk metadata snapshot for deep backfills.
+    ponytail: the cost is every record touched since ``start_dt``, fine for the rolling window,
+    catch-up and recent sync chunks; an older start raises rather than return a silent gap.
+    Upgrade: arXiv's bulk metadata snapshot for deep backfills.
     """
-    first_month = start_dt.strftime("%y%m")
-    last_month = (end_dt.replace(day=28) + timedelta(days=7)).strftime("%y%m")
+    too_deep = (
+        "arXiv's OAI-PMH fallback lists every record revised since the window start, so it only covers "
+        f"windows starting within about {_OAI_MAX_DAYS} days; use a later start date or retry once the "
+        "arXiv API accepts requests again"
+    )
+    if (utc_today() - start_dt).days > _OAI_MAX_DAYS:
+        raise RuntimeError(f"Can't list {', '.join(categories)} since {start_dt}: {too_deep}")
     found: dict[str, PaperCandidate] = {}
     for category in categories:
         LOGGER.warning("Listing %s since %s via arXiv OAI-PMH", category, start_dt)
-        params = {"verb": "ListRecords", "metadataPrefix": "arXiv", "set": _oai_set(category), "from": str(start_dt)}
+        params = {"verb": "ListRecords", "metadataPrefix": "arXivRaw", "set": _oai_set(category), "from": str(start_dt)}
         for _page in range(_OAI_MAX_PAGES):
             root = _oai_root(params, user_agent)
             error = root.find("oai:error", _OAI_NS)
             if error is not None and error.get("code") != "noRecordsMatch":
                 raise RuntimeError(f"arXiv OAI-PMH error for {category}: {error.get('code')} {error.text or ''}")
-            for meta in root.iterfind(".//arxiv:arXiv", _OAI_NS):
+            for meta in root.iterfind(".//raw:arXivRaw", _OAI_NS):
                 candidate = _parse_oai_record(meta)
-                aid = candidate.arxiv_id or ""
-                in_window = candidate.publication_dt is not None and start_dt <= candidate.publication_dt <= end_dt
-                if in_window and (not aid[:4].isdigit() or first_month <= aid[:4] <= last_month):
-                    found[aid] = candidate
+                if candidate.publication_dt is not None and start_dt <= candidate.publication_dt <= end_dt:
+                    found[candidate.arxiv_id or ""] = candidate
             token = root.findtext(".//oai:resumptionToken", "", _OAI_NS).strip()
             if not token:
                 break
             params = {"verb": "ListRecords", "resumptionToken": token}
         else:
-            raise RuntimeError(
-                f"arXiv OAI-PMH listing of {category} since {start_dt} exceeds {_OAI_MAX_PAGES} pages; "
-                "narrow the window or retry once the arXiv API accepts requests again"
-            )
+            raise RuntimeError(f"arXiv OAI-PMH listing of {category} exceeds {_OAI_MAX_PAGES} pages: {too_deep}")
     newest_first = sorted(found.values(), key=lambda c: (c.publication_date, c.arxiv_id or ""), reverse=True)
     return newest_first[:max_results]
 

@@ -127,6 +127,26 @@ class SyncCliStateTests(FlaskDBTestCase):
         self.assertTrue(messages[0].startswith("Starting sync for cs.CV"))
         self.assertTrue(messages[-1].startswith("Sync complete:"))
 
+    @patch("sync_cli.execute_historical_scrape")
+    def test_run_sync_never_records_a_chunk_whose_listing_raised(self, mock_historical_scrape):
+        # e.g. arXiv refused the API and the OAI-PMH fallback failed too: the chunk stays unsynced.
+        mock_historical_scrape.side_effect = [
+            {"new_papers": 1, "duplicates_skipped": 0, "total_matched": 1, "total_in_feed": 1},
+            RuntimeError("arXiv OAI-PMH error for cs.CV: badResumptionToken"),
+        ]
+
+        with self.assertRaises(RuntimeError):
+            run_sync(
+                self.app,
+                category="cs.CV",
+                start_dt=date(2026, 9, 1),
+                end_dt=date(2026, 9, 14),
+                emit=lambda _message: None,
+            )
+
+        stored = SyncState.query.filter_by(category="cs.CV").one()
+        self.assertEqual(stored.last_synced_submitted_at, datetime(2026, 9, 7, 23, 59, 59, 999999))
+
 
 class SyncCliQueryTests(FlaskDBTestCase):
     @patch("app.services.embeddings.add_papers_to_index", return_value=0)
@@ -216,7 +236,7 @@ class SyncCliQueryTests(FlaskDBTestCase):
 
         stats = run_query_import(
             self.app,
-            query='abs:"open-vocabulary segmentation" AND cat:cs.CV',
+            query='abs:"open-vocabulary segmentation" AND cat:cs.CV ANDNOT au:smith',
             collection="OVS",
             start_dt=date(2019, 1, 1),
             end_dt=date(2026, 9, 28),
@@ -226,11 +246,12 @@ class SyncCliQueryTests(FlaskDBTestCase):
 
         self.assertIn("arXiv refused the query (HTTP 406); used Semantic Scholar search instead", messages)
         self.assertTrue(any(m.startswith("WARNING: Semantic Scholar has no arXiv categories") for m in messages))
+        self.assertTrue(any(m.startswith("WARNING: Semantic Scholar has no author search") for m in messages))
         self.assertEqual(stats["created"], 1)
         params = s2.call_args.kwargs["params"]
         self.assertEqual(
             (params["query"], params["publicationDateOrYear"], params["fieldsOfStudy"]),
-            ('"open-vocabulary segmentation"', "2019-01-01:2026-09-28", "Computer Science"),
+            ('"open-vocabulary segmentation" -smith', "2019-01-01:2026-09-28", "Computer Science"),
         )
         self.assertEqual(s2.call_args.kwargs["headers"], {"x-api-key": "s2-key"})
         paper = Paper.query.filter_by(arxiv_id="2607.19228").one()
@@ -243,6 +264,7 @@ class SyncCliQueryTests(FlaskDBTestCase):
                 date(2026, 7, 21),
             ),
         )
+        self.assertEqual(paper.semantic_scholar_id, "006e24d91fe3bfe6b3dae83f36df91e12e76a7af")
         self.assertEqual(SyncState.query.count(), 0)
         upsert.assert_not_called()
 
@@ -277,6 +299,11 @@ class SyncCliQueryTests(FlaskDBTestCase):
             'abs:"open-vocabulary segmentation" OR ti:ovs': '"open-vocabulary segmentation" | ovs',
             "(cat:cs.CV OR cat:cs.LG) AND ti:detr ANDNOT au:smith": "detr -smith",
             "ti:mask AND (abs:transformer OR cat:cs.CV)": "mask + ( transformer )",
+            # ANDNOT after a dropped cat: stays a negation instead of turning into a required word.
+            "cat:cs.CV ANDNOT ti:survey": "-survey",
+            "(cat:cs.CV OR cat:cs.LG) ANDNOT abs:review": "-review",
+            "ti:nerf AND (cat:cs.CV ANDNOT ti:dynamic)": "nerf + ( -dynamic )",
+            "ti:a ANDNOT cat:cs.LG OR ti:x": "a | x",
         }
         for arxiv_query, expected in cases.items():
             self.assertEqual(arxiv_query_to_s2(arxiv_query), expected, arxiv_query)

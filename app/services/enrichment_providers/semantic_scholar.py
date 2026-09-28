@@ -131,10 +131,12 @@ def arxiv_query_to_s2(query: str) -> str:
     for term in re.findall(r'(?:\w+:)?"[^"]*"|[()]|[^\s()]+', query):
         term = re.sub(r"^(?:all|ti|abs|au):", "", term)
         if not term or term.startswith("cat:"):
+            if out and out[-1] in _S2_OPERATORS.values():
+                out.pop()  # the operator joining this dropped cat: term
             continue
         op = _S2_OPERATORS.get(term)
-        if op and (not out or out[-1] in ("(", *_S2_OPERATORS.values())):
-            continue  # nothing on its left: the term before it was a dropped cat:
+        if op and op != "-" and (not out or out[-1] in ("(", *_S2_OPERATORS.values())):
+            continue  # AND/OR with nothing on its left (a dropped cat:); ANDNOT stays a prefix negation
         if term == ")":
             if out and out[-1] in _S2_OPERATORS.values():
                 out.pop()
@@ -147,6 +149,59 @@ def arxiv_query_to_s2(query: str) -> str:
     return " ".join(out).replace("- ", "-")
 
 
+def _s2_candidate(arxiv_id: str, item: dict[str, Any]) -> PaperCandidate:
+    """An S2 paper (title, abstract, authors, publicationDate, paperId) as an arXiv candidate.
+
+    S2 has no arXiv categories, so none are set.
+    """
+    from app.services.ingest.base import PaperCandidate, parse_publication_dt
+
+    authors = [a["name"] for a in item.get("authors") or [] if a.get("name")]
+    publication_dt, publication_date = parse_publication_dt(item.get("publicationDate"))
+    return PaperCandidate(
+        arxiv_id=arxiv_id,
+        link=f"https://arxiv.org/abs/{arxiv_id}",
+        title=item.get("title") or "",
+        author=", ".join(authors),
+        authors_list=authors,
+        abstract=item.get("abstract") or "",
+        publication_dt=publication_dt,
+        publication_date=publication_date,
+        semantic_scholar_id=item.get("paperId"),
+    )
+
+
+def lookup_arxiv_papers(arxiv_ids: list[str]) -> dict[str, PaperCandidate]:
+    """Resolve arXiv ids with S2's batch endpoint, the first id-lookup fallback when arXiv refuses us.
+
+    One POST per 500 ids instead of an OAI-PMH request per id. Ids S2 doesn't know are absent,
+    and a failed request only leaves its ids for the caller's next fallback.
+    """
+    from app.services.http_client import request_with_backoff
+    from app.services.secret_files import resolve_data_source_key
+
+    api_key = resolve_data_source_key("semantic_scholar")
+    found: dict[str, PaperCandidate] = {}
+    for i in range(0, len(arxiv_ids), SEMANTIC_SCHOLAR_BATCH_LIMIT):
+        batch = arxiv_ids[i : i + SEMANTIC_SCHOLAR_BATCH_LIMIT]
+        try:
+            items = request_with_backoff(
+                "POST",
+                SEMANTIC_SCHOLAR_BATCH_URL,
+                json={"ids": [f"ARXIV:{arxiv_id}" for arxiv_id in batch]},
+                params={"fields": "title,abstract,authors,publicationDate,externalIds,paperId"},
+                headers={"x-api-key": api_key} if api_key else None,
+                rate_limit_profile="bulk",
+                timeout=15,
+            ).json()
+        except Exception as exc:
+            LOGGER.warning("Semantic Scholar arXiv id lookup failed: %s", exc)
+            continue
+        # The batch endpoint answers position by position, null for an unknown id.
+        found.update((arxiv_id, _s2_candidate(arxiv_id, item)) for arxiv_id, item in zip(batch, items) if item)
+    return found
+
+
 def search_arxiv_papers(query: str, start_dt: date, end_dt: date, max_results: int) -> list[PaperCandidate]:
     """arXiv papers matching an arXiv-syntax ``query`` via S2 bulk search, newest first.
 
@@ -155,7 +210,7 @@ def search_arxiv_papers(query: str, start_dt: date, end_dt: date, max_results: i
     to Computer Science and come back without categories.
     """
     from app.services.http_client import request_with_backoff
-    from app.services.ingest.base import PaperCandidate, extract_arxiv_id, parse_publication_dt
+    from app.services.ingest.base import extract_arxiv_id
     from app.services.secret_files import resolve_data_source_key
 
     s2_query = arxiv_query_to_s2(query)
@@ -183,22 +238,8 @@ def search_arxiv_papers(query: str, start_dt: date, end_dt: date, max_results: i
         ).json()
         for item in data.get("data") or []:
             arxiv_id = extract_arxiv_id(f"https://arxiv.org/abs/{(item.get('externalIds') or {}).get('ArXiv') or ''}")
-            if not arxiv_id:
-                continue
-            authors = [a["name"] for a in item.get("authors") or [] if a.get("name")]
-            publication_dt, publication_date = parse_publication_dt(item.get("publicationDate"))
-            candidates.append(
-                PaperCandidate(
-                    arxiv_id=arxiv_id,
-                    link=f"https://arxiv.org/abs/{arxiv_id}",
-                    title=item.get("title") or "",
-                    author=", ".join(authors),
-                    authors_list=authors,
-                    abstract=item.get("abstract") or "",
-                    publication_dt=publication_dt,
-                    publication_date=publication_date,
-                )
-            )
+            if arxiv_id:
+                candidates.append(_s2_candidate(arxiv_id, item))
         if not data.get("token"):
             break
         params["token"] = data["token"]

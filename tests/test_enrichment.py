@@ -8,7 +8,7 @@ import requests
 
 from app.services.enrichment import (
     _fetch_api_metadata,
-    _fetch_api_metadata_batch,
+    enrich_entries_with_api_metadata,
     extract_affiliation_text_batch,
     extract_pdf_resource_links,
     extract_pdf_resource_links_batch,
@@ -131,17 +131,17 @@ class FetchRecentPapersTests(unittest.TestCase):
 
 @patch.object(arxiv_api_backend, "_refused", (0.0, 0))
 class ArxivRefusalFallbackTests(unittest.TestCase):
+    @patch("app.services.enrichment.time.sleep")
     @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
-    def test_metadata_batch_falls_back_to_oai(self, mock_request):
+    def test_metadata_batch_falls_back_to_oai(self, mock_request, _sleep):
         mock_request.side_effect = [
             requests.HTTPError(response=Mock(status_code=406)),
             Mock(content=oai_response("GetRecord", OAI_RECORD_2609_12871)),
         ]
-        metadata: dict[str, dict] = {}
         session = _ua_session()
         self.addCleanup(session.close)
 
-        _fetch_api_metadata_batch(["2609.12871"], metadata, session=session)
+        metadata = _fetch_api_metadata(["2609.12871"], session=session)
 
         self.assertEqual(
             metadata,
@@ -155,6 +155,44 @@ class ArxivRefusalFallbackTests(unittest.TestCase):
             },
         )
         self.assertEqual(mock_request.call_args.kwargs["user_agent"], _UA)  # OAI keeps the configured UA
+
+    @patch("app.services.enrichment.fetch_oai_records", return_value=({}, ["2604.00021", "2604.00022"]))
+    @patch("app.services.enrichment.request_arxiv_api", side_effect=ArxivRefused(406))
+    @patch("app.services.enrichment.time.sleep")
+    def test_refused_metadata_asks_oai_once_for_every_batch_left(self, _sleep, mock_request, oai):
+        # One OAI pass for all ids: a struggling OAI fails once, not once per 20-id batch.
+        ids = [f"2604.{i:05d}" for i in range(23)]
+
+        self.assertEqual(_fetch_api_metadata(ids), {})
+
+        self.assertEqual(mock_request.call_count, 1)
+        oai.assert_called_once()
+        self.assertEqual(oai.call_args.args[0], ids)
+
+    @patch("app.services.enrichment._fetch_api_metadata", return_value={})
+    def test_oai_listed_entries_keep_their_metadata_without_a_lookup(self, mock_fetch):
+        listed = PaperCandidate(
+            arxiv_id="2609.28194",
+            link="https://arxiv.org/abs/2609.28194",
+            title="Old-growth forests",
+            categories=["cs.LG", "cs.CV"],
+            comment="code: https://github.com/ratsakatika/detecting-old-growth-forests",
+            api_affiliations="University of Cambridge",
+            has_api_metadata=True,
+        ).to_entry_dict()
+        rss_only = PaperCandidate(arxiv_id="2609.12871", link="https://arxiv.org/abs/2609.12871", title="RSS")
+        entries = [listed, rss_only.to_entry_dict()]
+
+        enrich_entries_with_api_metadata(entries)
+
+        self.assertEqual(mock_fetch.call_args.args[0], ["2609.12871"])  # the listed entry isn't looked up again
+        self.assertEqual(
+            (listed["categories"], listed["api_affiliations"]), (["cs.LG", "cs.CV"], "University of Cambridge")
+        )
+        self.assertEqual(
+            [link["url"] for link in listed["resource_links"]],
+            ["https://github.com/ratsakatika/detecting-old-growth-forests"],
+        )
 
     @patch("app.services.enrichment.list_oai_candidates")
     @patch("app.services.enrichment.request_arxiv_api", side_effect=ArxivRefused(406))

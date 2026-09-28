@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from app.models import Collection, Paper, PaperCollection, PaperFeedback, PaperRelation, db
 from app.services.collection_share import export_collection, import_collection
 from tests.helpers import FlaskDBTestCase
@@ -274,6 +276,41 @@ class CollectionShareTests(FlaskDBTestCase):
         self.assertEqual((res.status_code, res.get_json()["edges"]), (200, 4))
         s2_by_arxiv = dict(db.session.query(Paper.arxiv_id, Paper.semantic_scholar_id))
         self.assertEqual((s2_by_arxiv["1905.00001"], s2_by_arxiv["2601.00009"]), (s2_new, s2_local))
+
+    @patch("app.services.onboarding._REFUSED_LOOKUP_BUDGET_SECONDS", 0)
+    @patch("app.services.secret_files.resolve_data_source_key", return_value=None)
+    @patch("app.services.http_client.request_with_backoff")
+    def test_import_ids_under_refusal_keeps_s2_ids_and_defers_unlooked_ids(self, s2, _key):
+        # Refused: S2's batch answers what it knows (with its paperId); ids OAI had no time for
+        # are "deferred" (retry in a minute), not "not found".
+        s2_id = "c" * 40
+        s2.return_value = MagicMock(
+            json=MagicMock(
+                return_value=[
+                    {
+                        "paperId": s2_id,
+                        "externalIds": {"ArXiv": "1905.00001"},
+                        "title": "A Seminal Paper",
+                        "abstract": "Seed abstract.",
+                        "authors": [{"name": "Dana Seed"}],
+                        "publicationDate": "2019-05-01",
+                    },
+                    None,
+                ]
+            )
+        )
+        refused = MagicMock(side_effect=requests.HTTPError(response=MagicMock(status_code=406)))
+        with patch("app.services.ingest.arxiv_api_backend.request_with_backoff", refused):
+            res = self.client.post(
+                "/api/collections/import-ids",
+                json={"name": "Seeds", "text": "1905.00001 1905.00002"},
+                headers={"X-CSRF-Token": self._csrf_token()},
+            )
+
+        body = res.get_json()
+        self.assertEqual((body["created"], body["not_found"], body["deferred"]), (1, [], ["1905.00002"]))
+        self.assertEqual(Paper.query.filter_by(arxiv_id="1905.00001").one().semantic_scholar_id, s2_id)
+        self.assertEqual(refused.call_count, 1)  # the refused id_list call; no OAI request past the budget
 
     def test_import_ids_seeds_collection_without_feedback(self):
         local = _paper("2601.00001")

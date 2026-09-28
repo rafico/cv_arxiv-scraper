@@ -319,7 +319,11 @@ class IngestOrchestrator:
         for candidate in primary:
             merged_candidates[_merge_dedup_key(candidate)] = candidate
         for candidate in secondary:
-            merged_candidates.setdefault(_merge_dedup_key(candidate), candidate)
+            kept = merged_candidates.setdefault(_merge_dedup_key(candidate), candidate)
+            if candidate.has_api_metadata and not kept.has_api_metadata:
+                # An OAI-listed twin already has what enrichment would look up one GetRecord at a time.
+                kept.categories, kept.comment, kept.doi = candidate.categories, candidate.comment, candidate.doi
+                kept.api_affiliations, kept.has_api_metadata = candidate.api_affiliations, True
         return list(merged_candidates.values())
 
     def _resolve_backend_names(self, backend_names: Sequence[str] | None) -> list[str]:

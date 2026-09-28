@@ -5,6 +5,8 @@ import os
 import shutil
 import tempfile
 
+import pytest
+
 # Native-isolation targets (embeddings, PDF rendering) run inline during the suite so
 # tests can keep mocking the in-process functions — mocks don't cross a spawned
 # process — and to avoid multiprocessing flakiness. Tests that exercise the isolation
@@ -20,3 +22,14 @@ os.environ["CV_ARXIV_NATIVE_ISOLATION"] = "0"
 _SANDBOX_INSTANCE = tempfile.mkdtemp(prefix="cv_arxiv_test_instance_")
 os.environ.setdefault("CV_ARXIV_INSTANCE_PATH", _SANDBOX_INSTANCE)
 atexit.register(shutil.rmtree, _SANDBOX_INSTANCE, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def _forget_arxiv_refusal():
+    """arxiv_api_backend remembers a refusal for 30 minutes in a module global; a test that
+    triggers one must not send every later test down the OAI/S2 fallbacks."""
+    from app.services.ingest import arxiv_api_backend
+
+    arxiv_api_backend._refused = (0.0, 0)
+    yield
+    arxiv_api_backend._refused = (0.0, 0)
