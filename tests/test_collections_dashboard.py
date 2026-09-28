@@ -78,6 +78,9 @@ class CollectionDashboardTests(FlaskDBTestCase):
         self.assertIn("Add a paper to this collection first, then try Suggest similar.", text)
         self.assertIn("Could not delete the collection.", text)
         self.assertIn("un-skip to see them here", text)
+        # Prior works "Add": keep the S2 id for the citation graph, and say when the paper is hidden.
+        self.assertIn("s2_ids: { [p.arxiv_id]: p.s2_id }", text)
+        self.assertIn("Added, but hidden (skipped earlier)", text)
 
     def test_search_inside_collection_keeps_members_outside_global_top_hits(self):
         collection = Collection(name="Review")

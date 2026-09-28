@@ -209,14 +209,23 @@ def import_collection_ids():
 
     ``name`` is a collection name (created on miss) or a numeric id. Unlike the
     onboarding bootstrap, no feedback rows are written, so the ranker is untouched.
+    Optional ``s2_ids`` ({arxiv_id: S2 paperId}, from prior works) fills empty
+    Semantic Scholar ids so the papers link into the citation graph right away.
     """
+    from app.services.citation_graph import _S2_PAPER_ID
     from app.services.collection_share import BUNDLE_VERSION, arxiv_bundle_entry, import_collection
     from app.services.mcp_tools import _resolve_or_create_collection
-    from app.services.onboarding import extract_arxiv_ids, fetch_arxiv_metadata
+    from app.services.onboarding import extract_arxiv_ids, fetch_arxiv_metadata, normalize_arxiv_id
 
     validate_csrf_token()
     payload = request.get_json(silent=True) or {}
     name = require_str(payload, "name")
+    s2_ids = payload.get("s2_ids") or {}
+    if not isinstance(s2_ids, dict) or not all(
+        isinstance(v, str) and _S2_PAPER_ID.fullmatch(v) for v in s2_ids.values()
+    ):
+        return jsonify({"error": "'s2_ids' must map arXiv ids to Semantic Scholar paperIds"}), 400
+    s2_ids = {normalize_arxiv_id(k): v for k, v in s2_ids.items()}
     ids = extract_arxiv_ids(require_str(payload, "text"))
     if not ids:
         return jsonify({"error": "No arXiv ids found"}), 400
@@ -241,6 +250,8 @@ def import_collection_ids():
         )
         for e in fetched
     ]
+    for entry in papers:
+        entry["semantic_scholar_id"] = s2_ids.get(entry["arxiv_id"])
     manifest = {"bundle_version": BUNDLE_VERSION, "collection": {"name": collection.name}, "papers": papers}
     _collection, stats = import_collection(manifest, into=collection)
     found = {entry["arxiv_id"] for entry in papers}

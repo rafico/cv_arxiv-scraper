@@ -223,6 +223,33 @@ class CollectionShareTests(FlaskDBTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual((res.get_json()["linked"], res.get_json()["hidden"]), (1, ["2601.00001"]))
 
+    def test_import_ids_keeps_s2_ids_so_prior_works_join_the_citation_graph(self):
+        # Prior works "Add" already knows the S2 paperId; dropping it left the added
+        # paper unlinked from the members citing it until a later scrape.
+        s2_new, s2_local = "a" * 40, "b" * 40
+        collection = Collection(name="Review")
+        members = [_paper(f"2601.0000{i}", referenced_works=[s2_new, s2_local]) for i in (1, 2)]
+        local = _paper("2601.00009")  # in the library, no S2 id yet
+        db.session.add_all([collection, local, *members])
+        db.session.flush()
+        db.session.add_all(PaperCollection(paper_id=m.id, collection_id=collection.id) for m in members)
+        db.session.commit()
+        payload = {"name": str(collection.id), "text": "1905.00001 2601.00009"}
+        headers = {"X-CSRF-Token": self._csrf_token()}
+
+        bad = {**payload, "s2_ids": {"1905.00001": "not-an-s2-id"}}
+        self.assertEqual(self.client.post("/api/collections/import-ids", json=bad, headers=headers).status_code, 400)
+        with patch("app.services.onboarding.request_with_backoff", return_value=MagicMock(content=_ATOM_FEED)):
+            res = self.client.post(
+                "/api/collections/import-ids",
+                json={**payload, "s2_ids": {"1905.00001": s2_new, "2601.00009": s2_local}},
+                headers=headers,
+            )
+
+        self.assertEqual((res.status_code, res.get_json()["edges"]), (200, 4))
+        s2_by_arxiv = dict(db.session.query(Paper.arxiv_id, Paper.semantic_scholar_id))
+        self.assertEqual((s2_by_arxiv["1905.00001"], s2_by_arxiv["2601.00009"]), (s2_new, s2_local))
+
     def test_import_ids_seeds_collection_without_feedback(self):
         local = _paper("2601.00001")
         db.session.add(local)

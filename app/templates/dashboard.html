@@ -398,9 +398,12 @@
                         const res = await fetch("/api/collections/import-ids", {
                             method: "POST",
                             headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
-                            body: JSON.stringify({ name: String(collectionId), text: p.arxiv_id }),
+                            body: JSON.stringify({
+                                name: String(collectionId), text: p.arxiv_id, s2_ids: { [p.arxiv_id]: p.s2_id },
+                            }),
                         });
                         const out = await res.json();
+                        if (res.ok && out.hidden.length) { add.textContent = "Added, but hidden (skipped earlier)"; return; }
                         if (res.ok && !out.not_found.length) { card.remove(); return; }
                     } catch (e) { /* fall through */ }
                     add.disabled = false;

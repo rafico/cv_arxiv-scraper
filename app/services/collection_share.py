@@ -207,6 +207,8 @@ def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDL
                 paper.user_tags = _entry_list(entry, "user_tags")
             if not paper.openalex_id and _entry_str(entry, "openalex_id"):
                 paper.openalex_id = _entry_str(entry, "openalex_id")
+            if not paper.semantic_scholar_id and _entry_str(entry, "semantic_scholar_id"):
+                paper.semantic_scholar_id = _entry_str(entry, "semantic_scholar_id")
             if not paper.referenced_works and _entry_list(entry, "referenced_works"):
                 paper.referenced_works = _entry_list(entry, "referenced_works")
             linked += 1
