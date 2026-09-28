@@ -21,9 +21,11 @@ import re
 import time
 
 import feedparser
+from flask import current_app, has_app_context
 
 from app.services.embeddings import get_embedding_service
 from app.services.enrichment_providers.semantic_scholar import lookup_arxiv_papers
+from app.services.http_client import resolve_user_agent
 from app.services.ingest.arxiv_api_backend import ArxivRefused, fetch_oai_records, request_arxiv_api
 from app.services.ingest.base import (
     clean_abstract,
@@ -125,12 +127,17 @@ def fetch_arxiv_metadata(arxiv_ids: list[str]) -> tuple[list[dict], list[str]]:
     if not normalized:
         return [], []
 
+    # The operator's ingest.user_agent (a contact address, as arXiv asks), like the scrape paths.
+    user_agent = resolve_user_agent(current_app.config.get("SCRAPER_CONFIG") if has_app_context() else None)
     deadline = time.monotonic() + _REFUSED_LOOKUP_BUDGET_SECONDS
     try:
-        response = request_arxiv_api({"id_list": ",".join(normalized), "max_results": len(normalized)})
+        # ponytail: a synchronous route, so one try (no 3x Retry-After waits); the budget is the fallbacks'.
+        response = request_arxiv_api(
+            {"id_list": ",".join(normalized), "max_results": len(normalized)}, attempts=1, user_agent=user_agent
+        )
     except ArxivRefused:
         found = lookup_arxiv_papers(normalized)
-        records, deferred = fetch_oai_records([i for i in normalized if i not in found], deadline=deadline)
+        records, deferred = fetch_oai_records([i for i in normalized if i not in found], user_agent, deadline=deadline)
         found.update(records)
         return [
             {

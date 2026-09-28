@@ -108,7 +108,7 @@ class PaperCandidate:
     doi: str = ""
     api_affiliations: str = ""
     resource_links: list[dict[str, str]] = field(default_factory=list)
-    # The listing already carried what enrich_entries_with_api_metadata looks up (OAI-PMH does).
+    # The listing already carried what enrich_entries_with_api_metadata looks up (the API and OAI-PMH do).
     has_api_metadata: bool = False
     semantic_scholar_id: str | None = None
 

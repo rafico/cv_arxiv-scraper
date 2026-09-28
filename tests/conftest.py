@@ -26,10 +26,10 @@ atexit.register(shutil.rmtree, _SANDBOX_INSTANCE, ignore_errors=True)
 
 @pytest.fixture(autouse=True)
 def _forget_arxiv_refusal():
-    """arxiv_api_backend remembers a refusal for 30 minutes in a module global; a test that
-    triggers one must not send every later test down the OAI/S2 fallbacks."""
+    """arxiv_api_backend remembers a refusal (and a failed OAI-PMH) in module globals; a test
+    that triggers one must not send every later test down the fallbacks."""
     from app.services.ingest import arxiv_api_backend
 
-    arxiv_api_backend._refused = (0.0, 0)
+    arxiv_api_backend._refused, arxiv_api_backend._oai_down_until = (0.0, 0), 0.0
     yield
-    arxiv_api_backend._refused = (0.0, 0)
+    arxiv_api_backend._refused, arxiv_api_backend._oai_down_until = (0.0, 0), 0.0

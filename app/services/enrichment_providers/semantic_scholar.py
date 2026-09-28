@@ -149,6 +149,23 @@ def arxiv_query_to_s2(query: str) -> str:
     return " ".join(out).replace("- ", "-")
 
 
+def _has_positive_term(s2_query: str) -> bool:
+    """True when some word or phrase is required: '-survey' alone matches ~all of CS, like ''.
+
+    ponytail: per term, not boolean; '( -x ) | y' counts y as required though its '-x' branch
+    matches almost everything. Upgrade: evaluate the parsed query if that shape shows up.
+    """
+    negated: list[bool] = []  # per open group: opened with '-('
+    for term in re.findall(r'-?"[^"]*"|-?\(|\)|[^\s()]+', s2_query):
+        if term.endswith("("):
+            negated.append(term == "-(")
+        elif term == ")":
+            negated = negated[:-1]
+        elif term not in ("+", "|") and not term.startswith("-") and not any(negated):
+            return True
+    return False
+
+
 def _s2_candidate(arxiv_id: str, item: dict[str, Any]) -> PaperCandidate:
     """An S2 paper (title, abstract, authors, publicationDate, paperId) as an arXiv candidate.
 
@@ -193,6 +210,9 @@ def lookup_arxiv_papers(arxiv_ids: list[str]) -> dict[str, PaperCandidate]:
                 headers={"x-api-key": api_key} if api_key else None,
                 rate_limit_profile="bulk",
                 timeout=15,
+                # ponytail: one try, its sole caller is a sync route's 30 s budget and a miss falls
+                # through to OAI; take attempts as a parameter if a background caller wants retries.
+                attempts=1,
             ).json()
         except Exception as exc:
             LOGGER.warning("Semantic Scholar arXiv id lookup failed: %s", exc)
@@ -214,10 +234,10 @@ def search_arxiv_papers(query: str, start_dt: date, end_dt: date, max_results: i
     from app.services.secret_files import resolve_data_source_key
 
     s2_query = arxiv_query_to_s2(query)
-    if not s2_query:  # an empty S2 query matches every Computer Science paper in the window
+    if not _has_positive_term(s2_query):  # it would match every Computer Science paper in the window
         raise ValueError(
-            "the query has no search terms besides cat: filters, which the Semantic Scholar fallback "
-            "cannot apply; retry once arXiv accepts the query"
+            "the query has no search terms besides cat: filters and ANDNOT exclusions, which the Semantic "
+            "Scholar fallback cannot narrow; retry once arXiv accepts the query"
         )
     api_key = resolve_data_source_key("semantic_scholar")
     params = {

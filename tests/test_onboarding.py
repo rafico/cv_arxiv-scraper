@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import requests
+from flask import Flask
 
 # Import the route module at module load (before any create_app registers the
 # blueprint) so its handlers attach to the shared api_bp. The production wiring
@@ -191,6 +192,9 @@ class FetchArxivMetadataTests(unittest.TestCase):
         self.assertEqual(s2.call_args.kwargs["json"], {"ids": ["ARXIV:1706.03762", "ARXIV:2609.22706"]})
         self.assertEqual(s2.call_args.kwargs["headers"], {"x-api-key": "s2-key"})
         self.assertEqual(arxiv.call_args.kwargs["params"]["identifier"], "oai:arXiv.org:2609.22706")
+        # A synchronous route: one try each (no 3x Retry-After waits), so OAI gets the 30 s budget.
+        self.assertEqual([call.kwargs["attempts"] for call in arxiv.call_args_list], [1, 1])
+        self.assertEqual(s2.call_args.kwargs["attempts"], 1)
         self.assertEqual(deferred, [])
         by_id = {entry["arxiv_id"]: entry for entry in entries}
         keys = ("authors", "categories", "link", "pdf_link", "publication_date", "semantic_scholar_id")
@@ -217,6 +221,25 @@ class FetchArxivMetadataTests(unittest.TestCase):
             },
         )
         self.assertTrue(by_id["2609.22706"]["title"].startswith("DOA-SORT"))
+
+    @patch("app.services.http_client.request_with_backoff")
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_refused_lookup_sends_the_configured_user_agent(self, arxiv, s2, _key):
+        arxiv.side_effect = [
+            requests.HTTPError(response=MagicMock(status_code=406)),
+            MagicMock(content=oai_response("GetRecord", OAI_RECORD_2609_22706)),
+        ]
+        s2.return_value = MagicMock(json=MagicMock(return_value=[None]))
+        app = Flask(__name__)
+        app.config["SCRAPER_CONFIG"] = {"ingest": {"user_agent": "MyApp/9.9 (mailto:me@example.com)"}}
+
+        with app.app_context():
+            entries, _deferred = fetch_arxiv_metadata(["2609.22706"])
+
+        self.assertEqual([entry["arxiv_id"] for entry in entries], ["2609.22706"])
+        self.assertEqual(
+            [call.kwargs["user_agent"] for call in arxiv.call_args_list], ["MyApp/9.9 (mailto:me@example.com)"] * 2
+        )
 
     @patch("app.services.onboarding._REFUSED_LOOKUP_BUDGET_SECONDS", 0)
     @patch("app.services.http_client.request_with_backoff", side_effect=requests.ConnectionError("S2 down"))

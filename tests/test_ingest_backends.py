@@ -44,7 +44,7 @@ ARXIV_API_XML_PAGE_ONE = """<?xml version="1.0" encoding="UTF-8"?>
     <published>2026-04-01T08:00:00Z</published>
     <title>API Paper</title>
     <summary>Abstract from API</summary>
-    <author><name>Carol Example</name></author>
+    <author><name>Carol Example</name><arxiv:affiliation>Test Lab</arxiv:affiliation></author>
     <category term="cs.CV" />
     <arxiv:comment>Project page: https://example.com/project</arxiv:comment>
     <arxiv:doi>10.48550/arXiv.2604.00002</arxiv:doi>
@@ -183,6 +183,8 @@ class ArxivApiBackendTests(TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].arxiv_id, "2604.00002")
         self.assertEqual(candidates[0].doi, "10.48550/arXiv.2604.00002")
+        # The listing carries what enrichment's id_list lookup would return, so it isn't asked again.
+        self.assertEqual((candidates[0].api_affiliations, candidates[0].has_api_metadata), ("Test Lab", True))
         # The API returns ISO-8601 <published>; it must still yield a real date.
         self.assertEqual(candidates[0].publication_dt, date(2026, 4, 1))
         self.assertEqual(candidates[0].publication_date, "2026-04-01")
@@ -589,6 +591,8 @@ class ArxivRefusalTests(TestCase):
         # 2609.22706 is the day after the window, and 2609.12825 counts although its v2 came after it.
         self.assertEqual([c.arxiv_id for c in candidates], ["2609.12871", "2609.12825"])
         self.assertEqual(candidates[0].comment, 'Paper accompanying the dataset "7V-Scanario"')
+        # arXivRaw authors are TeX; the whitelist and the Atom API are Unicode.
+        self.assertEqual(candidates[1].authors_list, ["Mustafa Bora Çelik", "Hayriye Aktaş Dinçer", "Ayse Keles"])
         self.assertTrue(all(c.has_api_metadata for c in candidates))
         self.assertEqual(
             [call.kwargs["params"] for call in mock_request.call_args_list[1:]],
@@ -609,6 +613,46 @@ class ArxivRefusalTests(TestCase):
         with self.assertRaisesRegex(RuntimeError, "use a later start date"):
             list_oai_candidates(["cs.CV"], date(2026, 6, 1), date(2026, 6, 1), 25)
         mock_request.assert_not_called()
+
+    @patch("app.services.ingest.arxiv_api_backend.utc_today", return_value=date(2026, 9, 28))
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_oai_listing_fits_60_days_of_a_busy_category(self, mock_request, _today):
+        # cs.AI: ~250 records a day, 1300 a page, so 58 days back is ~11 pages.
+        pages = [Mock(content=oai_response("ListRecords", token=f"tok{i}")) for i in range(11)]
+        mock_request.side_effect = [*pages, Mock(content=oai_response("ListRecords", OAI_RECORD_2609_12825, token=""))]
+
+        candidates = list_oai_candidates(["cs.AI"], date(2026, 8, 1), date(2026, 9, 28), 25)
+
+        self.assertEqual([c.arxiv_id for c in candidates], ["2609.12825"])
+        self.assertEqual(mock_request.call_count, 12)
+
+    @patch("app.services.ingest.arxiv_api_backend.utc_today", return_value=date(2026, 9, 28))
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff", side_effect=requests.ConnectTimeout("down"))
+    def test_a_spent_oai_retry_budget_is_remembered(self, mock_request, _today):
+        ids = ["2609.22706"]
+        # A one-try lookup (a synchronous route's deadline) failing says little: not remembered.
+        self.assertEqual(fetch_oai_records(ids, deadline=time.monotonic() + 60), ({}, ids))
+        # A spent retry budget is: the next feeds and enrichment skip OAI instead of paying it again.
+        window = (["cs.CV"], date(2026, 9, 20), date(2026, 9, 28), 25)
+        with self.assertRaises(requests.ConnectTimeout):
+            list_oai_candidates(*window)
+        with self.assertRaisesRegex(RuntimeError, "failed recently"):
+            list_oai_candidates(*window)
+        self.assertEqual(fetch_oai_records(ids), ({}, ids))
+
+        self.assertEqual(mock_request.call_count, 2)  # the one-try lookup and the first listing
+
+    def test_detex_decodes_the_tex_accents_arxivraw_authors_carry(self):
+        cases = {
+            r"Bernhard Sch\"olkopf": "Bernhard Schölkopf",
+            r"Beno\^it Macq, Marc Ru{\ss}wurm": "Benoît Macq, Marc Rußwurm",
+            r"Mihaela-Elena Breab\u{a}n, Jan Jeri\'cevi\'c": "Mihaela-Elena Breabăn, Jan Jerićević",
+            r"{\"O}zt{\"u}rk, Jos\'{e} Mar\'{\i}a, Micha{\l}": "Öztürk, José María, Michał",
+            r"Mart\'{\i}n K\i l\i\c{c}, S\o ren": "Martín Kılıç, Søren",
+            "Ashish Vaswani (1), Noam Shazeer ((1) Google)": "Ashish Vaswani (1), Noam Shazeer ((1) Google)",
+        }
+        for tex, expected in cases.items():
+            self.assertEqual(arxiv_api_backend._detex(tex), expected, tex)
 
     def test_oai_set_names_follow_the_archive_group(self):
         self.assertEqual(

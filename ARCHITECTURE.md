@@ -78,7 +78,8 @@ later caller goes straight to its fallback. OAI-PMH is read in the `arXivRaw`
 format (its v1 `<version>` date is the submission date) at arXiv's 1 request / 3 s.
 Date windows (rolling window, backfill/catch-up) use `ListRecords` from the window
 start, keeping records by v1 date; a start more than ~60 days back (or a listing
-past 10 pages) raises rather than leaving a gap. Listed entries carry their
+past 15 pages) raises rather than leaving a gap, and an OAI request that spends its
+whole retry budget pauses OAI for 10 minutes. Listed entries (API or OAI) carry their
 metadata (`has_api_metadata`), so scrape enrichment runs `GetRecord` only for
 RSS-only entries. Seed import and bootstrap ask Semantic Scholar's batch endpoint
 first, then `GetRecord` for the leftovers within a 30 s budget; ids not reached

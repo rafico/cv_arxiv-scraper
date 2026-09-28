@@ -18,12 +18,12 @@ from app.constants import ARXIV_API_DELAY as _ARXIV_API_DELAY
 from app.services.ingest import ArxivApiBackend, RssFeedBackend
 from app.services.ingest.arxiv_api_backend import (
     ArxivRefused,
+    _parse_atom_candidate,
     fetch_oai_records,
     list_oai_candidates,
     request_arxiv_api,
 )
-from app.services.ingest.base import clean_abstract, extract_arxiv_id, parse_publication_dt
-from app.services.text import clean_whitespace, utc_today
+from app.services.text import utc_today
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,43 +53,6 @@ def _extract_category_from_feed_url(feed_url: str) -> str | None:
         return None
     category = path.split("/")[-1].strip()
     return category or None
-
-
-def _parse_atom_entry(entry) -> dict:
-    id_el = entry.find("atom:id", _ATOM_NS)
-    title_el = entry.find("atom:title", _ATOM_NS)
-    summary_el = entry.find("atom:summary", _ATOM_NS)
-    published_el = entry.find("atom:published", _ATOM_NS)
-
-    link = ""
-    if id_el is not None and id_el.text:
-        link = id_el.text.strip()
-
-    authors_list = [
-        clean_whitespace(name_el.text)
-        for author_el in entry.findall("atom:author", _ATOM_NS)
-        for name_el in [author_el.find("atom:name", _ATOM_NS)]
-        if name_el is not None and name_el.text
-    ]
-    categories = [
-        term
-        for term in (category_el.get("term", "").strip() for category_el in entry.findall("atom:category", _ATOM_NS))
-        if term
-    ]
-    publication_dt, publication_date = parse_publication_dt(published_el.text if published_el is not None else None)
-
-    return {
-        "arxiv_id": extract_arxiv_id(link),
-        "link": link,
-        "title": clean_whitespace(title_el.text if title_el is not None else ""),
-        "author": ", ".join(authors_list),
-        "authors_list": authors_list,
-        "abstract": clean_abstract(summary_el.text if summary_el is not None else ""),
-        "published": published_el.text if published_el is not None else None,
-        "publication_dt": publication_dt,
-        "publication_date": publication_date,
-        "categories": categories,
-    }
 
 
 def query_arxiv_api(categories: list[str], start_dt: date, end_dt: date, max_results: int = 1000) -> list[dict]:
@@ -152,7 +115,7 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
                 "Rolling-window pagination stopped early for %s after %d page(s): %s", category, pages_fetched, exc
             )
             break
-        batch_entries = [_parse_atom_entry(entry) for entry in root.findall("atom:entry", _ATOM_NS)]
+        batch_entries = [_parse_atom_candidate(entry).to_entry_dict() for entry in root.findall("atom:entry", _ATOM_NS)]
         if not batch_entries:
             break
 
@@ -379,7 +342,7 @@ def _fetch_api_metadata(arxiv_ids: list[str], session: requests.Session | None =
             # Refused or rate-limited (429 after retries): ask OAI-PMH once for every id left, so
             # a struggling OAI fails once rather than once per batch.
             # ponytail: one GetRecord per id at 1 request / 3 s (~15 min for 300 RSS-only ids;
-            # OAI-listed entries skip this). Upgrade: ListRecords the feed's category instead.
+            # API- and OAI-listed entries skip this). Upgrade: ListRecords the feed's category instead.
             records, _deferred = fetch_oai_records(deduped_ids[index:], _session_user_agent(session))
             for arxiv_id, candidate in records.items():
                 metadata[arxiv_id] = {
@@ -394,7 +357,7 @@ def _fetch_api_metadata(arxiv_ids: list[str], session: requests.Session | None =
 
 
 def enrich_entries_with_api_metadata(entries: list[dict], session: requests.Session | None = None) -> None:
-    # An OAI-listed entry already carries the metadata; looking it up again costs a GetRecord each.
+    # An API- or OAI-listed entry already carries the metadata; looking it up again costs requests.
     arxiv_ids = [entry["arxiv_id"] for entry in entries if entry.get("arxiv_id") and not entry.get("has_api_metadata")]
     metadata: dict[str, dict] = {}
     if arxiv_ids:

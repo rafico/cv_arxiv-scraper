@@ -279,6 +279,11 @@ class SyncCliQueryTests(FlaskDBTestCase):
             ("(cat:cs.CV OR cat:cs.LG)", ["cs.CV"]),
             ("abs:spiking", ["q-bio.NC"]),
             ("abs:spiking AND cat:q-bio.NC", None),
+            # Only exclusions left once cat: is dropped: '-survey' matches ~all of CS, like ''.
+            ("cat:cs.CV ANDNOT ti:survey", None),
+            ("(cat:cs.CV OR cat:cs.LG) ANDNOT abs:review", None),
+            ('cat:cs.CV ANDNOT ti:"a survey"', None),
+            ("cat:cs.CV ANDNOT (ti:survey OR (ti:a AND ti:b))", None),
         ):
             with self.subTest(query=query), self.assertRaises(ValueError):
                 run_query_import(

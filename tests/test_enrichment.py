@@ -128,6 +128,28 @@ class FetchRecentPapersTests(unittest.TestCase):
         )
         self.assertTrue(all(call.kwargs["rate_limit_profile"] == "bulk" for call in mock_request.call_args_list))
 
+    @patch("app.services.enrichment.time.sleep")
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_api_listed_entries_skip_the_metadata_lookup(self, mock_request, _sleep):
+        # The listing already has what id_list returns; re-asking costs a request per 20 ids, and
+        # a GetRecord per id once arXiv starts refusing mid-run.
+        mock_request.return_value = Mock(
+            text="""<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom"><entry>
+  <id>http://arxiv.org/abs/2609.22706v1</id>
+  <author><name>Hao Wang</name><arxiv:affiliation>Test Lab</arxiv:affiliation></author>
+  <arxiv:comment>Code: https://github.com/lab/doa-sort</arxiv:comment>
+</entry></feed>"""
+        )
+
+        entries = fetch_recent_papers(2, "https://rss.arxiv.org/rss/cs.CV")
+        enrich_entries_with_api_metadata(entries)
+
+        mock_request.assert_called_once()  # the listing; no id_list lookup
+        self.assertEqual(
+            (entries[0]["api_affiliations"], [link["url"] for link in entries[0]["resource_links"]]),
+            ("Test Lab", ["https://github.com/lab/doa-sort"]),
+        )
+
 
 @patch.object(arxiv_api_backend, "_refused", (0.0, 0))
 class ArxivRefusalFallbackTests(unittest.TestCase):

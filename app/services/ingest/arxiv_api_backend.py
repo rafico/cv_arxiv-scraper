@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+import unicodedata
 from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any
@@ -44,13 +45,27 @@ _refused: tuple[float, int] = (0.0, 0)
 _OAI_URL = "https://oaipmh.arxiv.org/oai"
 _OAI_NS = {"oai": "http://www.openarchives.org/OAI/2.0/", "raw": "http://arxiv.org/OAI/arXivRaw/"}
 # A ListRecords page holds ~1300 records (~4 MB).
-_OAI_MAX_PAGES = 10
-# A listing costs every record touched since its start (cs.CV: ~150 a day), so a start further
-# back than this can't be listed in _OAI_MAX_PAGES; refuse it before downloading anything.
+_OAI_MAX_PAGES = 15
+# A listing costs every record touched since its start (cs.AI: ~250 a day, so 60 days is ~11.5
+# pages; cs.CV ~150), so a start further back than this can't be listed in _OAI_MAX_PAGES;
+# refuse it before downloading anything.
 _OAI_MAX_DAYS = 60
+# A spent OAI retry budget (OAI down or refusing) skips OAI for a while, so each rolling-window
+# feed and then enrichment don't pay the budget again. ponytail: in-process, like _refused.
+_OAI_DOWN_SECONDS = 10 * 60
+_oai_down_until = 0.0
 _OAI_GROUPS = frozenset({"cs", "econ", "eess", "math", "q-bio", "q-fin", "stat"})
 # A top-level "(...)" in an arXivRaw author string, one nesting level deep: "A (1), B (2) ((1) MIT, (2) ETH)".
 _AUTHOR_PARENS_RE = re.compile(r"\(((?:[^()]|\([^()]*\))*)\)")
+# arXivRaw authors are the submitter's TeX (Sch\"olkopf); the Atom API and the author whitelist are Unicode.
+_TEX_ACCENTS = dict(
+    zip("`'^\"~=.uvHckr", "\u0300\u0301\u0302\u0308\u0303\u0304\u0307\u0306\u030c\u030b\u0327\u0328\u030a")
+)
+# \i is dotless, so \'{\i} is í. A control word eats the space after it (S\o ren).
+_TEX_LETTERS = dict(zip(("ss", "aa", "AA", "ae", "AE", "oe", "OE", "o", "O", "l", "L", "i", "j"), "ßåÅæÆœŒøØłŁıȷ"))
+_TEX_LETTER_RE = re.compile(r"\\(ss|aa|AA|ae|AE|oe|OE|[oOlLij])(?![A-Za-z])\s*")
+# \"o, \'{e}, \c{c}, \u a: a braced or bare letter after the accent.
+_TEX_ACCENT_RE = re.compile(r"\\([`'^\"~=.]|[uvHckr](?![A-Za-z]))\s*(?:\{\s*([A-Za-zıȷ])\s*\}|([A-Za-zıȷ]))")
 
 
 class ArxivRefused(requests.HTTPError):
@@ -61,7 +76,9 @@ class ArxivRefused(requests.HTTPError):
         self.status = status
 
 
-def request_arxiv_api(params: dict[str, str | int], **kwargs: Any) -> requests.Response:
+def request_arxiv_api(
+    params: dict[str, str | int], attempts: int = _ARXIV_API_ATTEMPTS, **kwargs: Any
+) -> requests.Response:
     """GET the export API. Every caller comes through here, so one refusal pauses them all."""
     global _refused
     until, status = _refused
@@ -73,7 +90,7 @@ def request_arxiv_api(params: dict[str, str | int], **kwargs: Any) -> requests.R
             _ARXIV_API_URL,
             params=params,
             timeout=_ARXIV_API_TIMEOUT,
-            attempts=_ARXIV_API_ATTEMPTS,
+            attempts=attempts,
             base_delay=_ARXIV_API_BASE_DELAY,
             rate_limit_profile="bulk",
             **kwargs,
@@ -90,18 +107,33 @@ def request_arxiv_api(params: dict[str, str | int], **kwargs: Any) -> requests.R
 def _oai_root(params: dict[str, str], user_agent: str | None = None, attempts: int = _ARXIV_API_ATTEMPTS) -> ET.Element:
     # arXiv's 1 request / 3 s covers OAI-PMH too: the "bulk" limiter is the one the export API
     # shares. No session: its limiter/UA would be retuned. The caller passes its UA.
-    response = request_with_backoff(
-        "GET",
-        _OAI_URL,
-        params=params,
-        timeout=_ARXIV_API_TIMEOUT,
-        attempts=attempts,
-        base_delay=_ARXIV_API_BASE_DELAY,
-        rate_limit_profile="bulk",
-        user_agent=user_agent,
-        max_bytes=25 * 1024 * 1024,
-    )
+    global _oai_down_until
+    if time.monotonic() < _oai_down_until:
+        raise RuntimeError("arXiv OAI-PMH failed recently; skipping it for now")
+    try:
+        response = request_with_backoff(
+            "GET",
+            _OAI_URL,
+            params=params,
+            timeout=_ARXIV_API_TIMEOUT,
+            attempts=attempts,
+            base_delay=_ARXIV_API_BASE_DELAY,
+            rate_limit_profile="bulk",
+            user_agent=user_agent,
+            max_bytes=25 * 1024 * 1024,
+        )
+    except requests.RequestException:
+        if attempts > 1:  # a whole retry budget, not one deadline-bounded try
+            _oai_down_until = time.monotonic() + _OAI_DOWN_SECONDS
+        raise
     return ET.fromstring(response.content)
+
+
+def _detex(value: str) -> str:
+    """Decode the TeX accents and letters names use: Sch\\"olkopf -> Schölkopf, Ru{\\ss}wurm -> Rußwurm."""
+    value = _TEX_LETTER_RE.sub(lambda m: _TEX_LETTERS[m[1]], value)
+    value = _TEX_ACCENT_RE.sub(lambda m: (m[2] or m[3]).replace("ı", "i").replace("ȷ", "j") + _TEX_ACCENTS[m[1]], value)
+    return unicodedata.normalize("NFC", value.replace("{", "").replace("}", ""))
 
 
 def _parse_oai_record(meta: ET.Element) -> PaperCandidate:
@@ -115,7 +147,7 @@ def _parse_oai_record(meta: ET.Element) -> PaperCandidate:
     def text(path: str) -> str:
         return clean_whitespace(meta.findtext(path, "", _OAI_NS))
 
-    authors = text("raw:authors")
+    authors = _detex(text("raw:authors"))
     names = re.split(r",\s*(?:and\s+)?|\s+and\s+", _AUTHOR_PARENS_RE.sub("", authors))
     authors_list = [clean_whitespace(name) for name in names if name.strip()]
     affiliations = [a for a in _AUTHOR_PARENS_RE.findall(authors) if not re.fullmatch(r"[\d,\s]*", a)]  # not "(1, 2)"
@@ -251,6 +283,12 @@ def _parse_atom_candidate(entry: ET.Element) -> PaperCandidate:
         for term in (category_el.get("term", "").strip() for category_el in entry.findall("atom:category", _ATOM_NS))
         if term
     ]
+    affiliations = [
+        clean_whitespace(affiliation_el.text)
+        for author_el in entry.findall("atom:author", _ATOM_NS)
+        for affiliation_el in author_el.findall("arxiv:affiliation", _ATOM_NS)
+        if affiliation_el.text and affiliation_el.text.strip()
+    ]
     published = clean_whitespace(published_el.text if published_el is not None and published_el.text else "")
     publication_dt, publication_date = parse_publication_dt(published or None)
 
@@ -267,6 +305,8 @@ def _parse_atom_candidate(entry: ET.Element) -> PaperCandidate:
         categories=categories,
         comment=clean_whitespace(comment_el.text if comment_el is not None else ""),
         doi=clean_whitespace(doi_el.text if doi_el is not None else ""),
+        api_affiliations="\n".join(dict.fromkeys(affiliations)),
+        has_api_metadata=True,  # the same Atom entry enrichment's id_list lookup would return
     )
 
 
