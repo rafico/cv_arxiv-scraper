@@ -41,6 +41,12 @@ _MISSING_SDK_MESSAGE = (
 
 def _load_fastmcp() -> Any:
     """Import ``FastMCP`` lazily, re-raising a clear, actionable error if missing."""
+    try:  # mcp 2.x renamed FastMCP -> MCPServer (same constructor/tool/run API we use)
+        from mcp.server.mcpserver import MCPServer
+
+        return MCPServer
+    except ModuleNotFoundError:
+        pass
     try:
         from mcp.server.fastmcp import FastMCP
     except ModuleNotFoundError as exc:  # the extra isn't installed

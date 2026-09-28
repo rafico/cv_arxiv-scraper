@@ -358,6 +358,17 @@ class BuildServerTests(FlaskDBTestCase):
         self.assertIn("get_collection", server.tools)
         self.assertEqual(server.tools["get_paper_text"](str(424242))["error"], "not_found")
 
+    @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp extra not installed")
+    def test_builds_with_the_installed_sdk(self):
+        # Guards SDK API drift (mcp 2.x renamed FastMCP -> MCPServer).
+        import asyncio
+
+        from app.mcp_server import _load_fastmcp, build_server
+
+        server = build_server(self.app, _load_fastmcp())
+        names = {tool.name for tool in asyncio.run(server.list_tools())}
+        self.assertTrue({"get_collection", "get_paper_text", "search_papers"} <= names)
+
 
 class AskPaperTests(FlaskDBTestCase):
     def setUp(self):
@@ -403,7 +414,7 @@ class McpServerImportHygieneTests(unittest.TestCase):
         import app.mcp_server as mcp_server
 
         # Simulate the extra being absent regardless of the real environment.
-        blocked = {"mcp": None, "mcp.server": None, "mcp.server.fastmcp": None}
+        blocked = {"mcp": None, "mcp.server": None, "mcp.server.fastmcp": None, "mcp.server.mcpserver": None}
         original = {name: sys.modules.get(name) for name in blocked}
         try:
             sys.modules.update(blocked)
@@ -420,7 +431,7 @@ class McpServerImportHygieneTests(unittest.TestCase):
     def test_cli_main_errors_cleanly_when_sdk_absent(self):
         from app.cli import mcp as mcp_cli
 
-        blocked = {"mcp": None, "mcp.server": None, "mcp.server.fastmcp": None}
+        blocked = {"mcp": None, "mcp.server": None, "mcp.server.fastmcp": None, "mcp.server.mcpserver": None}
         original = {name: sys.modules.get(name) for name in blocked}
         try:
             sys.modules.update(blocked)
