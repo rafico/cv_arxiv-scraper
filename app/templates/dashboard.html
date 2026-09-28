@@ -246,6 +246,13 @@
             Share
         </a>
     </div>
+    <div class="mt-2 px-2">
+        <a href="{{ url_for('api.export_collection_csv', collection_id=current_filters.collection) }}"
+           title="Screening spreadsheet: one row per paper with venue, code, citations, your tags and notes"
+           class="block w-full px-2 py-1.5 text-xs text-center rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Download CSV
+        </a>
+    </div>
     <div class="mt-2 px-2 flex gap-2">
         <button id="collection-rename-btn" type="button"
                 class="flex-1 px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">

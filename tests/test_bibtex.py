@@ -45,7 +45,7 @@ class PaperToBibtexTests(unittest.TestCase):
     def test_basic_paper_conversion(self):
         paper = _make_paper()
         bib = paper_to_bibtex(paper)
-        self.assertIn("@article{2603_12345,", bib)
+        self.assertIn("@misc{2603_12345,", bib)
         self.assertIn("title = {Test Paper on Vision}", bib)
         self.assertIn("url = {https://arxiv.org/abs/2603.12345}", bib)
         self.assertIn("year = {2026}", bib)
@@ -89,7 +89,7 @@ class PaperToBibtexTests(unittest.TestCase):
     def test_missing_optional_fields(self):
         paper = _make_paper(abstract_text="", publication_dt=None)
         bib = paper_to_bibtex(paper)
-        self.assertIn("@article{", bib)
+        self.assertIn("@misc{", bib)
         self.assertIn("title = {", bib)
         self.assertNotIn("abstract = {", bib)
         self.assertNotIn("year = {", bib)
@@ -97,13 +97,43 @@ class PaperToBibtexTests(unittest.TestCase):
     def test_arxiv_id_used_as_cite_key(self):
         paper = _make_paper(arxiv_id="2603.99999")
         bib = paper_to_bibtex(paper)
-        self.assertTrue(bib.startswith("@article{2603_99999,"))
+        self.assertTrue(bib.startswith("@misc{2603_99999,"))
+
+    def test_preprint_is_misc_with_arxiv_fields(self):
+        bib = paper_to_bibtex(_make_paper(venue="CVPR", acceptance_status="mentioned"))
+        self.assertTrue(bib.startswith("@misc{2603_12345,"))
+        self.assertIn("primaryclass = {cs.CV}", bib)
+        self.assertIn("doi = {10.48550/arXiv.2603.12345}", bib)
+        self.assertIn("note = {arXiv:2603.12345}", bib)
+        self.assertNotIn("booktitle", bib)
+        self.assertNotIn("keywords", bib)
+        self.assertNotIn("annote", bib)
+
+    def test_accepted_venue_becomes_inproceedings_or_journal_article(self):
+        bib = paper_to_bibtex(_make_paper(venue="CVPR", venue_year=2027, acceptance_status="oral"))
+        # Cite key unchanged, so existing .tex files still compile.
+        self.assertTrue(bib.startswith("@inproceedings{2603_12345,"))
+        self.assertIn("booktitle = {CVPR}", bib)
+        self.assertIn("year = {2027}", bib)
+        self.assertNotIn("month", bib)  # the arXiv month doesn't belong to the venue year
+        self.assertNotIn("doi =", bib)
+        self.assertIn("note = {arXiv:2603.12345}", bib)
+
+        bib = paper_to_bibtex(_make_paper(venue="TPAMI", acceptance_status="accepted"))
+        self.assertTrue(bib.startswith("@article{2603_12345,"))
+        self.assertIn("journal = {TPAMI}", bib)
+        self.assertIn("year = {2026}", bib)
+
+    def test_user_tags_and_notes_exported(self):
+        bib = paper_to_bibtex(_make_paper(user_tags=["survey", "3d"], user_notes="Uses 50% less memory"))
+        self.assertIn("keywords = {survey, 3d}", bib)
+        self.assertIn(r"annote = {Uses 50\% less memory}", bib)
 
     def test_multiple_papers_export(self):
         p1 = _make_paper(arxiv_id="2603.00001", link="https://arxiv.org/abs/2603.00001")
         p2 = _make_paper(arxiv_id="2603.00002", link="https://arxiv.org/abs/2603.00002")
         bib = papers_to_bibtex([p1, p2])
-        self.assertEqual(bib.count("@article{"), 2)
+        self.assertEqual(bib.count("@misc{"), 2)
         self.assertIn("2603_00001", bib)
         self.assertIn("2603_00002", bib)
 
@@ -149,7 +179,7 @@ class BibtexExportEndpointTests(FlaskDBTestCase):
 
         response = self.client.get(f"/api/papers/{paper.id}/bibtex")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("@article{", response.get_data(as_text=True))
+        self.assertIn("@misc{", response.get_data(as_text=True))
 
     def test_single_paper_bibtex_404(self):
         response = self.client.get("/api/papers/99999/bibtex")

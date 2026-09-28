@@ -1,6 +1,6 @@
 """Collections CRUD and membership endpoints."""
 
-from flask import abort, jsonify, request
+from flask import Response, abort, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.csrf import validate_csrf_token
@@ -95,6 +95,74 @@ def export_collection_bundle(collection_id: int):
     db.session.get(Collection, collection_id) or abort(404)
     response = jsonify(export_collection(collection_id))
     response.headers["Content-Disposition"] = f'attachment; filename="collection-{collection_id}.json"'
+    return response
+
+
+_CSV_COLUMNS = (
+    "arxiv_id",
+    "title",
+    "first_author",
+    "year",
+    "venue",
+    "acceptance_status",
+    "github_repo",
+    "github_stars",
+    "citation_count",
+    "readiness",
+    "user_tags",
+    "user_notes",
+    "reading_status",
+    "link",
+)
+
+
+def _csv_cell(value):
+    # Titles/notes are untrusted text: a spreadsheet evaluates a cell starting with
+    # = + - @ (or tab/CR) as a formula, so prefix an apostrophe to keep it literal.
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + value
+    return value
+
+
+@api_bp.route("/collections/<int:collection_id>/table.csv", methods=["GET"])
+def export_collection_csv(collection_id: int):
+    """One row per paper: the screening/extraction spreadsheet for a review."""
+    import csv
+    import io
+
+    from app.services.implementation_readiness import implementation_readiness
+    from app.services.preferences import first_author_name
+
+    db.session.get(Collection, collection_id) or abort(404)
+    papers = (
+        Paper.query.join(PaperCollection, PaperCollection.paper_id == Paper.id)
+        .filter(PaperCollection.collection_id == collection_id)
+        .order_by(Paper.id)
+        .all()
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_CSV_COLUMNS)
+    for p in papers:
+        row = (
+            p.arxiv_id,
+            p.title,
+            first_author_name(p.authors),
+            p.publication_dt.year if p.publication_dt else None,
+            p.venue,
+            p.acceptance_status,
+            p.github_repo,
+            p.github_stars,
+            p.citation_count if p.citation_count is not None else p.openalex_cited_by_count,
+            implementation_readiness(p).tier,
+            "; ".join(p.user_tags_list),
+            p.user_notes,
+            p.reading_status,
+            p.link,
+        )
+        writer.writerow([_csv_cell(v) for v in row])
+    response = Response(buf.getvalue(), mimetype="text/csv")
+    response.headers["Content-Disposition"] = f'attachment; filename="collection-{collection_id}.csv"'
     return response
 
 

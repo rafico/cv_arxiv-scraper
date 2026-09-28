@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date, datetime, timezone
 from unittest.mock import patch
 
@@ -56,6 +58,7 @@ class CollectionDashboardTests(FlaskDBTestCase):
         self.assertIn('id="collection-rename-btn"', text)
         self.assertIn('id="collection-delete-btn"', text)
         self.assertIn('id="collection-import-ids"', text)
+        self.assertIn(f'href="/api/collections/{collection.id}/table.csv"', text)
         self.assertIn("data-remove-from-collection", text)
         self.assertIn(f"removeFromCollection({paper.id}, {collection.id}", text)
         self.assertIn('const collectionName = "Survey Seeds";', text)
@@ -80,3 +83,41 @@ class CollectionDashboardTests(FlaskDBTestCase):
         # Unscoped views still trust the ranked ids alone.
         self.assertIn(f'data-paper-id="{outsider.id}"', inbox.get_data(as_text=True))
         self.assertNotIn(f'data-paper-id="{member.id}"', inbox.get_data(as_text=True))
+
+    def test_collection_csv_export(self):
+        collection = Collection(name="Review")
+        member = _make_paper(
+            1,
+            title="=HYPERLINK(1)",
+            authors="Ada Lovelace, Alan Turing",
+            venue="CVPR",
+            acceptance_status="accepted",
+            openalex_cited_by_count=7,
+            user_tags=["screen-in", "3d"],
+            user_notes="@SUM(A1)\nsecond line",
+        )
+        outsider = _make_paper(2)
+        db.session.add_all([collection, member, outsider])
+        db.session.flush()
+        db.session.add(PaperCollection(paper_id=member.id, collection_id=collection.id))
+        db.session.commit()
+
+        response = self.client.get(f"/api/collections/{collection.id}/table.csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.content_type)
+        self.assertIn(f"collection-{collection.id}.csv", response.headers["Content-Disposition"])
+        rows = list(csv.DictReader(io.StringIO(response.get_data(as_text=True))))
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["arxiv_id"], member.arxiv_id)
+        # Formula-looking cells are neutralised with a leading apostrophe.
+        self.assertEqual(row["title"], "'=HYPERLINK(1)")
+        self.assertEqual(row["user_notes"], "'@SUM(A1)\nsecond line")
+        self.assertEqual(row["first_author"], "Ada Lovelace")
+        self.assertEqual(row["venue"], "CVPR")
+        self.assertEqual(row["citation_count"], "7")  # falls back to OpenAlex
+        self.assertEqual(row["readiness"], "none")
+        self.assertEqual(row["user_tags"], "screen-in; 3d")
+
+        self.assertEqual(self.client.get("/api/collections/9999/table.csv").status_code, 404)
