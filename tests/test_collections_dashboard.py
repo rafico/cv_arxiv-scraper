@@ -58,6 +58,7 @@ class CollectionDashboardTests(FlaskDBTestCase):
         self.assertIn('id="collection-rename-btn"', text)
         self.assertIn('id="collection-delete-btn"', text)
         self.assertIn('id="collection-import-ids"', text)
+        self.assertIn('id="collection-prior-btn"', text)
         self.assertIn(f'href="/api/collections/{collection.id}/table.csv"', text)
         self.assertIn(f'href="/graph?collection={collection.id}"', text)
         self.assertIn("data-remove-from-collection", text)

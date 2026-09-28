@@ -143,3 +143,115 @@ class PagerankTests(unittest.TestCase):
     def test_edges_to_unknown_nodes_ignored(self):
         ranks = pagerank([1, 2], [(1, 2), (1, 99), (99, 2)])
         self.assertGreater(ranks[2], ranks[1])
+
+
+def _s2(n: int) -> str:
+    return f"{n:040x}"  # 40-char hex, the Semantic Scholar paperId shape
+
+
+class _FakeResponse:
+    def __init__(self, data):
+        self._data = data
+
+    def json(self):
+        return self._data
+
+
+class MissingReferencesTests(FlaskDBTestCase):
+    def _members(self):
+        from app.models import Collection, PaperCollection
+
+        a = _paper("2601.00001", None, [_s2(1), _s2(2), _s2(3), _s2(9), "W77"])
+        b = _paper("2601.00002", None, [_s2(1), _s2(2), _s2(9), "W77", _s2(1)])  # dup ref counts once
+        c = _paper("2601.00003", None, [_s2(1), _s2(3)])
+        local = _paper("2601.00009")
+        local.semantic_scholar_id = _s2(9)  # already tracked: never a "prior work"
+        collection = Collection(name="Review")
+        db.session.add_all([a, b, c, local, collection])
+        db.session.flush()
+        db.session.add_all([PaperCollection(paper_id=p.id, collection_id=collection.id) for p in (a, b, c)])
+        db.session.commit()
+        return collection, [a.id, b.id, c.id]
+
+    def test_ranks_outside_refs_cited_by_two_or_more_members(self):
+        from app.services.citation_graph import missing_references
+
+        _collection, ids = self._members()
+        calls = []
+
+        def fake_request(method, url, **kwargs):
+            calls.append(kwargs)
+            by_id = {
+                _s2(1): {"title": "Deep Residual Learning", "year": 2016, "citationCount": 10, "externalIds": {}},
+                _s2(2): {
+                    "title": "Attention",
+                    "year": 2017,
+                    "citationCount": 500,
+                    "externalIds": {"ArXiv": "1706.03762"},
+                },
+                _s2(3): {"title": "Adam", "year": 2014, "citationCount": 900, "externalIds": None},
+            }
+            return _FakeResponse([by_id[i] for i in kwargs["json"]["ids"]])
+
+        result = missing_references(ids, request_fn=fake_request)
+
+        self.assertEqual(len(calls), 1)  # one batch resolve
+        self.assertEqual(calls[0]["attempts"], 1)
+        self.assertEqual(sorted(calls[0]["json"]["ids"]), [_s2(1), _s2(2), _s2(3)])  # no W-ids, no local, no count-1
+        self.assertNotIn("error", result)
+        rows = result["results"]
+        # (count, citationCount): 3 citers first, then the 2-citer ties by citationCount.
+        self.assertEqual([r["s2_id"] for r in rows], [_s2(1), _s2(3), _s2(2)])
+        self.assertEqual([r["cited_by"] for r in rows], [3, 2, 2])
+        self.assertEqual(rows[2]["arxiv_id"], "1706.03762")
+        self.assertEqual(rows[2]["link"], "https://arxiv.org/abs/1706.03762")
+        self.assertEqual(rows[0]["link"], f"https://www.semanticscholar.org/paper/{_s2(1)}")
+        self.assertEqual(rows[0]["year"], 2016)
+
+        self.assertEqual(len(missing_references(ids, limit=1, request_fn=fake_request)["results"]), 1)
+
+    def test_no_candidates_skips_the_network(self):
+        from app.services.citation_graph import missing_references
+
+        a = _paper("2601.00001", None, [_s2(1)])
+        db.session.add(a)
+        db.session.commit()
+
+        def boom(*args, **kwargs):
+            raise AssertionError("no S2 call expected")
+
+        self.assertEqual(missing_references([a.id], request_fn=boom), {"results": []})
+
+    def test_s2_failure_degrades_to_error_payload(self):
+        from app.services.citation_graph import missing_references
+
+        _collection, ids = self._members()
+
+        def down(*args, **kwargs):
+            raise ConnectionError("429")
+
+        self.assertEqual(
+            missing_references(ids, request_fn=down), {"results": [], "error": "Semantic Scholar unavailable"}
+        )
+
+    def test_prior_works_route(self):
+        from unittest.mock import patch
+
+        client = self.app.test_client()
+        collection, _ids = self._members()
+        self.assertEqual(client.get("/api/collections/9999/prior-works").status_code, 404)
+
+        with patch(
+            "app.services.http_client.request_with_backoff",
+            return_value=_FakeResponse([{"title": "T", "year": 2016, "citationCount": 1, "externalIds": {}}] * 3),
+        ):
+            response = client.get(f"/api/collections/{collection.id}/prior-works")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["paper_count"], 3)
+        self.assertEqual(len(data["results"]), 3)
+
+        with patch("app.services.http_client.request_with_backoff", side_effect=ConnectionError("down")):
+            response = client.get(f"/api/collections/{collection.id}/prior-works")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json()["error"], "Semantic Scholar unavailable")

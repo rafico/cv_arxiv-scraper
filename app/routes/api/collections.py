@@ -166,6 +166,22 @@ def export_collection_csv(collection_id: int):
     return response
 
 
+@api_bp.route("/collections/<int:collection_id>/prior-works", methods=["GET"])
+def collection_prior_works(collection_id: int):
+    """Outside papers cited by >= 2 members, resolved live via Semantic Scholar."""
+    from app.services.citation_graph import missing_references
+
+    db.session.get(Collection, collection_id) or abort(404)
+    ids = [
+        pid
+        for (pid,) in db.session.query(Paper.id)
+        .join(PaperCollection, PaperCollection.paper_id == Paper.id)
+        .filter(PaperCollection.collection_id == collection_id, Paper.is_hidden.is_(False))
+    ]
+    result = missing_references(ids)
+    return jsonify({**result, "paper_count": len(ids)}), 502 if "error" in result else 200
+
+
 _MAX_BUNDLE_UPLOAD_BYTES = 64 * 1024 * 1024
 # ponytail: the arXiv fetch and CPU embedding run synchronously on the single
 # worker, so seeds are capped and bigger bundles skip embedding (left to

@@ -14,7 +14,13 @@ the full id list).
 
 from __future__ import annotations
 
+import logging
+import re
+
+LOGGER = logging.getLogger(__name__)
+
 CITES = "cites"
+_S2_PAPER_ID = re.compile(r"[0-9a-f]{40}")
 
 
 def sync_citation_edges() -> int:
@@ -53,6 +59,69 @@ def sync_citation_edges() -> int:
     if inserted:
         db.session.commit()
     return inserted
+
+
+def missing_references(paper_ids: list[int], limit: int = 15, request_fn=None) -> dict:
+    """Outside works cited by >= 2 of ``paper_ids``: the prior works they build on.
+
+    Counts stored Semantic Scholar paperIds only (OpenAlex W-ids aren't S2
+    resolvable), drops ones already local, and resolves the top ids in one S2
+    /paper/batch call. Any failure degrades to an error payload, never raises.
+
+    # ponytail: uncached live S2 call per click; lru_cache it if clicked a lot.
+    """
+    from collections import Counter
+
+    from app.models import Paper, db
+    from app.services.enrichment_providers.semantic_scholar import SEMANTIC_SCHOLAR_BATCH_URL
+    from app.services.http_client import request_with_backoff
+    from app.services.secret_files import resolve_data_source_key
+
+    rows = db.session.query(Paper.referenced_works).filter(Paper.id.in_(paper_ids)).all()
+    counts = Counter(ref for (refs,) in rows for ref in set(refs or []) if _S2_PAPER_ID.fullmatch(ref))
+    local = {s2 for (s2,) in db.session.query(Paper.semantic_scholar_id).filter(Paper.semantic_scholar_id.isnot(None))}
+    # ponytail: resolve the top 100 so the citationCount tie-break is exact for
+    # typical collections (count >= 2 leaves ~1-10); raise toward 500 if cut.
+    top = [ref for ref, n in counts.most_common() if n >= 2 and ref not in local][:100]
+    if not top:
+        return {"results": []}
+
+    try:
+        api_key = resolve_data_source_key("semantic_scholar")
+        # Single web worker: one attempt, short timeout.
+        response = (request_fn or request_with_backoff)(
+            "POST",
+            SEMANTIC_SCHOLAR_BATCH_URL,
+            json={"ids": top},
+            params={"fields": "title,year,externalIds,citationCount"},
+            attempts=1,
+            timeout=10,
+            headers={"x-api-key": api_key} if api_key else None,
+        )
+        results = []
+        for ref, item in zip(top, response.json()):
+            if not item:
+                continue
+            arxiv_id = (item.get("externalIds") or {}).get("ArXiv")
+            results.append(
+                {
+                    "s2_id": ref,
+                    "title": item.get("title") or "",
+                    "year": item.get("year"),
+                    "arxiv_id": arxiv_id,
+                    "citation_count": item.get("citationCount"),
+                    "cited_by": counts[ref],
+                    # Built from the validated id, not S2's url field: no untrusted hrefs.
+                    "link": f"https://arxiv.org/abs/{arxiv_id}"
+                    if arxiv_id
+                    else f"https://www.semanticscholar.org/paper/{ref}",
+                }
+            )
+        results.sort(key=lambda r: (r["cited_by"], r["citation_count"] or 0), reverse=True)
+    except Exception as exc:
+        LOGGER.warning("Prior-works lookup failed: %s", exc)
+        return {"results": [], "error": "Semantic Scholar unavailable"}
+    return {"results": results[:limit]}
 
 
 def pagerank(

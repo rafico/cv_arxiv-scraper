@@ -225,6 +225,14 @@
     </div>
     <div id="collection-suggest-list" class="mt-2 px-2 space-y-2"></div>
     <div class="mt-2 px-2">
+        <button id="collection-prior-btn" type="button"
+                title="Papers outside your library that several members cite (via Semantic Scholar)"
+                class="w-full px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Prior works
+        </button>
+    </div>
+    <div id="collection-prior-list" class="mt-2 px-2 space-y-2"></div>
+    <div class="mt-2 px-2">
         <textarea id="collection-import-ids" rows="3" aria-label="Add by arXiv id, URL or .bib"
                   class="input-base w-full text-xs font-mono"
                   placeholder="Add by arXiv id / URL / .bib"></textarea>
@@ -335,6 +343,68 @@
         } catch (e) { /* non-fatal */ }
         button.disabled = false;
         button.textContent = "Suggest similar";
+    };
+
+    const priorBtn = document.getElementById("collection-prior-btn");
+    const priorList = document.getElementById("collection-prior-list");
+    priorBtn.onclick = async function () {
+        priorBtn.disabled = true;
+        priorBtn.textContent = "Looking up…";
+        let data;
+        try {
+            data = await (await fetch("/api/collections/" + collectionId + "/prior-works")).json();
+        } catch (e) {
+            data = { results: [], error: "request failed" };
+        }
+        const results = data.results || [];
+        priorList.innerHTML = "";
+        if (!results.length) {
+            const empty = document.createElement("p");
+            empty.className = "text-[11px] text-fg-subtle px-1";
+            empty.textContent = data.error ? "Error: " + data.error
+                : "No outside paper is cited by 2+ members yet. Reference lists fill in over time "
+                  + "(daily scrape, cv-arxiv-backfill), so check back as the collection grows.";
+            priorList.append(empty);
+        }
+        results.forEach(function (p) {
+            const card = document.createElement("div");
+            card.className = "rounded-lg border border-edge bg-surface p-2";
+            card.dataset.s2Id = p.s2_id;
+            const title = document.createElement("a");
+            title.className = "text-xs font-medium text-fg line-clamp-2 hover:text-accent";
+            title.textContent = p.title;
+            title.href = p.link;
+            title.target = "_blank";
+            title.rel = "noopener";
+            const meta = document.createElement("div");
+            meta.className = "mt-0.5 text-[11px] text-fg-muted";
+            meta.textContent = "cited by " + p.cited_by + " of your " + data.paper_count + " papers"
+                + (p.year ? " · " + p.year : "");
+            card.append(title, meta);
+            if (p.arxiv_id) {
+                const add = document.createElement("button");
+                add.className = "mt-2 px-2 py-1 text-[11px] rounded-lg bg-accent text-accent-fg";
+                add.textContent = "Add";
+                add.onclick = async function () {
+                    add.disabled = true;
+                    try {
+                        const res = await fetch("/api/collections/import-ids", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                            body: JSON.stringify({ name: String(collectionId), text: p.arxiv_id }),
+                        });
+                        const out = await res.json();
+                        if (res.ok && !out.not_found.length) { card.remove(); return; }
+                    } catch (e) { /* fall through */ }
+                    add.disabled = false;
+                    add.textContent = "Failed, retry";
+                };
+                card.append(add);
+            }
+            priorList.append(card);
+        });
+        priorBtn.disabled = false;
+        priorBtn.textContent = "Prior works";
     };
 
     const importBtn = document.getElementById("collection-import-ids-btn");
