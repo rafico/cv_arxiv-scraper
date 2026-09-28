@@ -5,11 +5,20 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+import requests
+
 from app.services.arxiv_adapter import result_to_entry
 from app.services.enrichment import parse_feed_entries, query_arxiv_api
-from app.services.ingest import ArxivApiBackend, PaperCandidate, RssFeedBackend
-from app.services.ingest.arxiv_api_backend import _build_query
+from app.services.ingest import ArxivApiBackend, PaperCandidate, RssFeedBackend, arxiv_api_backend
+from app.services.ingest.arxiv_api_backend import (
+    ArxivRefused,
+    _build_query,
+    _oai_set,
+    fetch_oai_records,
+    request_arxiv_api,
+)
 from app.services.ingest.base import clean_abstract, parse_publication_dt
+from tests.helpers import OAI_RECORD_2609_12871, OAI_RECORD_2609_22706, oai_response
 
 RSS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -306,3 +315,123 @@ class ArxivAdapterTests(TestCase):
         self.assertEqual(entry["arxiv_id"], "2604.00003")
         self.assertEqual(entry["author"], "Dana Example")
         self.assertEqual(entry["categories"], ["cs.CV"])
+
+
+# Two more live OAI records (abstracts trimmed) that a cs.CV harvest from 2026-09-11 returns but the
+# window must drop: an old paper whose metadata was revised, and a 2508 paper whose <created> is its
+# v2 date (arXiv's OAI feed reports a later version's date there, not v1's).
+OAI_RECORD_2303_15533 = """<record>
+    <header><identifier>oai:arXiv.org:2303.15533</identifier><datestamp>2026-09-24</datestamp></header>
+    <metadata>
+        <arXiv xmlns="http://arxiv.org/OAI/arXiv/">
+        <id>2303.15533</id>
+        <created>2023-03-27</created>
+            <updated>2026-09-24</updated>
+        <authors><author><keyname>Pathak</keyname><forenames>Arkanath</forenames></author></authors>
+        <title>Sequential training of GANs against GAN-classifiers reveals correlated &#34;knowledge gaps&#34; present among independently trained GAN instances</title>
+            <categories>cs.LG cs.CV</categories>
+            <doi>10.1109/CVPR52729.2023.02343</doi>
+            <abstract>Modern Generative Adversarial Networks (GANs) generate realistic images remarkably well.</abstract>
+    </arXiv>
+    </metadata>
+</record>"""
+
+OAI_RECORD_2508_11450 = """<record>
+    <header><identifier>oai:arXiv.org:2508.11450</identifier><datestamp>2026-09-14</datestamp></header>
+    <metadata>
+        <arXiv xmlns="http://arxiv.org/OAI/arXiv/">
+        <id>2508.11450</id>
+        <created>2026-09-11</created>
+            <updated>2026-09-14</updated>
+        <authors><author><keyname>Lee</keyname><forenames>Augustine X. W.</forenames></author></authors>
+        <title>Subcortical Masks Generation in CT Images via Ensemble-Based Cross-Domain Label Transfer</title>
+            <categories>eess.IV cs.CV</categories>
+            <abstract>Subcortical segmentation in neuroimages plays an important role in understanding brain anatomy.</abstract>
+    </arXiv>
+    </metadata>
+</record>"""
+
+
+def _http_error(status: int) -> requests.HTTPError:
+    return requests.HTTPError(response=Mock(status_code=status))
+
+
+@patch.object(arxiv_api_backend, "_refused", (0.0, 0))
+class ArxivRefusalTests(TestCase):
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_refusal_is_remembered_and_short_circuits_later_calls(self, mock_request):
+        mock_request.side_effect = [_http_error(500), _http_error(406)]
+
+        with self.assertRaises(requests.HTTPError) as caught:
+            request_arxiv_api({"id_list": "2609.22706"})
+        self.assertNotIsInstance(caught.exception, ArxivRefused)  # a 5xx is not a refusal
+        for _ in range(2):
+            with self.assertRaises(ArxivRefused) as refused:
+                request_arxiv_api({"id_list": "2609.22706"})
+            self.assertEqual(refused.exception.status, 406)
+
+        self.assertEqual(mock_request.call_count, 2)  # the remembered refusal never reached arXiv
+
+    @patch.object(arxiv_api_backend, "_OAI_LOOKUP_CAP", 2)
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_fetch_oai_records_parses_the_live_record_shape(self, mock_request):
+        mock_request.side_effect = [
+            Mock(content=oai_response("GetRecord", OAI_RECORD_2609_22706)),
+            Mock(
+                content=b'<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"><error code="idDoesNotExist"/></OAI-PMH>'
+            ),
+        ]
+
+        records = fetch_oai_records(["2609.22706", "2609.99999", "2609.00001"])
+
+        self.assertEqual(list(records), ["2609.22706"])  # unknown id absent, third id past the cap
+        paper = records["2609.22706"]
+        self.assertEqual(
+            (paper.title, paper.authors_list, paper.categories, paper.link, paper.publication_dt),
+            (
+                "DOA-SORT: Directional Occlusion-Aware Multi-Object Tracking with Distributional Observations",
+                ["Hao Wang"],
+                ["cs.CV", "cs.IR"],
+                "https://arxiv.org/abs/2609.22706",
+                date(2026, 9, 19),
+            ),
+        )
+        self.assertTrue(paper.abstract.startswith("Identity association in multi-object tracking"))
+        self.assertEqual((paper.comment, paper.doi), ("", ""))
+        self.assertEqual(mock_request.call_count, 2)
+        self.assertEqual(
+            mock_request.call_args_list[0].kwargs["params"],
+            {"verb": "GetRecord", "identifier": "oai:arXiv.org:2609.22706", "metadataPrefix": "arXiv"},
+        )
+
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_refused_listing_falls_back_to_an_oai_window(self, mock_request):
+        mock_request.side_effect = [
+            _http_error(406),
+            Mock(content=oai_response("ListRecords", OAI_RECORD_2303_15533, OAI_RECORD_2508_11450, token="tok1")),
+            Mock(content=oai_response("ListRecords", OAI_RECORD_2609_22706, OAI_RECORD_2609_12871, token="")),
+        ]
+        window = {"start_dt": date(2026, 9, 11), "end_dt": date(2026, 9, 18)}
+
+        candidates = ArxivApiBackend().fetch(categories=["cs.CV"], max_results=25, **window)
+
+        # 2303.15533: created long ago; 2508.11450: created in the window is its v2, the id says August 2025;
+        # 2609.22706: created the day after the window.
+        self.assertEqual([c.arxiv_id for c in candidates], ["2609.12871"])
+        self.assertEqual(candidates[0].comment, 'Paper accompanying the dataset "7V-Scanario"')
+        self.assertEqual(
+            [call.kwargs["params"] for call in mock_request.call_args_list[1:]],
+            [
+                {"verb": "ListRecords", "metadataPrefix": "arXiv", "set": "cs:cs:CV", "from": "2026-09-11"},
+                {"verb": "ListRecords", "resumptionToken": "tok1"},
+            ],
+        )
+        with self.assertRaises(ArxivRefused):  # a search has no OAI equivalent; the caller decides
+            ArxivApiBackend().fetch(categories=["cs.CV"], query="ti:x", **window)
+        self.assertEqual(mock_request.call_count, 3)
+
+    def test_oai_set_names_follow_the_archive_group(self):
+        self.assertEqual(
+            [_oai_set(c) for c in ("cs.CV", "math.GT", "astro-ph.CO", "hep-th", "cs")],
+            ["cs:cs:CV", "math:math:GT", "physics:astro-ph:CO", "physics:hep-th", "cs:cs"],
+        )

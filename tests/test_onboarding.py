@@ -6,12 +6,14 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import requests
 
 # Import the route module at module load (before any create_app registers the
 # blueprint) so its handlers attach to the shared api_bp. The production wiring
 # adds `onboarding` to app/routes/api/__init__.py's import tuple.
 import app.routes.api.onboarding  # noqa: F401
 from app.models import Paper, PaperFeedback, db
+from app.services.ingest import arxiv_api_backend
 from app.services.onboarding import (
     bootstrap_from_arxiv_ids,
     extract_arxiv_ids,
@@ -19,7 +21,7 @@ from app.services.onboarding import (
     normalize_arxiv_id,
     select_uncertain_papers,
 )
-from tests.helpers import FlaskDBTestCase
+from tests.helpers import OAI_RECORD_2609_22706, FlaskDBTestCase, oai_response
 
 # A canned 2-entry arXiv Atom feed (as returned by the API id_list query).
 _ATOM_FEED = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -163,7 +165,30 @@ class ExtractArxivIdsTests(unittest.TestCase):
         self.assertEqual(extract_arxiv_ids(text), [])
 
 
+@patch.object(arxiv_api_backend, "_refused", (0.0, 0))
 class FetchArxivMetadataTests(unittest.TestCase):
+    def test_falls_back_to_oai_when_arxiv_refuses(self):
+        refused = requests.HTTPError(response=MagicMock(status_code=406))
+        oai = MagicMock(content=oai_response("GetRecord", OAI_RECORD_2609_22706))
+        with patch("app.services.ingest.arxiv_api_backend.request_with_backoff", side_effect=[refused, oai]) as fetch:
+            entries = fetch_arxiv_metadata(["arXiv:2609.22706v1"])
+
+        self.assertEqual(fetch.call_args.args[1], "https://oaipmh.arxiv.org/oai")
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(
+            {key: entry[key] for key in ("arxiv_id", "authors", "categories", "link", "pdf_link", "publication_date")},
+            {
+                "arxiv_id": "2609.22706",
+                "authors": ["Hao Wang"],
+                "categories": ["cs.CV", "cs.IR"],
+                "link": "https://arxiv.org/abs/2609.22706",
+                "pdf_link": "https://arxiv.org/pdf/2609.22706",
+                "publication_date": "2026-09-19",
+            },
+        )
+        self.assertTrue(entry["title"].startswith("DOA-SORT"))
+
     def test_skips_api_error_entries(self):
         error_feed = b"""<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -174,7 +199,9 @@ class FetchArxivMetadataTests(unittest.TestCase):
   </entry>
 </feed>
 """
-        with patch("app.services.onboarding.request_with_backoff", return_value=_fake_response(error_feed)):
+        with patch(
+            "app.services.ingest.arxiv_api_backend.request_with_backoff", return_value=_fake_response(error_feed)
+        ):
             self.assertEqual(fetch_arxiv_metadata(["2401.01234"]), [])
 
 
@@ -185,7 +212,9 @@ class BootstrapTests(FlaskDBTestCase):
 
     def _patches(self):
         return [
-            patch("app.services.onboarding.request_with_backoff", return_value=_fake_response(_ATOM_FEED)),
+            patch(
+                "app.services.ingest.arxiv_api_backend.request_with_backoff", return_value=_fake_response(_ATOM_FEED)
+            ),
             patch("app.services.onboarding.get_embedding_service", return_value=self.service),
             patch("app.services.embeddings.get_embedding_service", return_value=self.service),
         ]
@@ -369,7 +398,9 @@ class OnboardingEndpointTests(FlaskDBTestCase):
     def test_bootstrap_endpoint_ingests(self):
         recompute = MagicMock(return_value=0)
         with (
-            patch("app.services.onboarding.request_with_backoff", return_value=_fake_response(_ATOM_FEED)),
+            patch(
+                "app.services.ingest.arxiv_api_backend.request_with_backoff", return_value=_fake_response(_ATOM_FEED)
+            ),
             patch("app.services.onboarding.get_embedding_service", return_value=self.service),
             patch("app.services.embeddings.get_embedding_service", return_value=self.service),
             patch("app.services.interest_model.recompute_interest_similarities", recompute),

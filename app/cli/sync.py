@@ -14,7 +14,9 @@ from app.ingest.scrape_engine import execute_historical_scrape
 from app.models import SyncState, db
 from app.search_.text import now_utc
 from app.services.collection_share import BUNDLE_VERSION, MAX_BUNDLE_PAPERS, arxiv_bundle_entry, import_collection
+from app.services.enrichment_providers.semantic_scholar import search_arxiv_papers
 from app.services.ingest import ArxivApiBackend
+from app.services.ingest.arxiv_api_backend import ArxivRefused
 from app.services.mcp_tools import _resolve_or_create_collection
 
 CHUNK_DAYS = 7
@@ -156,17 +158,22 @@ def run_query_import(
 
     Bypasses the scrape pipeline (no PDF downloads, no whitelist matching) and
     never calls run_sync/upsert_sync_state: a topic query says nothing about how
-    far a category has been synced.
+    far a category has been synced. When arXiv refuses the search, Semantic Scholar
+    runs it instead.
     """
     with app.app_context():
         emit(f"Querying arXiv {start_dt.isoformat()} -> {end_dt.isoformat()}: {query}")
-        candidates = ArxivApiBackend().fetch(
-            categories=categories or [],
-            start_dt=start_dt,
-            end_dt=end_dt,
-            max_results=max_results,
-            query=query,
-        )
+        try:
+            candidates = ArxivApiBackend().fetch(
+                categories=categories or [],
+                start_dt=start_dt,
+                end_dt=end_dt,
+                max_results=max_results,
+                query=query,
+            )
+        except ArxivRefused as exc:
+            emit(f"arXiv refused the query (HTTP {exc.status}); used Semantic Scholar search instead")
+            candidates = search_arxiv_papers(query, start_dt, end_dt, max_results)
         if len(candidates) >= max_results:
             emit(
                 f"WARNING: hit --max-results {max_results}. arXiv returns newest first, so the OLDEST "

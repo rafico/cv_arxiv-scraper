@@ -4,10 +4,12 @@ import contextlib
 import io
 import unittest
 from datetime import date, datetime
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.models import Collection, Paper, PaperCollection, PaperFeedback, SyncState, db
+from app.services.enrichment_providers.semantic_scholar import arxiv_query_to_s2
 from app.services.ingest import PaperCandidate
+from app.services.ingest.arxiv_api_backend import ArxivRefused
 from sync_cli import chunk_end_timestamp, iter_date_chunks, main, run_query_import, run_sync, upsert_sync_state
 from tests.helpers import FlaskDBTestCase
 
@@ -182,6 +184,75 @@ class SyncCliQueryTests(FlaskDBTestCase):
         scrape.assert_not_called()
         upsert.assert_not_called()
         self.assertTrue(any(m.startswith("WARNING: hit --max-results 2") for m in messages))
+
+    @patch("app.services.embeddings.add_papers_to_index", return_value=0)
+    @patch("sync_cli.upsert_sync_state")
+    @patch("app.services.secret_files.resolve_data_source_key", return_value="s2-key")
+    @patch("app.services.http_client.request_with_backoff")
+    @patch("sync_cli.ArxivApiBackend.fetch", side_effect=ArxivRefused(406))
+    def test_refused_query_falls_back_to_semantic_scholar(self, _fetch, s2, _key, upsert, _embed):
+        s2.return_value = Mock(
+            json=Mock(
+                return_value={
+                    "total": 2,
+                    "data": [
+                        {
+                            "paperId": "006e24d91fe3bfe6b3dae83f36df91e12e76a7af",
+                            "externalIds": {"ArXiv": "2607.19228", "DOI": "10.48550/arXiv.2607.19228"},
+                            "title": "IGGT4D: Streaming 4D Instance-Grounded Geometry Transformer",
+                            "abstract": "Real-world spatial intelligence requires agents to understand scenes.",
+                            "authors": [
+                                {"authorId": "2336870897", "name": "Zheng-Yu Zou"},
+                                {"authorId": "1", "name": "Hao Li"},
+                            ],
+                            "publicationDate": "2026-07-21",
+                        },
+                        {"paperId": "b", "externalIds": {"DOI": "10.1109/x"}, "title": "Not on arXiv"},
+                    ],
+                }
+            )
+        )
+        messages: list[str] = []
+
+        stats = run_query_import(
+            self.app,
+            query='abs:"open-vocabulary segmentation" AND cat:cs.CV',
+            collection="OVS",
+            start_dt=date(2019, 1, 1),
+            end_dt=date(2026, 9, 28),
+            max_results=5,
+            emit=messages.append,
+        )
+
+        self.assertIn("arXiv refused the query (HTTP 406); used Semantic Scholar search instead", messages)
+        self.assertEqual(stats["created"], 1)
+        params = s2.call_args.kwargs["params"]
+        self.assertEqual(
+            (params["query"], params["publicationDateOrYear"], params["fieldsOfStudy"]),
+            ('"open-vocabulary segmentation"', "2019-01-01:2026-09-28", "Computer Science"),
+        )
+        self.assertEqual(s2.call_args.kwargs["headers"], {"x-api-key": "s2-key"})
+        paper = Paper.query.filter_by(arxiv_id="2607.19228").one()
+        self.assertEqual(
+            (paper.link, paper.pdf_link, paper.authors, paper.publication_dt),
+            (
+                "https://arxiv.org/abs/2607.19228",
+                "https://arxiv.org/pdf/2607.19228",
+                "Zheng-Yu Zou, Hao Li",
+                date(2026, 7, 21),
+            ),
+        )
+        self.assertEqual(SyncState.query.count(), 0)
+        upsert.assert_not_called()
+
+    def test_arxiv_query_translates_to_s2_syntax(self):
+        cases = {
+            'abs:"open-vocabulary segmentation" OR ti:ovs': '"open-vocabulary segmentation" | ovs',
+            "(cat:cs.CV OR cat:cs.LG) AND ti:detr ANDNOT au:smith": "detr -smith",
+            "ti:mask AND (abs:transformer OR cat:cs.CV)": "mask + ( transformer )",
+        }
+        for arxiv_query, expected in cases.items():
+            self.assertEqual(arxiv_query_to_s2(arxiv_query), expected, arxiv_query)
 
     @patch("sync_cli.run_query_import")
     @patch("sync_cli.create_app", return_value=object())

@@ -50,7 +50,7 @@ class BareCallPreservesSessionConfigTests(unittest.TestCase):
         self.assertEqual(session._cv_arxiv_rate_limit_settings.profile, "bulk")
 
     def test_bulk_profile_call_retunes_rate_limit_but_keeps_user_agent(self):
-        # enrichment._request_arxiv_api passes rate_limit_profile="bulk" with no config
+        # arxiv_api_backend.request_arxiv_api passes rate_limit_profile="bulk" with no config
         # or user_agent: it must re-tune the throttle yet keep the configured UA.
         session = create_session(
             scraper_config={"ingest": {"user_agent": _UA}},

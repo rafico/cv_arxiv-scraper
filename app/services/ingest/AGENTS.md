@@ -10,7 +10,12 @@ with resumable pagination. This is the most state-heavy part of the pipeline.
 - `orchestrator.py` — `IngestOrchestrator` chooses backends and modes, aggregates
   candidates, and owns the per-backend error policy.
 - `arxiv_api_backend.py` — `ArxivApiBackend.fetch(...)`: queries the arXiv Atom
-  API, paginates by `page_size`, supports `resume_after_arxiv_id`.
+  API, paginates by `page_size`, supports `resume_after_arxiv_id`. Also the **one**
+  export-API entry point, `request_arxiv_api`, used by every caller (rolling window,
+  scrape enrichment, id lookups): a 403/406 (or a 429 that outlives the retries) is
+  remembered for 30 minutes in-process and raised as `ArxivRefused`. Callers then
+  fall back to arXiv OAI-PMH (`fetch_oai_records` for ids, `list_oai_candidates` for
+  date windows); a `--query` search falls back to Semantic Scholar in `cv-arxiv-sync`.
 - `rss_backend.py` — RSS/Atom feed backend for the daily-watch path.
 
 ## Modes (`IngestMode`)

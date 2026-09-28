@@ -238,7 +238,7 @@ class CollectionShareTests(FlaskDBTestCase):
         self.assertEqual(
             self.client.post("/api/collections/import-ids", json={"name": "Seeds", "text": text}).status_code, 400
         )
-        with patch("app.services.onboarding.request_with_backoff", return_value=response) as fetch:
+        with patch("app.services.ingest.arxiv_api_backend.request_with_backoff", return_value=response) as fetch:
             res = self.client.post(
                 "/api/collections/import-ids",
                 json={"name": "Seeds", "text": text},

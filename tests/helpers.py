@@ -114,3 +114,74 @@ class DefaultConfigFlaskDBTestCase(unittest.TestCase):
         self.ctx.pop()
         os.chdir(self._original_cwd)
         self._tmpdir.cleanup()
+
+
+# Live arXiv OAI-PMH records (oaipmh.arxiv.org, fetched 2026-09-28), abstracts trimmed.
+# 2609.12871 carries comments/journal-ref/doi; 2609.22706 is a bare single-version record.
+OAI_RECORD_2609_12871 = """<record>
+    <header>
+        <identifier>oai:arXiv.org:2609.12871</identifier>
+        <datestamp>2026-09-14</datestamp>
+        <setSpec>cs:cs:RO</setSpec>
+        <setSpec>cs:cs:CV</setSpec>
+    </header>
+    <metadata>
+        <arXiv xmlns="http://arxiv.org/OAI/arXiv/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <id>2609.12871</id>
+        <created>2026-09-11</created>
+            <updated>2026-09-14</updated>
+        <authors>
+                <author>
+                    <keyname>Berthold</keyname>
+                        <forenames>Philipp</forenames>
+                </author>
+                <author>
+                    <keyname>Forkel</keyname>
+                        <forenames>Bianca</forenames>
+                </author>
+        </authors>
+        <title>A Multi-Vehicle Dataset with Camera, LiDAR, and Radar Sensors and Scanned 3D Models for Custom Auto-Annotation using RTK-GNSS</title>
+            <categories>cs.RO cs.AI cs.CV cs.LG</categories>
+            <comments>Paper accompanying the dataset &#34;7V-Scanario&#34;</comments>
+            <journal-ref>2025 IEEE Sensor Data Fusion: Trends, Solutions, Applications (SDF)</journal-ref>
+            <doi>10.1109/SDF67080.2025.11331266</doi>
+            <license>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</license>
+            <abstract>Datasets are a crucial element in the development of perception algorithms.</abstract>
+    </arXiv>
+    </metadata>
+</record>"""
+
+OAI_RECORD_2609_22706 = """<record>
+    <header>
+        <identifier>oai:arXiv.org:2609.22706</identifier>
+        <datestamp>2026-09-22</datestamp>
+        <setSpec>cs:cs:CV</setSpec>
+        <setSpec>cs:cs:IR</setSpec>
+    </header>
+    <metadata>
+        <arXiv xmlns="http://arxiv.org/OAI/arXiv/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <id>2609.22706</id>
+        <created>2026-09-19</created>
+            <updated>2026-09-22</updated>
+        <authors>
+                <author>
+                    <keyname>Wang</keyname>
+                        <forenames>Hao</forenames>
+                </author>
+        </authors>
+        <title>DOA-SORT: Directional Occlusion-Aware Multi-Object Tracking with Distributional Observations</title>
+            <categories>cs.CV cs.IR</categories>
+            <license>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</license>
+            <abstract>Identity association in multi-object tracking (MOT) is vulnerable to partial occlusion, truncated detections, and fluctuating confidence scores.</abstract>
+    </arXiv>
+    </metadata>
+</record>"""
+
+
+def oai_response(verb: str, *records: str, token: str | None = None) -> bytes:
+    """An OAI-PMH envelope around ``records``: a GetRecord reply or one ListRecords page."""
+    resumption = "" if token is None else f"<resumptionToken>{token}</resumptionToken>"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">'
+        f"<{verb}>{''.join(records)}{resumption}</{verb}></OAI-PMH>"
+    ).encode()

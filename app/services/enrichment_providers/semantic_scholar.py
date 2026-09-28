@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
+from datetime import date
+from typing import TYPE_CHECKING, Any
 
 from app.services.enrichment_providers.base import (
     DEFAULT_CACHE_TTL_HOURS,
@@ -12,9 +14,13 @@ from app.services.enrichment_providers.base import (
     store_cached_payloads,
 )
 
+if TYPE_CHECKING:
+    from app.services.ingest.base import PaperCandidate
+
 LOGGER = logging.getLogger(__name__)
 
 SEMANTIC_SCHOLAR_BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"
+SEMANTIC_SCHOLAR_BULK_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
 
 # The Semantic Scholar batch endpoint caps each request at 500 ids; larger
 # payloads error (400/413). Chunk to stay under the cap.
@@ -107,3 +113,87 @@ class SemanticScholarProvider(EnrichmentProvider):
             ttl_hours=self.ttl_hours,
         )
         return {**cached, **fetched}
+
+
+_S2_OPERATORS = {"AND": "+", "OR": "|", "ANDNOT": "-"}
+
+
+def arxiv_query_to_s2(query: str) -> str:
+    """Rewrite an arXiv API search query in Semantic Scholar bulk-search syntax.
+
+    ponytail: term-level rewrite. Field prefixes are dropped (S2 matches title and
+    abstract together, so an ``au:`` name becomes a plain word) and ``cat:`` terms are
+    dropped along with the operators and groups they leave dangling (the caller narrows
+    to Computer Science instead). Deeply nested queries translate loosely; upgrade to a
+    real parser if people lean on this fallback.
+    """
+    out: list[str] = []
+    for term in re.findall(r'(?:\w+:)?"[^"]*"|[()]|[^\s()]+', query):
+        term = re.sub(r"^(?:all|ti|abs|au):", "", term)
+        if not term or term.startswith("cat:"):
+            continue
+        op = _S2_OPERATORS.get(term)
+        if op and (not out or out[-1] in ("(", *_S2_OPERATORS.values())):
+            continue  # nothing on its left: the term before it was a dropped cat:
+        if term == ")":
+            if out and out[-1] in _S2_OPERATORS.values():
+                out.pop()
+            if out and out[-1] == "(":
+                out.pop()
+                continue
+        out.append(op or term)
+    while out and out[-1] in ("(", *_S2_OPERATORS.values()):
+        out.pop()
+    return " ".join(out).replace("- ", "-")
+
+
+def search_arxiv_papers(query: str, start_dt: date, end_dt: date, max_results: int) -> list[PaperCandidate]:
+    """arXiv papers matching an arXiv-syntax ``query`` via S2 bulk search, newest first.
+
+    The fallback for ``cv-arxiv-sync --query`` when arXiv refuses the search. Hits S2 does
+    not link to an arXiv id are skipped; S2 has no arXiv categories, so results are narrowed
+    to Computer Science and come back without categories.
+    """
+    from app.services.http_client import request_with_backoff
+    from app.services.ingest.base import PaperCandidate, extract_arxiv_id, parse_publication_dt
+    from app.services.secret_files import resolve_data_source_key
+
+    api_key = resolve_data_source_key("semantic_scholar")
+    params = {
+        "query": arxiv_query_to_s2(query),
+        "fields": "externalIds,title,abstract,authors,publicationDate",
+        "publicationDateOrYear": f"{start_dt}:{end_dt}",
+        "fieldsOfStudy": "Computer Science",
+        "sort": "publicationDate:desc",
+    }
+    candidates: list[PaperCandidate] = []
+    while len(candidates) < max_results:
+        data = request_with_backoff(
+            "GET",
+            SEMANTIC_SCHOLAR_BULK_SEARCH_URL,
+            params=params,
+            headers={"x-api-key": api_key} if api_key else None,
+            rate_limit_profile="bulk",
+        ).json()
+        for item in data.get("data") or []:
+            arxiv_id = extract_arxiv_id(f"https://arxiv.org/abs/{(item.get('externalIds') or {}).get('ArXiv') or ''}")
+            if not arxiv_id:
+                continue
+            authors = [a["name"] for a in item.get("authors") or [] if a.get("name")]
+            publication_dt, publication_date = parse_publication_dt(item.get("publicationDate"))
+            candidates.append(
+                PaperCandidate(
+                    arxiv_id=arxiv_id,
+                    link=f"https://arxiv.org/abs/{arxiv_id}",
+                    title=item.get("title") or "",
+                    author=", ".join(authors),
+                    authors_list=authors,
+                    abstract=item.get("abstract") or "",
+                    publication_dt=publication_dt,
+                    publication_date=publication_date,
+                )
+            )
+        if not data.get("token"):
+            break
+        params["token"] = data["token"]
+    return candidates[:max_results]

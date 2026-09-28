@@ -4,14 +4,20 @@ import unittest
 from datetime import date
 from unittest.mock import Mock, patch
 
+import requests
+
 from app.services.enrichment import (
     _fetch_api_metadata,
+    _fetch_api_metadata_batch,
     extract_affiliation_text_batch,
     extract_pdf_resource_links,
     extract_pdf_resource_links_batch,
     fetch_recent_papers,
     merge_resource_links,
 )
+from app.services.ingest import PaperCandidate, arxiv_api_backend
+from app.services.ingest.arxiv_api_backend import ArxivRefused
+from tests.helpers import OAI_RECORD_2609_12871, oai_response
 
 
 def _make_pdf(pages: list[list[str]]) -> bytes:
@@ -70,7 +76,7 @@ class ExtractAffiliationTextBatchTests(unittest.TestCase):
 
 class FetchRecentPapersTests(unittest.TestCase):
     @patch("app.services.enrichment.utc_today", return_value=date(2026, 3, 20))
-    @patch("app.services.enrichment.request_with_backoff")
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
     def test_uses_utc_today_for_query_window(self, mock_request, _mock_today):
         mock_request.return_value = Mock(text='<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>')
 
@@ -84,7 +90,7 @@ class FetchRecentPapersTests(unittest.TestCase):
         self.assertEqual(mock_request.call_args.kwargs["rate_limit_profile"], "bulk")
 
     @patch("app.services.enrichment.time.sleep")
-    @patch("app.services.enrichment.request_with_backoff")
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
     def test_fetch_api_metadata_splits_failed_batch(self, mock_request, _mock_sleep):
         def _xml_for_id(arxiv_id: str) -> str:
             return f"""<?xml version="1.0"?>
@@ -114,6 +120,44 @@ class FetchRecentPapersTests(unittest.TestCase):
             [2, 1, 1],
         )
         self.assertTrue(all(call.kwargs["rate_limit_profile"] == "bulk" for call in mock_request.call_args_list))
+
+
+@patch.object(arxiv_api_backend, "_refused", (0.0, 0))
+class ArxivRefusalFallbackTests(unittest.TestCase):
+    @patch("app.services.ingest.arxiv_api_backend.request_with_backoff")
+    def test_metadata_batch_falls_back_to_oai(self, mock_request):
+        mock_request.side_effect = [
+            requests.HTTPError(response=Mock(status_code=406)),
+            Mock(content=oai_response("GetRecord", OAI_RECORD_2609_12871)),
+        ]
+        metadata: dict[str, dict] = {}
+
+        _fetch_api_metadata_batch(["2609.12871"], metadata)
+
+        self.assertEqual(
+            metadata,
+            {
+                "2609.12871": {
+                    "api_affiliations": "",
+                    "categories": ["cs.RO", "cs.AI", "cs.CV", "cs.LG"],
+                    "comment": 'Paper accompanying the dataset "7V-Scanario"',
+                    "doi": "10.1109/SDF67080.2025.11331266",
+                }
+            },
+        )
+
+    @patch("app.services.enrichment.list_oai_candidates")
+    @patch("app.services.enrichment.request_arxiv_api", side_effect=ArxivRefused(406))
+    @patch("app.services.enrichment.utc_today", return_value=date(2026, 9, 20))
+    def test_rolling_window_falls_back_to_oai_listing(self, _today, _request, mock_list):
+        mock_list.return_value = [
+            PaperCandidate(arxiv_id="2609.22706", link="https://arxiv.org/abs/2609.22706", title="DOA-SORT")
+        ]
+
+        entries = fetch_recent_papers(2, "https://rss.arxiv.org/rss/cs.CV")
+
+        self.assertEqual([entry["arxiv_id"] for entry in entries], ["2609.22706"])
+        self.assertEqual(mock_list.call_args.args[:3], (["cs.CV"], date(2026, 9, 17), date(2026, 9, 20)))
 
 
 class ExtractPdfResourceLinksTests(unittest.TestCase):

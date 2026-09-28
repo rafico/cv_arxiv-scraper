@@ -10,8 +10,8 @@ Two flows accelerate the learned interest profile (see
   similarity to the positive centroid sits nearest the middle of the candidate
   range — to gather the most informative feedback.
 
-Single-paper arXiv fetch lives here (there is no shared backend for it yet); it
-reuses the project's HTTP client and the ingest parsing helpers.
+The arXiv id lookup lives here; it goes through the ingest backend's shared
+export-API entry point (with its OAI-PMH fallback) and the ingest parsing helpers.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import re
 import feedparser
 
 from app.services.embeddings import get_embedding_service
-from app.services.http_client import request_with_backoff
+from app.services.ingest.arxiv_api_backend import ArxivRefused, fetch_oai_records, request_arxiv_api
 from app.services.ingest.base import (
     clean_abstract,
     extract_author_names,
@@ -31,11 +31,6 @@ from app.services.ingest.base import (
 from app.services.text import clean_whitespace
 
 LOGGER = logging.getLogger(__name__)
-
-_ARXIV_API_URL = "https://export.arxiv.org/api/query"
-_ARXIV_API_TIMEOUT = 45
-_ARXIV_API_ATTEMPTS = 4
-_ARXIV_API_BASE_DELAY = 2.0
 
 # Matches a bare arXiv id (new "2401.01234" or old "math.GT/0309136" scheme),
 # stripping any leading "arXiv:" label, surrounding abs/pdf URL, or trailing
@@ -115,21 +110,31 @@ def fetch_arxiv_metadata(arxiv_ids: list[str]) -> list[dict]:
     Returns a list of entry dicts (one per resolved id) with keys
     ``arxiv_id, title, authors, abstract, link, pdf_link, categories,
     published, publication_dt, publication_date``. Ids the API does not resolve
-    are simply absent from the result.
+    are simply absent from the result. When arXiv refuses the API, OAI-PMH answers
+    instead (capped per call, see ``fetch_oai_records``).
     """
     normalized = [nid for nid in (normalize_arxiv_id(raw) for raw in arxiv_ids) if nid]
     if not normalized:
         return []
 
-    response = request_with_backoff(
-        "GET",
-        _ARXIV_API_URL,
-        params={"id_list": ",".join(normalized), "max_results": len(normalized)},
-        timeout=_ARXIV_API_TIMEOUT,
-        attempts=_ARXIV_API_ATTEMPTS,
-        base_delay=_ARXIV_API_BASE_DELAY,
-        rate_limit_profile="bulk",
-    )
+    try:
+        response = request_arxiv_api({"id_list": ",".join(normalized), "max_results": len(normalized)})
+    except ArxivRefused:
+        return [
+            {
+                "arxiv_id": arxiv_id,
+                "title": c.title,
+                "authors": c.authors_list,
+                "abstract": c.abstract,
+                "link": c.link,
+                "pdf_link": f"https://arxiv.org/pdf/{arxiv_id}",
+                "categories": c.categories,
+                "published": c.published,
+                "publication_dt": c.publication_dt,
+                "publication_date": c.publication_date,
+            }
+            for arxiv_id, c in fetch_oai_records(normalized).items()
+        ]
     feed = feedparser.parse(response.content)
 
     entries: list[dict] = []

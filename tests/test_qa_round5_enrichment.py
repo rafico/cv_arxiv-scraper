@@ -26,7 +26,7 @@ class FetchRecentPaginationTests(unittest.TestCase):
     @patch.object(enrichment, "_ARXIV_ROLLING_WINDOW_MAX_PAGES", 5)
     @patch.object(enrichment, "_ARXIV_API_BATCH_SIZE", 2)
     @patch("app.services.enrichment.time.sleep", lambda *_a, **_k: None)
-    @patch.object(enrichment, "_request_arxiv_api")
+    @patch.object(enrichment, "request_arxiv_api")
     def test_midpagination_failure_keeps_collected_entries(self, mock_request, _mock_query):
         # First page: a full batch (forces a second page). Second page: network error.
         full_page = Mock(text=_atom_page(["2601.00001", "2601.00002"]))

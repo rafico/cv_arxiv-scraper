@@ -15,8 +15,13 @@ import requests
 
 from app.constants import ARXIV_API_BATCH_SIZE as _ARXIV_API_BATCH_SIZE
 from app.constants import ARXIV_API_DELAY as _ARXIV_API_DELAY
-from app.services.http_client import request_with_backoff
 from app.services.ingest import ArxivApiBackend, RssFeedBackend
+from app.services.ingest.arxiv_api_backend import (
+    ArxivRefused,
+    fetch_oai_records,
+    list_oai_candidates,
+    request_arxiv_api,
+)
 from app.services.ingest.base import clean_abstract, extract_arxiv_id, parse_publication_dt
 from app.services.text import clean_whitespace, utc_today
 
@@ -28,10 +33,6 @@ _HEADER_END_RE = re.compile(
 )
 _URL_RE = re.compile(r"https?://[^\s<>)\]\"']+")
 
-_ARXIV_API_URL = "https://export.arxiv.org/api/query"
-_ARXIV_API_TIMEOUT = 45
-_ARXIV_API_ATTEMPTS = 4
-_ARXIV_API_BASE_DELAY = 2.0
 _ARXIV_METADATA_BATCH_SIZE = min(_ARXIV_API_BATCH_SIZE, 20)
 _ARXIV_ROLLING_WINDOW_MAX_PAGES = 100
 
@@ -99,19 +100,6 @@ def query_arxiv_api(categories: list[str], start_dt: date, end_dt: date, max_res
     ]
 
 
-def _request_arxiv_api(params: dict[str, str | int], session: requests.Session | None = None) -> requests.Response:
-    return request_with_backoff(
-        "GET",
-        _ARXIV_API_URL,
-        params=params,
-        timeout=_ARXIV_API_TIMEOUT,
-        attempts=_ARXIV_API_ATTEMPTS,
-        base_delay=_ARXIV_API_BASE_DELAY,
-        rate_limit_profile="bulk",
-        session=session,
-    )
-
-
 def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | None = None) -> list[dict]:
     category = _extract_category_from_feed_url(feed_url)
     if not category or days <= 0:
@@ -140,8 +128,12 @@ def fetch_recent_papers(days: int, feed_url: str, session: requests.Session | No
             "max_results": batch_size,
         }
         try:
-            response = _request_arxiv_api(params, session=session)
+            response = request_arxiv_api(params, session=session)
             root = ET.fromstring(response.text)
+        except ArxivRefused:
+            limit = _ARXIV_ROLLING_WINDOW_MAX_PAGES * batch_size
+            entries = [c.to_entry_dict() for c in list_oai_candidates([category], start_date, end_date, limit)]
+            break
         except Exception as exc:
             # A mid-pagination arXiv failure (exhausted retries) or a malformed page
             # must not discard the entries already paginated this run — keep what we
@@ -330,19 +322,19 @@ def _fetch_api_metadata_batch(
 
     params: dict[str, str | int] = {"id_list": ",".join(arxiv_ids), "max_results": len(arxiv_ids)}
     try:
-        response = _request_arxiv_api(params, session=session)
+        response = request_arxiv_api(params, session=session)
+    except ArxivRefused:
+        # Refused or rate-limited (429 after retries): halving would only multiply the
+        # requests arXiv is refusing, so ask OAI-PMH for the whole batch instead.
+        for arxiv_id, candidate in fetch_oai_records(arxiv_ids).items():
+            metadata[arxiv_id] = {
+                "api_affiliations": candidate.api_affiliations,
+                "categories": candidate.categories,
+                "comment": candidate.comment,
+                "doi": candidate.doi,
+            }
+        return
     except Exception as exc:
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        if status == 429:
-            # Recursively halving on a rate-limit only multiplies the request
-            # count and makes the throttling worse. Metadata is best-effort, so
-            # skip this batch entirely.
-            LOGGER.warning(
-                "arXiv API metadata batch rate-limited (429) for %d papers; skipping enrichment for this batch",
-                len(arxiv_ids),
-            )
-            return
-
         if len(arxiv_ids) == 1:
             LOGGER.warning("arXiv API metadata request failed for %s: %s", arxiv_ids[0], exc)
             return
