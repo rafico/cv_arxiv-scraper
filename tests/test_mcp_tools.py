@@ -105,6 +105,24 @@ class SearchPapersTests(FlaskDBTestCase):
                 result = mcp_tools.search_papers("Vision", mode=mode)
                 self.assertEqual([r["id"] for r in result["results"]], [visible.id], mode)
 
+    def test_ranked_modes_over_fetch_past_hidden_top_hits(self):
+        # The top `limit` hits are all skipped papers: a top_k=limit search came back empty.
+        hidden = [_make_paper(20 + i, title=f"Vision skipped {i}", is_hidden=True) for i in range(2)]
+        db.session.add_all(hidden)
+        db.session.commit()
+        visible = Paper.query.filter_by(arxiv_id="2607.3000").one()
+
+        def ranked(_query, top_k):
+            return [(pid, 1.0) for pid in [h.id for h in hidden] + [visible.id]][:top_k]
+
+        with (
+            patch("app.services.search.search_bm25", side_effect=lambda q, limit: ranked(q, limit)),
+            patch("app.services.search.search_semantic", side_effect=ranked),
+        ):
+            for mode in ("hybrid", "semantic"):
+                result = mcp_tools.search_papers("Vision", mode=mode, limit=2)
+                self.assertEqual([r["id"] for r in result["results"]], [visible.id], mode)
+
 
 class GetPaperTests(FlaskDBTestCase):
     def setUp(self):

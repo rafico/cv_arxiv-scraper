@@ -183,20 +183,24 @@ def search_papers(query: str, mode: str = "hybrid", limit: int = _DEFAULT_LIMIT)
         try:
             from app.services.search import search_hybrid, search_semantic
 
+            # ponytail: over-fetch 3x so skipped (hidden) top hits don't empty the page; if all
+            # 3n are hidden the page comes back short. Upgrade: filter hidden ids inside search.
             if normalized_mode == "semantic":
-                ordered_ids = [pid for pid, _score in search_semantic(clean_query, top_k=n)]
+                ordered_ids = [pid for pid, _score in search_semantic(clean_query, top_k=n * 3)]
             else:
-                ordered_ids = [row["paper_id"] for row in search_hybrid(clean_query, top_k=n)]
+                ordered_ids = [row["paper_id"] for row in search_hybrid(clean_query, top_k=n * 3)]
         except Exception:  # noqa: BLE001 — search backends are best-effort; degrade to keyword
             ordered_ids = []
 
+    papers_by_id: dict[int, Paper] = {}
+    if ordered_ids:
+        # Skipped (hidden) papers drop out of the ranked modes too, as _keyword_ids does.
+        papers_by_id = {p.id: p for p in Paper.query.filter(Paper.id.in_(ordered_ids), Paper.is_hidden.is_(False))}
+        ordered_ids = [pid for pid in ordered_ids if pid in papers_by_id][:n]
     if not ordered_ids and normalized_mode != "semantic":
         ordered_ids = _keyword_ids(clean_query, n)
-
-    # Skipped (hidden) papers drop out of the ranked modes too, as _keyword_ids does.
-    visible = Paper.query.filter(Paper.id.in_(ordered_ids), Paper.is_hidden.is_(False))
-    papers_by_id = {p.id: p for p in visible.all()} if ordered_ids else {}
-    results = [_paper_brief(papers_by_id[pid]) for pid in ordered_ids if pid in papers_by_id]
+        papers_by_id = {p.id: p for p in Paper.query.filter(Paper.id.in_(ordered_ids))}
+    results = [_paper_brief(papers_by_id[pid]) for pid in ordered_ids]
     return {"query": clean_query, "mode": normalized_mode, "count": len(results), "results": results}
 
 

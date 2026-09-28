@@ -77,7 +77,8 @@ Wave 5: collections as a literature-review workspace.
   query is refused, not guessed). A historical sync reaching too far back for
   OAI-PMH fails instead of leaving a silent gap.
 - `/api/search` (every mode) and MCP `search_papers` in hybrid and semantic
-  mode no longer return skipped papers, matching the dashboard and exports.
+  mode no longer return skipped papers, matching the dashboard and exports;
+  MCP over-fetches so skipped top hits don't leave the page empty.
 - Bundle import keeps `semantic_scholar_id` only when it is a real Semantic
   Scholar paperId, so a bundle can't take over another paper's citation edges.
 - Search inside a collection no longer drops members outside the global
