@@ -1,5 +1,19 @@
 {# Feedback buttons + reading status. Shared by list rows and visual cards.
-   Context: `paper`, `FEEDBACK` (from dashboard.html). #}
+   Context: `paper`, `FEEDBACK`, `DECISIONS` (from dashboard.html). #}
+{% if current_filters is defined and current_filters.collection %}
+{# Screening decision in this collection; review-scoped, never trains the ranker. #}
+{% for value, meta in DECISIONS.items() %}
+<button type="button"
+        onclick="setDecision({{ paper.id }}, '{{ value }}', this)"
+        data-decision="{{ value }}"
+        data-active="{{ 'true' if paper.collection_decision == value else '' }}"
+        title="{{ meta.label }} ({{ meta.key }})"
+        class="decision-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border transition-opacity
+               {{ meta.active if paper.collection_decision == value else 'bg-surface text-fg-muted border-edge hover:bg-surface-2' }}">
+    {{ meta.label }}
+</button>
+{% endfor %}
+{% endif %}
 {% for action, meta in FEEDBACK.items() %}
 <button type="button"
         onclick="sendFeedback({{ paper.id }}, '{{ action }}', this)"

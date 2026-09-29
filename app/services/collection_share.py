@@ -44,8 +44,9 @@ def export_collection(collection_id: int) -> dict:
     collection = db.session.get(Collection, collection_id)
     if collection is None:
         raise ValueError("Collection not found")
-    papers = (
-        Paper.query.join(PaperCollection, PaperCollection.paper_id == Paper.id)
+    rows = (
+        db.session.query(Paper, PaperCollection.decision)
+        .join(PaperCollection, PaperCollection.paper_id == Paper.id)
         .filter(PaperCollection.collection_id == collection.id)
         .order_by(Paper.id)
         .all()
@@ -57,7 +58,7 @@ def export_collection(collection_id: int) -> dict:
             "description": collection.description or "",
             "color": collection.color,
         },
-        "papers": [{field: getattr(p, field) for field in _PAPER_FIELDS} for p in papers],
+        "papers": [{**{field: getattr(p, field) for field in _PAPER_FIELDS}, "decision": d} for p, d in rows],
     }
 
 
@@ -144,7 +145,7 @@ def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDL
 
     from flask import current_app
 
-    from app.models import Collection, Paper, PaperCollection, db
+    from app.models import SCREENING_DECISIONS, Collection, Paper, PaperCollection, db
     from app.services.citation_graph import _S2_PAPER_ID, sync_citation_edges
 
     manifest = _validate(manifest)
@@ -217,8 +218,13 @@ def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDL
                 paper.referenced_works = _entry_list(entry, "referenced_works")
             linked += 1
 
-        if not PaperCollection.query.filter_by(paper_id=paper.id, collection_id=collection.id).first():
-            db.session.add(PaperCollection(paper_id=paper.id, collection_id=collection.id))
+        # Screening decision, fill-only like the fields above; junk values are dropped.
+        decision = entry.get("decision") if entry.get("decision") in SCREENING_DECISIONS else None
+        membership = PaperCollection.query.filter_by(paper_id=paper.id, collection_id=collection.id).first()
+        if membership is None:
+            db.session.add(PaperCollection(paper_id=paper.id, collection_id=collection.id, decision=decision))
+        elif membership.decision is None:
+            membership.decision = decision
 
     db.session.commit()
     edges = sync_citation_edges()

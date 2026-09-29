@@ -2,9 +2,18 @@
 
 from flask import Response, abort, jsonify, request
 from sqlalchemy.exc import IntegrityError
+from werkzeug.exceptions import BadRequest
 
 from app.csrf import validate_csrf_token
-from app.models import Collection, Paper, PaperCollection, db
+from app.models import (
+    SCREENING_DECISIONS,
+    Collection,
+    Paper,
+    PaperCollection,
+    db,
+    decision_counts,
+    in_review_clause,
+)
 from app.routes.api import api_bp
 from app.routes.api._validation import optional_str, require_list, require_str
 
@@ -16,6 +25,7 @@ def list_collections():
             PaperCollection.collection_id,
             db.func.count(PaperCollection.id).label("paper_count"),
         )
+        .filter(in_review_clause())
         .group_by(PaperCollection.collection_id)
         .subquery()
     )
@@ -113,6 +123,7 @@ _CSV_COLUMNS = (
     "user_notes",
     "reading_status",
     "link",
+    "decision",
 )
 
 
@@ -134,8 +145,10 @@ def export_collection_csv(collection_id: int):
     from app.services.preferences import first_author_name
 
     db.session.get(Collection, collection_id) or abort(404)
-    papers = (
-        Paper.query.join(PaperCollection, PaperCollection.paper_id == Paper.id)
+    # Every member, excluded ones too: this is the screening spreadsheet.
+    rows = (
+        db.session.query(Paper, PaperCollection.decision)
+        .join(PaperCollection, PaperCollection.paper_id == Paper.id)
         .filter(PaperCollection.collection_id == collection_id, Paper.is_hidden.is_(False))
         .order_by(Paper.id)
         .all()
@@ -143,7 +156,7 @@ def export_collection_csv(collection_id: int):
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(_CSV_COLUMNS)
-    for p in papers:
+    for p, decision in rows:
         row = (
             p.arxiv_id,
             p.title,
@@ -159,6 +172,7 @@ def export_collection_csv(collection_id: int):
             p.user_notes,
             p.reading_status,
             p.link,
+            decision,
         )
         writer.writerow([_csv_cell(v) for v in row])
     response = Response(buf.getvalue(), mimetype="text/csv")
@@ -176,7 +190,7 @@ def collection_prior_works(collection_id: int):
         pid
         for (pid,) in db.session.query(Paper.id)
         .join(PaperCollection, PaperCollection.paper_id == Paper.id)
-        .filter(PaperCollection.collection_id == collection_id, Paper.is_hidden.is_(False))
+        .filter(PaperCollection.collection_id == collection_id, Paper.is_hidden.is_(False), in_review_clause())
     ]
     result = missing_references(ids)
     return jsonify({**result, "paper_count": len(ids)}), 502 if "error" in result else 200
@@ -279,7 +293,9 @@ def add_paper_to_collection(collection_id: int):
         paper_ids = [payload["paper_id"]]
     else:
         paper_ids = require_list(payload, "paper_ids")
-    added = _stage_new_memberships(paper_ids, c.id)
+    # Suggest similar's "Not relevant" adds as excluded, so it is never suggested again.
+    decision = _require_decision(payload) if "decision" in payload else None
+    added = _stage_new_memberships(paper_ids, c.id, decision)
     try:
         db.session.commit()
     except IntegrityError:
@@ -289,23 +305,24 @@ def add_paper_to_collection(collection_id: int):
         # end-state (papers in collection) is reached idempotently, mirroring
         # create_collection/update_collection instead of an opaque 500.
         db.session.rollback()
-        added = _stage_new_memberships(paper_ids, c.id)
+        added = _stage_new_memberships(paper_ids, c.id, decision)
         db.session.commit()
     return jsonify({"added": added, "collection_id": c.id})
 
 
-def _stage_new_memberships(paper_ids: list, collection_id: int) -> int:
+def _stage_new_memberships(paper_ids: list, collection_id: int, decision: str | None = None) -> int:
     """Stage PaperCollection rows for papers not already in the collection.
 
     Returns the count staged (not yet committed); skips non-int/bool ids,
-    missing papers, and existing memberships."""
+    missing papers, and existing memberships (excluded ones included, so an
+    existing decision is never reset)."""
     added = 0
     for pid in paper_ids:
         if not isinstance(pid, int) or isinstance(pid, bool) or not db.session.get(Paper, pid):
             continue
         if PaperCollection.query.filter_by(paper_id=pid, collection_id=collection_id).first():
             continue
-        db.session.add(PaperCollection(paper_id=pid, collection_id=collection_id))
+        db.session.add(PaperCollection(paper_id=pid, collection_id=collection_id, decision=decision))
         added += 1
     return added
 
@@ -319,3 +336,36 @@ def remove_paper_from_collection(collection_id: int, paper_id: int):
     db.session.delete(pc)
     db.session.commit()
     return jsonify({"removed": True})
+
+
+def _require_decision(payload: dict) -> str | None:
+    """``payload['decision']``: one of SCREENING_DECISIONS, or null for unscreened."""
+    decision = payload.get("decision")
+    if "decision" not in payload or not (decision is None or decision in SCREENING_DECISIONS):
+        raise BadRequest(f"'decision' must be one of {', '.join(SCREENING_DECISIONS)} or null")
+    return decision
+
+
+# Screening is review-scoped, not taste: these never write PaperFeedback, so the ranker is untouched.
+@api_bp.route("/collections/<int:collection_id>/papers/<int:paper_id>/decision", methods=["PUT"])
+def set_paper_decision(collection_id: int, paper_id: int):
+    validate_csrf_token()
+    decision = _require_decision(request.get_json(silent=True) or {})
+    pc = PaperCollection.query.filter_by(paper_id=paper_id, collection_id=collection_id).first() or abort(404)
+    pc.decision = decision
+    db.session.commit()
+    return jsonify({"paper_id": paper_id, "decision": decision, "counts": decision_counts(collection_id)})
+
+
+@api_bp.route("/collections/<int:collection_id>/decisions", methods=["PUT"])
+def set_paper_decisions(collection_id: int):
+    validate_csrf_token()
+    db.session.get(Collection, collection_id) or abort(404)
+    payload = request.get_json(silent=True) or {}
+    decision = _require_decision(payload)
+    ids = [pid for pid in require_list(payload, "paper_ids") if isinstance(pid, int) and not isinstance(pid, bool)]
+    updated = PaperCollection.query.filter(
+        PaperCollection.collection_id == collection_id, PaperCollection.paper_id.in_(ids)
+    ).update({"decision": decision}, synchronize_session=False)
+    db.session.commit()
+    return jsonify({"updated": updated, "counts": decision_counts(collection_id)})

@@ -24,7 +24,15 @@ from __future__ import annotations
 from typing import Any
 
 from app.enums import SortOption
-from app.models import Collection, Paper, PaperCollection, PaperSection, db, inbox_freshness_clause
+from app.models import (
+    Collection,
+    Paper,
+    PaperCollection,
+    PaperSection,
+    db,
+    in_review_clause,
+    inbox_freshness_clause,
+)
 from app.services.bibtex import _make_cite_key
 from app.services.implementation_readiness import implementation_readiness
 from app.services.preferences import first_author_name
@@ -320,12 +328,13 @@ def _resolve_profile(profile: str | int | None) -> dict[str, Any]:
 
 
 def list_collections() -> dict[str, Any]:
-    """List all collections with their paper counts (mirrors ``GET /api/collections``)."""
+    """List all collections with their paper counts, excluded papers not counted (mirrors ``GET /api/collections``)."""
     paper_count_subquery = (
         db.session.query(
             PaperCollection.collection_id,
             db.func.count(PaperCollection.id).label("paper_count"),
         )
+        .filter(in_review_clause())
         .group_by(PaperCollection.collection_id)
         .subquery()
     )
@@ -348,12 +357,16 @@ def list_collections() -> dict[str, Any]:
     return {"count": len(collections), "collections": collections}
 
 
-def get_collection(collection_name_or_id: str | int, offset: int = 0, limit: int = _MAX_LIMIT) -> dict[str, Any]:
+def get_collection(
+    collection_name_or_id: str | int, offset: int = 0, limit: int = _MAX_LIMIT, include_excluded: bool = False
+) -> dict[str, Any]:
     """Return one collection's papers (by id or exact name; never created here).
 
-    Members mirror the collection's Export .bib (hidden papers excluded, rank
-    order) and carry that export's ``cite_key`` plus the user's notes, so an
-    assistant's citations resolve against the same .bib. Paged by
+    Members mirror the collection's Export .bib (hidden and screened-out papers
+    excluded, rank order) and carry that export's ``cite_key``, the user's notes
+    and the screening ``decision`` (include/maybe/exclude, None = unscreened),
+    so an assistant's citations resolve against the same .bib.
+    ``include_excluded`` adds the screened-out papers back. Paged by
     ``offset``/``limit`` (``limit`` capped at 50); follow ``next_offset``.
     """
     from app.services.ranking import rank_score_order_expr
@@ -364,13 +377,16 @@ def get_collection(collection_name_or_id: str | int, offset: int = 0, limit: int
 
     start = max(0, offset)
     query = (
-        Paper.query.join(PaperCollection, PaperCollection.paper_id == Paper.id)
+        db.session.query(Paper, PaperCollection.decision)
+        .join(PaperCollection, PaperCollection.paper_id == Paper.id)
         .filter(PaperCollection.collection_id == collection.id, Paper.is_hidden.is_(False))
         .order_by(rank_score_order_expr().desc(), Paper.id)
     )
+    if not include_excluded:
+        query = query.filter(in_review_clause())
     total = query.count()
-    papers = query.offset(start).limit(_clamp_limit(limit, default=_MAX_LIMIT)).all()
-    end = start + len(papers)
+    rows = query.offset(start).limit(_clamp_limit(limit, default=_MAX_LIMIT)).all()
+    end = start + len(rows)
     return {
         "id": collection.id,
         "name": collection.name,
@@ -379,8 +395,13 @@ def get_collection(collection_name_or_id: str | int, offset: int = 0, limit: int
         "offset": start,
         "next_offset": end if end < total else None,
         "papers": [
-            {**_paper_brief(paper), "cite_key": _make_cite_key(paper), "user_notes": paper.user_notes or ""}
-            for paper in papers
+            {
+                **_paper_brief(paper),
+                "cite_key": _make_cite_key(paper),
+                "user_notes": paper.user_notes or "",
+                "decision": decision,
+            }
+            for paper, decision in rows
         ],
     }
 

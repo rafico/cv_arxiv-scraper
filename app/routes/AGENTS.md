@@ -39,6 +39,8 @@ belongs in [app/services](../services).
   target semantic hooks, not utility classes: `.paper-card`, `.paper-link`,
   `.paper-pdf-link`, `.feedback-btn[data-action]` + `data-active`,
   `.reading-status-select`, `.card-toggle`, `[data-card-details]`,
+  `.decision-btn[data-decision]` + `data-active`, `[data-decision-badge]`,
+  `[data-decision-filter]` / `[data-decision-count]` (collection screening),
   `#paper-list` / `#paper-grid`, `#theme-toggle`, `#scrape-btn`, `#app-sidebar`,
   settings tabs' `data-active`. Don't rename these when restyling; assert on
   them rather than on Tailwind classes.

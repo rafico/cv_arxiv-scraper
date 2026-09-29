@@ -435,6 +435,7 @@ def find_neighbor_papers(
     tracked_authors: list[str] | None = None,
     exclude_tracked_authors: bool = True,
     embedding_service=None,
+    exclude_ids: set[int] | frozenset[int] = frozenset(),
 ) -> dict:
     deduped_seed_ids = list(dict.fromkeys(int(paper_id) for paper_id in seed_paper_ids if paper_id))
     tracked_authors = [author for author in (tracked_authors or []) if author]
@@ -458,7 +459,7 @@ def find_neighbor_papers(
         }
 
     candidate_limit = max(limit * 5, 25)
-    seed_id_set = set(deduped_seed_ids)
+    skip_ids = set(deduped_seed_ids) | set(exclude_ids)
     aggregated: dict[int, dict] = {}
     for seed_paper_id in deduped_seed_ids:
         try:
@@ -468,7 +469,7 @@ def find_neighbor_papers(
             continue
 
         for paper_id, score in results:
-            if paper_id in seed_id_set:
+            if paper_id in skip_ids:
                 continue
             entry = aggregated.setdefault(
                 paper_id,

@@ -48,12 +48,16 @@ def export_bibtex():
     query = Paper.query.filter(Paper.is_hidden.is_(False))
 
     if collection_id:
-        from app.models import Collection, PaperCollection
+        from app.models import Collection, PaperCollection, in_review_clause
 
         db.session.get(Collection, collection_id) or abort(404)
         query = query.join(
             PaperCollection,
-            db.and_(PaperCollection.paper_id == Paper.id, PaperCollection.collection_id == collection_id),
+            db.and_(
+                PaperCollection.paper_id == Paper.id,
+                PaperCollection.collection_id == collection_id,
+                in_review_clause(),
+            ),
         )
     elif view == "saved":
         from app.models import PaperFeedback

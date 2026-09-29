@@ -28,7 +28,7 @@ def corpus_chat():
         if isinstance(collection_id, bool) or not isinstance(collection_id, int):
             raise BadRequest("'collection_id' must be an integer")
         collection = db.session.get(Collection, collection_id) or abort(404, description="Collection not found")
-        paper_ids = [membership.paper_id for membership in collection.papers]
+        paper_ids = [m.paper_id for m in collection.papers if m.decision != "exclude"]
 
     return jsonify(rag.answer_query(query, paper_ids=paper_ids))
 

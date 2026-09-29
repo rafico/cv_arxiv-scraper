@@ -3,6 +3,9 @@
 {% for mtype in paper.match_type.split(' + ') %}
 {% if mtype in BADGE %}<span class="badge badge-accent">{{ mtype }}</span>{% endif %}
 {% endfor %}
+{% if current_filters is defined and current_filters.collection %}
+<span data-decision-badge class="badge badge-outline{{ '' if paper.collection_decision else ' hidden' }}">{{ DECISIONS[paper.collection_decision].label if paper.collection_decision in DECISIONS }}</span>
+{% endif %}
 {% if paper.duplicate_of_id %}<span class="badge badge-warn">Dup</span>{% endif %}
 {% if paper.venue and paper.acceptance_status and paper.acceptance_status != 'mentioned' %}
 <span class="badge badge-outline" title="Detected from arXiv comment: {{ paper.arxiv_comment or '' }}">

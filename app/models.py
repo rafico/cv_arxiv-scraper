@@ -243,9 +243,42 @@ class PaperCollection(db.Model):
         db.Integer, db.ForeignKey("collections.id", ondelete="CASCADE"), nullable=False, index=True
     )
     added_at = db.Column(db.DateTime, server_default=db.func.now())
+    # Literature-review screening: one of SCREENING_DECISIONS, NULL = unscreened.
+    # Validated in the app (no CHECK constraint, so SQLite can still drop the column).
+    decision = db.Column(db.String(8), nullable=True)
 
     paper = db.relationship("Paper")
     collection = db.relationship("Collection", back_populates="papers")
+
+
+SCREENING_DECISIONS = ("include", "maybe", "exclude")
+
+
+def in_review_clause():
+    """SQLAlchemy filter for memberships still in a collection's review (not excluded).
+
+    A bare ``decision != 'exclude'`` would also drop the NULL (unscreened) rows.
+    """
+    return db.or_(PaperCollection.decision.is_(None), PaperCollection.decision != "exclude")
+
+
+def decision_counts(collection_id: int) -> dict[str, int]:
+    """Screening progress over a collection's visible (non-hidden) members.
+
+    Keys are ``unscreened`` plus SCREENING_DECISIONS, and ``all`` = the review (everything not excluded).
+    """
+    # ponytail: whole-collection progress, blind to the view's search/timeframe/include_hidden
+    # filters; run it over the filtered query if the chips must match a narrowed list.
+    rows = (
+        db.session.query(PaperCollection.decision, db.func.count())
+        .join(Paper, Paper.id == PaperCollection.paper_id)
+        .filter(PaperCollection.collection_id == collection_id, Paper.is_hidden.is_(False))
+        .group_by(PaperCollection.decision)
+    )
+    counts = dict.fromkeys(("unscreened", *SCREENING_DECISIONS), 0)
+    for decision, n in rows:
+        counts[decision or "unscreened"] = n
+    return {"all": sum(counts.values()) - counts["exclude"], **counts}
 
 
 class PaperRelation(db.Model):

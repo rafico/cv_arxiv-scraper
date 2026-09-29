@@ -249,3 +249,51 @@ def test_settings_tab_navigation(e2e_page):
     # Verify tab switched
     expect(controls_tab).to_have_attribute("data-active", "true")
     expect(interests_tab).to_have_attribute("data-active", "")
+
+
+# ── Test 9: Screening a collection from the keyboard ──
+
+
+def test_screening_keys_in_collection_view(e2e_page, live_server):
+    from app.models import Collection, Paper, PaperCollection
+    from app.models import db as _db
+
+    page, base_url = e2e_page
+    with live_server["app"].app_context():
+        collection = Collection(name="E2E Review")
+        _db.session.add(collection)
+        _db.session.flush()
+        for paper in Paper.query.all():
+            _db.session.add(PaperCollection(paper_id=paper.id, collection_id=collection.id))
+        _db.session.commit()
+        cid = collection.id
+
+    page.goto(f"{base_url}/?collection={cid}&timeframe=all&decision=unscreened")
+    page.wait_for_load_state("networkidle")
+    cards = page.locator(".paper-card")
+    expect(cards).to_have_count(3)
+
+    # 'i' on the focused card includes it: it leaves the Unscreened list and focus moves on.
+    page.keyboard.press("j")
+    page.keyboard.press("i")
+    expect(cards).to_have_count(2)
+    expect(cards.first).to_have_class(re.compile(r"ring-2"))
+    expect(page.locator('[data-decision-count="include"]')).to_have_text("1")
+    expect(page.locator('[data-decision-count="unscreened"]')).to_have_text("2")
+
+    page.keyboard.press("e")
+    expect(cards).to_have_count(1)
+    expect(page.locator('[data-decision-count="all"]')).to_have_text("2")  # the review: excluded is out
+
+    # "All" hides the excluded paper; the included one shows its decision.
+    page.goto(f"{base_url}/?collection={cid}&timeframe=all")
+    page.wait_for_load_state("networkidle")
+    expect(cards).to_have_count(2)
+    expect(page.locator('.decision-btn[data-decision="include"][data-active="true"]')).to_have_count(1)
+    expect(page.locator("[data-decision-badge]:visible")).to_have_text(["Include"])
+
+    # Clicking the active decision clears it back to unscreened; the card stays in "All".
+    page.locator('.decision-btn[data-decision="include"][data-active="true"]').click()
+    expect(page.locator('.decision-btn[data-active="true"]')).to_have_count(0)
+    expect(cards).to_have_count(2)
+    expect(page.locator('[data-decision-count="unscreened"]')).to_have_text("2")

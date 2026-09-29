@@ -13,12 +13,15 @@ from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
 from app.csrf import get_or_create_csrf_token
 from app.enums import FeedbackAction, SortOption
 from app.models import (
+    SCREENING_DECISIONS,
     DigestRun,
     Paper,
     PaperCollection,
     PaperFeedback,
     ScrapeRun,
     db,
+    decision_counts,
+    in_review_clause,
     inbox_freshness_clause,
 )
 from app.services.feedback import get_feedback_snapshot
@@ -470,6 +473,7 @@ def index():
     raw_ids = (x.strip() for x in request.args.get("ids", "").split(","))
     paper_ids = [int(x) for x in raw_ids if x.isdecimal() and len(x) <= 18]
 
+    decision = request.args.get("decision", "") if collection_id else ""
     query = Paper.query
     if paper_ids:
         query = query.filter(Paper.id.in_(paper_ids))
@@ -478,6 +482,14 @@ def index():
             PaperCollection,
             db.and_(PaperCollection.paper_id == Paper.id, PaperCollection.collection_id == collection_id),
         )
+        # Screening filter; the default ("All") is the review, i.e. everything not excluded.
+        if decision == "unscreened":
+            query = query.filter(PaperCollection.decision.is_(None))
+        elif decision in SCREENING_DECISIONS:
+            query = query.filter(PaperCollection.decision == decision)
+        else:
+            decision = ""
+            query = query.filter(in_review_clause())
     elif view == "saved":
         query = query.join(
             PaperFeedback,
@@ -612,6 +624,16 @@ def index():
     page = _parse_page(request.args.get("page"))
     pagination = query.paginate(page=page, per_page=DASHBOARD_PER_PAGE, error_out=False)
     papers = pagination.items
+    screening_counts = None
+    if collection_id:
+        screening_counts = decision_counts(collection_id)
+        page_decisions = dict(
+            db.session.query(PaperCollection.paper_id, PaperCollection.decision).filter(
+                PaperCollection.collection_id == collection_id, PaperCollection.paper_id.in_([p.id for p in papers])
+            )
+        )
+        for paper in papers:
+            paper.collection_decision = page_decisions.get(paper.id)
 
     type_counts_row = (
         query.order_by(None)
@@ -667,7 +689,9 @@ def index():
             "reading_status": reading_status,
             "author": author_filter,
             "collection": collection_id,
+            "decision": decision,
         },
+        decision_counts=screening_counts,
         filter_options=filter_options,
         dashboard_overview=_build_dashboard_overview(config),
         mendeley_connected=mendeley_connected,

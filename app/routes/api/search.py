@@ -2,7 +2,7 @@
 
 from flask import abort, current_app, jsonify, request
 
-from app.models import Collection, Paper, PaperCollection, db
+from app.models import Collection, Paper, PaperCollection, db, in_review_clause
 from app.routes.api import api_bp
 from app.routes.api._validation import parse_int_query_arg as _parse_int_query_arg
 
@@ -134,14 +134,15 @@ def corpus_neighbors():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    member_ids = set()
     if collection_id is not None:
         collection = db.session.get(Collection, collection_id) or abort(404)
-        seed_paper_ids.extend(
-            paper_collection.paper_id
-            for paper_collection in PaperCollection.query.filter_by(collection_id=collection.id)
-            .order_by(PaperCollection.added_at.desc())
-            .all()
+        memberships = (
+            PaperCollection.query.filter_by(collection_id=collection.id).order_by(PaperCollection.added_at.desc()).all()
         )
+        # Excluded members don't seed, but every member stays out of the results.
+        seed_paper_ids.extend(m.paper_id for m in memberships if m.decision != "exclude")
+        member_ids = {m.paper_id for m in memberships}
 
     if not seed_paper_ids:
         return jsonify({"error": "Provide 'paper_ids' or 'collection_id'"}), 400
@@ -152,6 +153,7 @@ def corpus_neighbors():
         limit=limit,
         tracked_authors=tracked_authors,
         exclude_tracked_authors=exclude_tracked_authors,
+        exclude_ids=member_ids,
     )
     if collection_id is not None:
         result["collection_id"] = collection_id
@@ -199,7 +201,11 @@ def citation_graph():
         db.session.get(Collection, collection_id) or abort(404)
         query = query.join(
             PaperCollection,
-            db.and_(PaperCollection.paper_id == Paper.id, PaperCollection.collection_id == collection_id),
+            db.and_(
+                PaperCollection.paper_id == Paper.id,
+                PaperCollection.collection_id == collection_id,
+                in_review_clause(),
+            ),
         )
     # Most-cited first so a capped corpus view keeps the interesting nodes.
     papers = query.order_by(Paper.citation_count.desc().nulls_last(), Paper.id).limit(limit).all()

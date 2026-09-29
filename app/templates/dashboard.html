@@ -19,6 +19,13 @@
     'shared':   {'label': 'Shared',         'active': 'bg-info-soft text-info border-info'},
 } %}
 
+{# Screening decisions in a collection view (keys i / m / e). Colors reuse the feedback tokens. #}
+{% set DECISIONS = {
+    'include': {'label': 'Include', 'key': 'i', 'active': 'bg-save-soft text-save border-save'},
+    'maybe':   {'label': 'Maybe',   'key': 'm', 'active': 'bg-priority-soft text-priority border-priority'},
+    'exclude': {'label': 'Exclude', 'key': 'e', 'active': 'bg-skip-soft text-skip border-skip'},
+} %}
+
 {% set TIMEFRAMES = [('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly'), ('all', 'All Time')] %}
 {% set visual_mode = current_filters.density == 'visual' %}
 
@@ -291,12 +298,12 @@
     const list = document.getElementById("collection-suggest-list");
     if (!button || !list) return;
 
-    async function addToCollection(paperId, card) {
+    async function addToCollection(paperId, card, decision) {
         try {
             const res = await fetch("/api/collections/" + collectionId + "/papers", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
-                body: JSON.stringify({ paper_id: paperId }),
+                body: JSON.stringify({ paper_id: paperId, decision }),
             });
             if (res.ok) card.remove();
         } catch (e) { /* non-fatal */ }
@@ -327,7 +334,13 @@
             add.className = "px-2 py-1 text-[11px] rounded-lg bg-accent text-accent-fg";
             add.textContent = "Add";
             add.onclick = function () { addToCollection(p.id, card); };
-            row.append(add);
+            // Kept as an excluded member, so it is never suggested again.
+            const notRelevant = document.createElement("button");
+            notRelevant.className = "px-2 py-1 text-[11px] rounded-lg border border-edge text-fg-muted hover:bg-surface-2";
+            notRelevant.textContent = "Not relevant";
+            notRelevant.dataset.notRelevant = "";
+            notRelevant.onclick = function () { addToCollection(p.id, card, "exclude"); };
+            row.append(add, notRelevant);
             card.append(title, meta, row);
             list.append(card);
         });
@@ -518,6 +531,18 @@
         </button>
         {% endfor %}
         {% endif %}
+        {% if current_filters.collection %}
+        {# Screening filter; "All" is the review (everything not excluded). #}
+        {% if current_filters.view == 'inbox' %}<span class="text-fg-subtle" aria-hidden="true">|</span>{% endif %}
+        {% for value, label in [('', 'All'), ('unscreened', 'Unscreened'), ('include', 'Include'), ('maybe', 'Maybe'), ('exclude', 'Exclude')] %}
+        <button type="button" onclick="applyFilters({ decision: '{{ value }}' })"
+                data-decision-filter="{{ value }}" data-active="{{ 'true' if current_filters.decision == value else '' }}"
+                class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                       {{ 'bg-accent text-accent-fg' if current_filters.decision == value else 'bg-surface-2 text-fg-muted hover:bg-edge' }}">
+            {{ label }} <span class="tabular-nums" data-decision-count="{{ value or 'all' }}">{{ decision_counts[value or 'all'] }}</span>
+        </button>
+        {% endfor %}
+        {% endif %}
         {% if pagination.total %}
         <span class="text-xs text-fg-subtle tabular-nums ml-1">{{ pagination.total }} paper{{ 's' if pagination.total != 1 }}</span>
         {% endif %}
@@ -582,6 +607,10 @@
     <h3 class="text-base font-semibold text-fg">Your saved queue is empty</h3>
     <p class="mt-1 text-sm text-fg-muted mb-6">Save strong matches from the inbox and they will stay here for follow-up.</p>
     <a href="{{ url_for('dashboard.index', view='inbox') }}" class="btn-primary px-5 py-2">Back To Inbox</a>
+    {% elif current_filters.decision == 'unscreened' and not decision_counts.unscreened %}
+    <h3 class="text-base font-semibold text-fg">All screened</h3>
+    <p class="mt-1 text-sm text-fg-muted mb-6">Every paper in this collection has a decision.</p>
+    <button type="button" onclick="applyFilters({ decision: '' })" class="btn-ghost px-5 py-2">Show the review</button>
     {% elif not dashboard_overview.has_successful_scrape %}
     <h3 class="text-base font-semibold text-fg">Build your first research queue</h3>
     <p class="mt-1 text-sm text-fg-muted mb-6">Add the authors, labs, and topics you care about, then run a scrape to create your first triage session.</p>
@@ -638,7 +667,7 @@
 {# ── Keyboard shortcut hint ── #}
 {% if papers %}
 <div class="mt-6 text-center">
-    <p class="text-[11px] text-fg-subtle">Keyboard: <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">j</kbd>/<kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">k</kbd> navigate · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">s</kbd> save · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">x</kbd> skip · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">o</kbd> open · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">p</kbd> PDF · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">d</kbd> details</p>
+    <p class="text-[11px] text-fg-subtle">Keyboard: <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">j</kbd>/<kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">k</kbd> navigate · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">s</kbd> save · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">x</kbd> skip · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">o</kbd> open · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">p</kbd> PDF · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">d</kbd> details{% if current_filters.collection %} · <kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">i</kbd>/<kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">m</kbd>/<kbd class="px-1 py-0.5 rounded bg-surface-2 text-fg-muted font-mono">e</kbd> include/maybe/exclude{% endif %}</p>
 </div>
 {% endif %}
 {% endblock %}

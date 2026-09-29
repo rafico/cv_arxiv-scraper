@@ -123,6 +123,64 @@
         }
     }
 
+    /* ── Screening decisions (collection view): review-scoped, never trains the ranker ── */
+    const SCREENING = { collection: {{ current_filters.collection | tojson }}, filter: {{ current_filters.decision | tojson }} };
+    const DECISION_STYLES = {
+        include: FEEDBACK_STYLES.save.active,
+        maybe: FEEDBACK_STYLES.priority.active,
+        exclude: FEEDBACK_STYLES.skip.active,
+    };
+
+    async function setDecision(paperId, decision, button) {
+        const card = button.closest(".paper-card");
+        if (!card) return;
+        setFeedbackLoading(button, true);
+        let data;
+        try {
+            const response = await fetch(`/api/collections/${SCREENING.collection}/papers/${paperId}/decision`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                // Clicking the active decision clears it back to unscreened.
+                body: JSON.stringify({ decision: button.dataset.active ? null : decision }),
+            });
+            if (!response.ok) return;
+            data = await response.json();
+        } catch (error) {
+            console.error("Decision request failed", error);
+            return;
+        } finally {
+            setFeedbackLoading(button, false);
+        }
+
+        for (const [key, count] of Object.entries(data.counts)) {
+            document.querySelectorAll(`[data-decision-count="${key}"]`).forEach((el) => { el.textContent = count; });
+        }
+        let label = "";
+        card.querySelectorAll(".decision-btn").forEach((btn) => {
+            const on = btn.dataset.decision === data.decision;
+            btn.dataset.active = on ? "true" : "";
+            btn.classList.remove(...INACTIVE_STYLES, ...Object.values(DECISION_STYLES).flat());
+            btn.classList.add(...(on ? DECISION_STYLES[btn.dataset.decision] : INACTIVE_STYLES));
+            if (on) label = btn.textContent.trim();
+        });
+        const badge = card.querySelector("[data-decision-badge]");
+        if (badge) {
+            badge.textContent = label;
+            badge.classList.toggle("hidden", !label);
+        }
+
+        // A card that no longer matches the active filter leaves the list; focus moves to the next one.
+        const filter = SCREENING.filter;
+        const matches = filter === "unscreened" ? !data.decision
+            : filter ? data.decision === filter : data.decision !== "exclude";
+        if (matches) return;
+        const index = getCards().indexOf(card);
+        card.remove();
+        if (!getCards().length) { window.location.reload(); return; }
+        if (index === focusedCardIndex) focusCard(index);
+        else if (index < focusedCardIndex) focusedCardIndex -= 1;
+    }
+
     async function sendRecommendation(paperId, action, button) {
         button.disabled = true;
         button.style.opacity = "0.5";
@@ -357,6 +415,8 @@
             <button onclick="bulkAction('save')" class="px-3 py-1 text-xs rounded-lg bg-save text-white hover:opacity-90">Save All</button>
             <button onclick="bulkAction('skip')" class="px-3 py-1 text-xs rounded-lg bg-skip text-white hover:opacity-90">Skip All</button>
             <button onclick="bulkExportBibtex()" class="px-3 py-1 text-xs rounded-lg bg-surface-2 text-fg-muted hover:bg-edge">BibTeX</button>
+            ${SCREENING.collection ? ["include", "maybe", "exclude"].map((d) => `
+            <button onclick="bulkDecision('${d}')" data-bulk-decision="${d}" class="px-3 py-1 text-xs rounded-lg bg-surface-2 text-fg-muted hover:bg-edge">${d[0].toUpperCase() + d.slice(1)}</button>`).join("") : ""}
         `;
         // Built with Option() (not innerHTML) so collection names are never parsed as markup.
         const picker = document.createElement('select');
@@ -383,6 +443,17 @@
             });
             window.location.reload();
         } catch (error) { console.error('Bulk action failed', error); }
+    }
+
+    async function bulkDecision(decision) {
+        try {
+            await fetch(`/api/collections/${SCREENING.collection}/decisions`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+                body: JSON.stringify({ paper_ids: Array.from(selectedPapers), decision }),
+            });
+            window.location.reload();
+        } catch (error) { console.error('Bulk decision failed', error); }
     }
 
     function bulkExportBibtex() {
@@ -638,6 +709,18 @@
                     if (toggle) toggle.click();
                 }
                 break;
+            case "i":
+            case "m":
+            case "e": {
+                // Screening: decision buttons only render in a collection view, so elsewhere the key stays inert.
+                const decision = { i: "include", m: "maybe", e: "exclude" }[e.key];
+                const btn = cards[focusedCardIndex]?.querySelector(`.decision-btn[data-decision="${decision}"]`);
+                if (btn) {
+                    e.preventDefault();
+                    btn.click();
+                }
+                break;
+            }
             case "?":
                 e.preventDefault();
                 toggleShortcutHelp();

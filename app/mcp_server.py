@@ -120,11 +120,17 @@ def build_server(app: Flask, fastmcp_cls: Any | None = None) -> Any:
     @server.tool(
         name="get_collection",
         description="A collection's papers (by id or exact name) with BibTeX cite keys matching the "
-        "collection's Export .bib, plus the user's notes. Paged: offset/limit (max 50); follow next_offset.",
+        "collection's Export .bib, plus the user's notes and screening decision (include/maybe/exclude, "
+        "null = unscreened). Excluded papers are left out unless include_excluded=true. "
+        "Paged: offset/limit (max 50); follow next_offset.",
     )
-    def get_collection(collection_name_or_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    def get_collection(
+        collection_name_or_id: str, offset: int = 0, limit: int = 50, include_excluded: bool = False
+    ) -> dict[str, Any]:
         with app.app_context():
-            return mcp_tools.get_collection(collection_name_or_id, offset=offset, limit=limit)
+            return mcp_tools.get_collection(
+                collection_name_or_id, offset=offset, limit=limit, include_excluded=include_excluded
+            )
 
     @server.tool(
         name="get_paper_text",

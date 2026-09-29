@@ -48,6 +48,10 @@ SYNC_STATE_COLUMN_DEFS = {
     "last_cursor_arxiv_id": "TEXT",
 }
 
+# Screening decision per membership; nullable with no default, so existing rows
+# read as unscreened and nothing is rewritten.
+PAPER_COLLECTION_COLUMN_DEFS = {"decision": "TEXT"}
+
 FTS5_CREATE = """
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
     title, abstract_text, authors, topic_tags,
@@ -225,6 +229,15 @@ def ensure_schema() -> None:
                     text(f"ALTER TABLE sync_state ADD COLUMN {col_name} {col_type}")  # noqa: S608
                 )
         db.session.commit()
+
+    pc_columns = {col["name"] for col in inspect(db.engine).get_columns("paper_collections")}
+    for col_name, col_type in PAPER_COLLECTION_COLUMN_DEFS.items():
+        if col_name not in pc_columns:
+            _validate_column_name(col_name)
+            db.session.execute(
+                text(f"ALTER TABLE paper_collections ADD COLUMN {col_name} {col_type}")  # noqa: S608
+            )
+    db.session.commit()
 
     # Migrate paper_feedback columns for richer triage events.
     if "paper_feedback" in tables:

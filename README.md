@@ -172,7 +172,8 @@ opening the PDF:
 
 - **Keyboard Inbox** (default) — a dense, fast triage list. Save with `s`, skip with `x`,
   expand a row with `d`, and move with `j` / `k`. Clear a day's feed without touching the
-  mouse.
+  mouse. Inside a collection, screen a literature review with `i` / `m` / `e`
+  (include / maybe / exclude).
 - **Visual grid** — browse papers by their first-page teaser figure when you'd rather skim by
   eye than by title.
 
@@ -188,7 +189,7 @@ opening the PDF:
 | **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · learned interest profile · per-paper "why it ranked" explanations + optional inline score-factor bars · optional AI relevance scoring |
 | **Chat & cold-start** | Chat with your saved papers or a collection (grounded, cited RAG answers) · seed your profile from a pasted list of arXiv IDs · active-learning prompts surface borderline papers to sharpen ranking |
 | **Summaries** | Extractive TL;DR with no API needed · optional AI TL;DR + structured insights when an LLM is enabled |
-| **Organization** | Save / skip / prioritize / share to train rankings · collections (create, rename, bulk add) seeded from pasted arXiv ids/URLs/.bib or an arXiv search, grown with prior works (outside papers 2+ members cite) · custom tags · notes · reading status · saved searches |
+| **Organization** | Save / skip / prioritize / share to train rankings · collections (create, rename, bulk add) seeded from pasted arXiv ids/URLs/.bib or an arXiv search, grown with prior works (outside papers 2+ members cite), screened include / maybe / exclude for a literature review · custom tags · notes · reading status · saved searches |
 | **Citation graph** | Your library as a force-directed network of real citation edges (Semantic Scholar + OpenAlex reference lists) · node size = PageRank influence within your corpus · color by year · collection & year filters |
 | **Export & sync** | BibTeX (single, bulk, or per collection; `@misc` preprint, or `@inproceedings`/`@article` once accepted) · per-collection CSV screening spreadsheet · shareable collection bundles (plain JSON — import on another instance without duplicating papers) · Mendeley · Zotero · HTML report · daily Gmail digest · one-click full backup & restore (DB + search index + config) |
 | **Enrichment** | Citation counts (Semantic Scholar, OpenAlex) · topic classifications & open-access status · GitHub repo stars/license · PDF thumbnails · related-paper recommendations · corpus analytics (clusters & emerging trends) |
@@ -221,7 +222,7 @@ Full REST API at `/api/`. Key endpoints:
 | Scraping | `POST /api/scrape`, `GET /api/scrape/stream` |
 | Search | `GET /api/search?q=...&mode=hybrid` |
 | Papers | `/api/papers/<id>/feedback`, `explain`, `notes`, `tags`, `bibtex` |
-| Collections | `GET/POST /api/collections`, manage papers in collections, `GET .../export` + `POST /api/collections/import` bundles, `POST /api/collections/import-ids` (seed from arXiv ids/URLs/.bib), `GET .../table.csv`, `GET .../prior-works` |
+| Collections | `GET/POST /api/collections`, manage papers in collections, `PUT .../papers/<pid>/decision` + `PUT .../decisions` (screening), `GET .../export` + `POST /api/collections/import` bundles, `POST /api/collections/import-ids` (seed from arXiv ids/URLs/.bib), `GET .../table.csv`, `GET .../prior-works` |
 | Citation graph | `GET /api/graph?collection=<id>` — nodes with PageRank + citation edges |
 | Saved searches | `GET/POST /api/saved-searches`, `POST .../run` |
 | Corpus | `/api/corpus/clusters`, `emerging`, `neighbors`, `POST /api/corpus/chat` (optional `collection_id`) |
@@ -276,7 +277,7 @@ Restart Claude Desktop and the tools appear:
 | `top_ranked_today` | Today's top-ranked fresh papers (optional interest-profile lens) |
 | `list_collections` | Your collections and their paper counts |
 | `ask_paper` | Grounded Q&A over one paper's own text, with section citations |
-| `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes (paged) |
+| `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes and screening decisions (paged; excluded papers only with `include_excluded`) |
 | `get_paper_text` | A paper's section table of contents + abstract, then any section's verbatim text (paged) |
 | `add_to_collection` | The one write tool — file a paper into a collection (idempotent) |
 
