@@ -45,6 +45,25 @@ class CollectionDashboardTests(FlaskDBTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"This collection is empty", response.data)
 
+    def test_bare_collection_url_shows_old_members(self):
+        # Without ?timeframe the inbox default ("daily") hid every older member of a review.
+        old = datetime(2021, 10, 13)
+        collection = Collection(name="Old Seeds")
+        paper = _make_paper(
+            7,
+            title="ByteTrack Seed",
+            publication_date="2021-10-13",
+            publication_dt=old.date(),
+            scraped_date="2021-10-13",
+            scraped_at=old,
+        )
+        db.session.add_all([collection, paper])
+        db.session.flush()
+        db.session.add(PaperCollection(paper_id=paper.id, collection_id=collection.id))
+        db.session.commit()
+
+        self.assertIn("ByteTrack Seed", self.client.get(f"/?collection={collection.id}").get_data(as_text=True))
+
     def test_collection_view_renders_manager_controls(self):
         collection = Collection(name="Survey Seeds")
         paper = _make_paper(1)

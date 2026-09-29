@@ -501,7 +501,7 @@ def index():
     if not include_hidden and not paper_ids:
         query = query.filter(Paper.is_hidden.is_(False))
 
-    default_timeframe = "all" if view == "saved" or paper_ids else "daily"
+    default_timeframe = "all" if view == "saved" or paper_ids or collection_id else "daily"
     timeframe = request.args.get("timeframe", default_timeframe)
     if timeframe not in TIMEFRAME_DAYS:
         timeframe = default_timeframe
