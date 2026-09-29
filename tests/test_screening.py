@@ -137,6 +137,40 @@ class ScreeningTests(FlaskDBTestCase):
         self.assertEqual(response.get_json()["added"], 1)
         self.assertEqual(self._decision(self.outsider), "exclude")
 
+    def test_plain_re_add_readmits_an_excluded_member(self):
+        headers = {"X-CSRF-Token": self._csrf_token()}
+        url = f"/api/collections/{self.cid}/papers"
+        # "Not relevant" on an excluded member keeps it excluded.
+        self.client.post(url, json={"paper_id": self.excluded, "decision": "exclude"}, headers=headers)
+        self.assertEqual(self._decision(self.excluded), "exclude")
+
+        response = self.client.post(url, json={"paper_id": self.excluded}, headers=headers)
+
+        self.assertEqual(response.get_json()["added"], 1)
+        self.assertIsNone(self._decision(self.excluded))
+        self.assertEqual(response.get_json()["counts"]["unscreened"], 2)
+
+    def test_membership_and_skip_responses_carry_chip_counts(self):
+        headers = {"X-CSRF-Token": self._csrf_token()}
+        added = self.client.post(
+            f"/api/collections/{self.cid}/papers", json={"paper_id": self.outsider}, headers=headers
+        )
+        self.assertEqual(added.get_json()["counts"]["unscreened"], 2)
+
+        removed = self.client.delete(f"/api/collections/{self.cid}/papers/{self.outsider}", headers=headers)
+        self.assertEqual(removed.get_json()["counts"]["unscreened"], 1)
+
+        # Skip hides the paper, and the chips count visible members only.
+        skipped = self.client.post(
+            f"/api/papers/{self.unscreened}/feedback",
+            json={"action": "skip", "collection_id": self.cid},
+            headers=headers,
+        )
+        self.assertEqual(skipped.get_json()["decision_counts"]["unscreened"], 0)
+        self.assertEqual(skipped.get_json()["decision_counts"]["all"], 2)
+        inbox_skip = self.client.post(f"/api/papers/{self.maybe}/feedback", json={"action": "skip"}, headers=headers)
+        self.assertNotIn("decision_counts", inbox_skip.get_json())
+
     # ── consumers: excluded is out of the review ──
 
     def test_collection_view_filters_by_decision_with_counts(self):
@@ -165,6 +199,31 @@ class ScreeningTests(FlaskDBTestCase):
         inbox = self.client.get("/?timeframe=all").get_data(as_text=True)
         self.assertNotIn('class="decision-btn', inbox)
         self.assertNotIn("data-decision-filter=", inbox)
+
+    def test_collection_view_drops_the_stale_paper_total(self):
+        # The live chips carry the counts; a server-rendered total goes stale as cards leave.
+        self.assertNotIn("3 papers", self._view())
+        self.assertIn("5 papers", self.client.get("/?timeframe=all").get_data(as_text=True))
+
+    def test_empty_decision_filter_gets_screening_copy_not_scrape_advice(self):
+        self.client.put(
+            f"/api/collections/{self.cid}/decisions",
+            json={"paper_ids": [self.included], "decision": None},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+        empty = self._view("&decision=include")
+        self.assertIn("No papers marked Include", empty)
+        self.assertIn("Show unscreened", empty)
+        self.assertNotIn("Build your first research queue", empty)
+        self.assertNotIn("No papers for this filter", empty)
+
+    def test_page_past_the_end_falls_back_to_the_last_page(self):
+        # Screening the last card of the last page reloads with a ?page= that no longer exists.
+        with patch("app.routes.dashboard.DASHBOARD_PER_PAGE", 2):
+            html = self._view("&page=5")
+        self.assertEqual(len(self._card_ids(html)), 1)
+        self.assertIn("Page 2 of 2", html)
+        self.assertIn('rel="prev"', html)
 
     def test_exports_and_graph_drop_excluded(self):
         bib = self.client.get(f"/api/export/bibtex?collection={self.cid}").get_data(as_text=True)

@@ -254,19 +254,24 @@ def test_settings_tab_navigation(e2e_page):
 # ── Test 9: Screening a collection from the keyboard ──
 
 
-def test_screening_keys_in_collection_view(e2e_page, live_server):
+def _review_of_every_paper(app) -> int:
+    """A collection holding every seeded paper, all unscreened; returns its id."""
     from app.models import Collection, Paper, PaperCollection
     from app.models import db as _db
 
-    page, base_url = e2e_page
-    with live_server["app"].app_context():
+    with app.app_context():
         collection = Collection(name="E2E Review")
         _db.session.add(collection)
         _db.session.flush()
         for paper in Paper.query.all():
             _db.session.add(PaperCollection(paper_id=paper.id, collection_id=collection.id))
         _db.session.commit()
-        cid = collection.id
+        return collection.id
+
+
+def test_screening_keys_in_collection_view(e2e_page, live_server):
+    page, base_url = e2e_page
+    cid = _review_of_every_paper(live_server["app"])
 
     page.goto(f"{base_url}/?collection={cid}&timeframe=all&decision=unscreened")
     page.wait_for_load_state("networkidle")
@@ -297,3 +302,81 @@ def test_screening_keys_in_collection_view(e2e_page, live_server):
     expect(page.locator('.decision-btn[data-active="true"]')).to_have_count(0)
     expect(cards).to_have_count(2)
     expect(page.locator('[data-decision-count="unscreened"]')).to_have_text("2")
+
+
+def test_racing_decisions_keep_keyboard_focus_and_keys_only_set(e2e_page, live_server):
+    page, base_url = e2e_page
+    cid = _review_of_every_paper(live_server["app"])
+    page.goto(f"{base_url}/?collection={cid}&timeframe=all&decision=unscreened")
+    cards = page.locator(".paper-card")
+    expect(cards).to_have_count(3)
+    first_id = cards.first.get_attribute("data-paper-id")
+
+    # Two decisions in flight for the focused card (a slow server, 'i' then 'e'): the late
+    # response finds it already gone and must not shift focus off the highlighted card.
+    page.keyboard.press("j")
+    page.keyboard.press("j")
+    page.evaluate("""() => {
+        const card = getCards()[1];
+        const btn = (d) => card.querySelector(`.decision-btn[data-decision="${d}"]`);
+        const id = Number(card.dataset.paperId);
+        return Promise.all([setDecision(id, "include", btn("include")), setDecision(id, "exclude", btn("exclude"))]);
+    }""")
+    expect(cards).to_have_count(2)
+    page.keyboard.press("i")  # screens the highlighted third paper, not the first
+    expect(cards).to_have_count(1)
+    expect(cards.first).to_have_attribute("data-paper-id", first_id)
+
+    # A key only sets its decision: pressing it again, or holding another, never re-screens.
+    page.goto(f"{base_url}/?collection={cid}&timeframe=all")
+    page.keyboard.press("j")
+    page.keyboard.press("i")
+    include = page.locator('[data-decision-count="include"]')
+    expect(include).to_have_text("2")
+    page.keyboard.press("i")
+    page.evaluate("() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', repeat: true }))")
+    page.evaluate("() => fetch('/api/collections').then((r) => r.status)")  # serial server: any PUT is done
+    page.reload()
+    expect(include).to_have_text("2")
+    expect(page.locator('[data-decision-count="maybe"]')).to_have_text("0")
+
+
+def test_next_page_after_screening_does_not_skip_papers(e2e_page, live_server):
+    from app.models import db as _db
+    from tests.e2e.conftest import _make_paper
+
+    page, base_url = e2e_page
+    with live_server["app"].app_context():
+        _db.session.add_all(_make_paper(i) for i in range(3, 29))  # 29 unscreened: 24 + 5
+        _db.session.commit()
+    cid = _review_of_every_paper(live_server["app"])
+    page.goto(f"{base_url}/?collection={cid}&timeframe=all&decision=unscreened")
+    cards = page.locator(".paper-card")
+    expect(cards).to_have_count(24)
+
+    page.keyboard.press("j")
+    page.keyboard.press("i")
+    expect(cards).to_have_count(23)
+    # The screened card's slot went to what was page 2's first paper; Next must not skip it.
+    page.get_by_role("link", name="Next", exact=True).click()
+    page.wait_for_load_state("networkidle")
+    expect(cards).to_have_count(24)
+
+
+def test_skip_and_remove_keep_screening_chips_live(e2e_page, live_server):
+    page, base_url = e2e_page
+    cid = _review_of_every_paper(live_server["app"])
+    page.goto(f"{base_url}/?collection={cid}&timeframe=all&decision=unscreened")
+    cards = page.locator(".paper-card")
+    unscreened = page.locator('[data-decision-count="unscreened"]')
+    expect(unscreened).to_have_text("3")
+
+    page.keyboard.press("j")
+    page.keyboard.press("x")  # skip hides it, and the chips count visible members only
+    expect(cards).to_have_count(2)
+    expect(unscreened).to_have_text("2")
+
+    page.locator("[data-remove-from-collection]").first.evaluate("(b) => b.click()")
+    expect(cards).to_have_count(1)
+    expect(unscreened).to_have_text("1")
+    expect(page.locator('[data-decision-count="all"]')).to_have_text("1")

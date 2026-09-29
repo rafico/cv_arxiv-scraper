@@ -94,10 +94,11 @@
                     "Content-Type": "application/json",
                     "X-CSRF-Token": getCsrfToken(),
                 },
-                body: JSON.stringify({ action }),
+                body: JSON.stringify({ action, collection_id: SCREENING.collection }),
             });
             const data = await response.json();
             if (!response.ok) { setFeedbackLoading(button, false); return; }
+            applyDecisionCounts(data.decision_counts);
 
             card.querySelectorAll(".feedback-btn").forEach((btn) => {
                 const btnAction = btn.dataset.action;
@@ -131,6 +132,12 @@
         exclude: FEEDBACK_STYLES.skip.active,
     };
 
+    function applyDecisionCounts(counts) {
+        for (const [key, count] of Object.entries(counts || {})) {
+            document.querySelectorAll(`[data-decision-count="${key}"]`).forEach((el) => { el.textContent = count; });
+        }
+    }
+
     async function setDecision(paperId, decision, button) {
         const card = button.closest(".paper-card");
         if (!card) return;
@@ -152,9 +159,7 @@
             setFeedbackLoading(button, false);
         }
 
-        for (const [key, count] of Object.entries(data.counts)) {
-            document.querySelectorAll(`[data-decision-count="${key}"]`).forEach((el) => { el.textContent = count; });
-        }
+        applyDecisionCounts(data.counts);
         let label = "";
         card.querySelectorAll(".decision-btn").forEach((btn) => {
             const on = btn.dataset.decision === data.decision;
@@ -175,7 +180,10 @@
             : filter ? data.decision === filter : data.decision !== "exclude";
         if (matches) return;
         const index = getCards().indexOf(card);
+        if (index < 0) return; // an earlier racing response already removed it; focus is settled
         card.remove();
+        // ponytail: offset paging over a shrinking list; Next reloads this page, which now holds the papers that shifted up.
+        document.querySelector('a[rel="next"]')?.setAttribute("href", window.location.href);
         if (!getCards().length) { window.location.reload(); return; }
         if (index === focusedCardIndex) focusCard(index);
         else if (index < focusedCardIndex) focusedCardIndex -= 1;
@@ -322,6 +330,8 @@
                 body: JSON.stringify({ paper_id: paperId }),
             });
             if (response.ok) {
+                // A plain add readmits an excluded member; in this collection's view, reload to show it.
+                if ((await response.json()).added && collectionId === SCREENING.collection) window.location.reload();
                 button.classList.add('text-accent', 'font-semibold');
                 setTimeout(() => {
                     button.closest('.collection-menu').classList.add('hidden');
@@ -336,7 +346,9 @@
                 method: "DELETE",
                 headers: { "X-CSRF-Token": getCsrfToken() },
             });
-            if (response.ok) button.closest('.paper-card').remove();
+            if (!response.ok) return;
+            button.closest('.paper-card').remove();
+            applyDecisionCounts((await response.json()).counts);
         } catch (error) { console.error("Collection remove failed", error); }
     }
 
@@ -717,7 +729,8 @@
                 const btn = cards[focusedCardIndex]?.querySelector(`.decision-btn[data-decision="${decision}"]`);
                 if (btn) {
                     e.preventDefault();
-                    btn.click();
+                    // A key only sets its decision (clear it by clicking); ignore autorepeat so holding a key can't screen a run of cards.
+                    if (!e.repeat && !btn.dataset.active) btn.click();
                 }
                 break;
             }

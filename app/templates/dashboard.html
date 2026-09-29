@@ -305,7 +305,9 @@
                 headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
                 body: JSON.stringify({ paper_id: paperId, decision }),
             });
-            if (res.ok) card.remove();
+            if (!res.ok) return;
+            card.remove();
+            applyDecisionCounts((await res.json()).counts);
         } catch (e) { /* non-fatal */ }
     }
 
@@ -543,7 +545,8 @@
         </button>
         {% endfor %}
         {% endif %}
-        {% if pagination.total %}
+        {# In a collection the live chips carry the counts; this total would go stale as screened cards leave. #}
+        {% if pagination.total and not current_filters.collection %}
         <span class="text-xs text-fg-subtle tabular-nums ml-1">{{ pagination.total }} paper{{ 's' if pagination.total != 1 }}</span>
         {% endif %}
     </div>
@@ -586,7 +589,7 @@
             {# Carry ALL active query params (collection/venue/dataset/reading_status/#}
             {# author/search_mode/…), overriding only page — same pattern as the density#}
             {# toggle above. Hand-listing a subset silently dropped filters on paging. #}
-            <a href="{{ url_for('dashboard.index', **(dict(request.args.to_dict(), page=num) | safe_url_args)) }}"
+            <a rel="{{ dir }}" href="{{ url_for('dashboard.index', **(dict(request.args.to_dict(), page=num) | safe_url_args)) }}"
                class="btn-ghost py-1.5 text-sm">{{ label }}</a>
             {% else %}
             <span class="px-3 py-1.5 text-sm rounded-lg border border-edge text-fg-subtle">{{ label }}</span>
@@ -611,6 +614,20 @@
     <h3 class="text-base font-semibold text-fg">All screened</h3>
     <p class="mt-1 text-sm text-fg-muted mb-6">Every paper in this collection has a decision.</p>
     <button type="button" onclick="applyFilters({ decision: '' })" class="btn-ghost px-5 py-2">Show the review</button>
+    {% elif current_filters.collection and not decision_counts[current_filters.decision or 'all'] %}
+    {# An empty screening chip, not a narrowing filter: the timeframe/scrape advice below would mislead. #}
+    {% if current_filters.decision %}
+    <h3 class="text-base font-semibold text-fg">No papers marked {{ DECISIONS[current_filters.decision].label }}</h3>
+    <p class="mt-1 text-sm text-fg-muted mb-6">Screen papers with i / m / e on their cards, or Select several at once.</p>
+    <button type="button" onclick="applyFilters({ decision: '{{ 'unscreened' if decision_counts.unscreened else '' }}' })" class="btn-ghost px-5 py-2">{{ 'Show unscreened' if decision_counts.unscreened else 'Show the review' }}</button>
+    {% elif decision_counts.exclude %}
+    <h3 class="text-base font-semibold text-fg">Every paper here is excluded</h3>
+    <p class="mt-1 text-sm text-fg-muted mb-6">Excluded papers stay in the collection but leave the review.</p>
+    <button type="button" onclick="applyFilters({ decision: 'exclude' })" class="btn-ghost px-5 py-2">Show excluded</button>
+    {% else %}
+    <h3 class="text-base font-semibold text-fg">This collection is empty</h3>
+    <p class="mt-1 text-sm text-fg-muted mb-6">Add papers from a card's folder menu, or with Add by arXiv id in the sidebar.</p>
+    {% endif %}
     {% elif not dashboard_overview.has_successful_scrape %}
     <h3 class="text-base font-semibold text-fg">Build your first research queue</h3>
     <p class="mt-1 text-sm text-fg-muted mb-6">Add the authors, labs, and topics you care about, then run a scrape to create your first triage session.</p>

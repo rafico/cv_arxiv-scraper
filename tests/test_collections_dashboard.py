@@ -43,7 +43,7 @@ class CollectionDashboardTests(FlaskDBTestCase):
         response = self.client.get(f"/?collection={collection.id}&timeframe=all")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No papers for this filter", response.data)
+        self.assertIn(b"This collection is empty", response.data)
 
     def test_collection_view_renders_manager_controls(self):
         collection = Collection(name="Survey Seeds")

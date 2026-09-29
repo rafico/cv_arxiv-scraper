@@ -623,6 +623,9 @@ def index():
 
     page = _parse_page(request.args.get("page"))
     pagination = query.paginate(page=page, per_page=DASHBOARD_PER_PAGE, error_out=False)
+    if pagination.pages and page > pagination.pages:
+        # A page emptied by screening/skipping reloads with a ?page= past the end; show the last real one.
+        pagination = query.paginate(page=pagination.pages, per_page=DASHBOARD_PER_PAGE, error_out=False)
     papers = pagination.items
     screening_counts = None
     if collection_id:

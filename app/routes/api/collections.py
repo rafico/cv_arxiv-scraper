@@ -307,20 +307,25 @@ def add_paper_to_collection(collection_id: int):
         db.session.rollback()
         added = _stage_new_memberships(paper_ids, c.id, decision)
         db.session.commit()
-    return jsonify({"added": added, "collection_id": c.id})
+    return jsonify({"added": added, "collection_id": c.id, "counts": decision_counts(c.id)})
 
 
 def _stage_new_memberships(paper_ids: list, collection_id: int, decision: str | None = None) -> int:
     """Stage PaperCollection rows for papers not already in the collection.
 
     Returns the count staged (not yet committed); skips non-int/bool ids,
-    missing papers, and existing memberships (excluded ones included, so an
-    existing decision is never reset)."""
+    missing papers, and existing memberships. A plain add (no decision) of an
+    excluded member readmits it as unscreened; any other decision is kept."""
     added = 0
     for pid in paper_ids:
         if not isinstance(pid, int) or isinstance(pid, bool) or not db.session.get(Paper, pid):
             continue
-        if PaperCollection.query.filter_by(paper_id=pid, collection_id=collection_id).first():
+        existing = PaperCollection.query.filter_by(paper_id=pid, collection_id=collection_id).first()
+        if existing:
+            # An explicit add is the user asking for it back; Suggest similar never offers excluded members.
+            if decision is None and existing.decision == "exclude":
+                existing.decision = None
+                added += 1
             continue
         db.session.add(PaperCollection(paper_id=pid, collection_id=collection_id, decision=decision))
         added += 1
@@ -335,7 +340,7 @@ def remove_paper_from_collection(collection_id: int, paper_id: int):
         abort(404)
     db.session.delete(pc)
     db.session.commit()
-    return jsonify({"removed": True})
+    return jsonify({"removed": True, "counts": decision_counts(collection_id)})
 
 
 def _require_decision(payload: dict) -> str | None:

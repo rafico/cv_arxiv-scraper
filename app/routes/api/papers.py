@@ -6,7 +6,7 @@ from flask import abort, current_app, jsonify, request
 
 from app.csrf import validate_csrf_token
 from app.enums import ReadingStatus
-from app.models import Paper, db
+from app.models import Paper, db, decision_counts
 from app.routes._config import config_write_lock, persist_config
 from app.routes.api import api_bp
 from app.routes.api._validation import require_str
@@ -145,6 +145,10 @@ def paper_feedback(paper_id: int):
     except LookupError as exc:
         return jsonify({"error": str(exc)}), 404
 
+    # A collection view's screening chips count visible members, so a skip there moves them.
+    collection_id = payload.get("collection_id")
+    if isinstance(collection_id, int) and not isinstance(collection_id, bool):
+        result["decision_counts"] = decision_counts(collection_id)
     return jsonify(result)
 
 
