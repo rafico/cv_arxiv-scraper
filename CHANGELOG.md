@@ -34,6 +34,20 @@ Wave 5: collections as a literature-review workspace.
   opens Discover chat with `?collection=`, which sends an optional
   `collection_id` on `POST /api/corpus/chat` and answers from that
   collection's visible members only. Answers are labelled with their scope.
+- **Screening decisions**: mark collection members Include, Maybe or Exclude
+  (card buttons, `i` / `m` / `e` on the focused card, or the bulk bar) and
+  filter with All / Unscreened / Include / Maybe / Exclude chips that show live
+  counts. The API is `PUT /api/collections/<id>/papers/<pid>/decision` and
+  bulk `PUT /api/collections/<id>/decisions` (`null` clears), stored in a
+  nullable `paper_collections.decision` column added on startup. Excluded
+  papers stay members but leave the review: the default view, Export .bib,
+  the graph, Prior works, Ask this collection, Suggest similar seeds and
+  collection counts skip them, and Suggest similar never offers them again
+  (its new "Not relevant" button files a suggestion as excluded). The CSV
+  keeps every member plus a `decision` column, bundles carry the decision
+  (import only fills a blank one), and MCP `get_collection` returns each
+  member's `decision` (`include_excluded` adds the excluded papers). Decisions
+  write no feedback, so the ranker is untouched.
 
 ### Changed
 - BibTeX entries are `@misc` arXiv preprints (eprint, primaryclass, arXiv
@@ -105,6 +119,9 @@ Wave 5: collections as a literature-review workspace.
   was renamed to `MCPServer`; 1.x still works.
 - The onboarding and Settings text no longer says a profile description adds
   papers beyond your whitelists while learned ranking is switched off.
+- A dashboard `?page=` past the last page (such as the reload after skipping
+  or screening a last page empty) shows the last page instead of an empty
+  state.
 
 ## [0.6.0] — 2026-08-16
 

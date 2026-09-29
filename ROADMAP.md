@@ -266,10 +266,19 @@ Checkpoint after 2-4 weeks:
 `sqlite3 'file:instance/arxiv_papers.db?mode=ro' "select count(*) from paper_collections"`.
 If it is still 0, stop — Tier 3 would have no users.
 
+Tier 3 delivered (its trigger fired):
+
+- **Screening decision column** ✅ — trigger: a 238-paper collection after a
+  `--query` import. `paper_collections.decision` (include/maybe/exclude, NULL =
+  unscreened) with filter chips, `i`/`m`/`e` keys and bulk buttons. Excluded
+  papers stay members but leave the review (.bib, graph, prior works, chat,
+  Suggest similar); the CSV, bundles and MCP `get_collection` carry the
+  decision. It writes no feedback, so the ranker is untouched. Ceiling: chip
+  counts cover the whole collection, blind to the view's search/timeframe
+  filters.
+
 Tier 3 (each only on its trigger):
 
-- **Screening decision column** — when collections regularly hold 50+
-  unscreened papers (e.g. after `--query` imports).
 - **`near=<collection>` watch filter** ("new similar this week") — when
   collections are being revisited.
 - **Review-matrix LLM cells** — when the in-app LLM is actually on.
