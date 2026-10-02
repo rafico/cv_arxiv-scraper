@@ -1,7 +1,7 @@
 {# Feedback buttons + reading status. Shared by list rows and visual cards.
    Context: `paper`, `FEEDBACK`, `DECISIONS` (from dashboard.html). #}
 {% if current_filters is defined and current_filters.collection %}
-{# Screening decision in this collection; review-scoped, never trains the ranker. #}
+{# Screening decision in this collection; review-scoped, writes no feedback (an exclude leaves the collection's interest centroid). #}
 {% for value, meta in DECISIONS.items() %}
 <button type="button"
         onclick="setDecision({{ paper.id }}, '{{ value }}', this)"

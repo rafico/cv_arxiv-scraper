@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import requests
 
 from app.models import Collection, Paper, PaperCollection, PaperFeedback, PaperRelation, db
@@ -51,7 +52,11 @@ class CollectionShareTests(FlaskDBTestCase):
         embed = patch("app.services.embeddings.add_papers_to_index", return_value=0)
         self.embed = embed.start()
         self.addCleanup(embed.stop)
-        service = patch("app.services.embeddings.get_embedding_service", return_value=MagicMock(index_dir="/idx"))
+        # The dashboard (the CSRF helper's GET /) builds the interest profile: no vectors, no profile.
+        no_vectors = {"get_paper_vectors.return_value": ([], np.empty((0, 768), dtype=np.float32))}
+        service = patch(
+            "app.services.embeddings.get_embedding_service", return_value=MagicMock(index_dir="/idx", **no_vectors)
+        )
         service.start()
         self.addCleanup(service.stop)
 

@@ -145,7 +145,8 @@ class Paper(db.Model):
     venue_year = db.Column(db.Integer, nullable=True)
     acceptance_status = db.Column(db.String(16), nullable=True)
 
-    # Cosine similarity to the learned interest profile; NULL until computed.
+    # Interest signal in [-1, 1] from learned_ranker.interest_signal (collection affinity,
+    # else feedback centroid / learned model / description); NULL until computed.
     interest_similarity = db.Column(db.Float, nullable=True)
 
     # Legacy string dates are preserved for compatibility with older rows.

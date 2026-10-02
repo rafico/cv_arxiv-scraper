@@ -836,12 +836,20 @@ def interest_signal(
     profile that only has a description still ranks papers by cosine similarity
     to it (cold start). Its source is "description" when nothing else
     contributes.
+
+    A collection profile is returned alone, with source "collection": while
+    collections exist they are the interest model, and neither the learned
+    model nor the description is blended in.
     """
     centroid_score = None
     if profile is not None:
         from app.services.interest_model import score_vector
 
         centroid_score = score_vector(profile, vector)
+        if profile.centroids is not None:
+            # ponytail: the learned model and the description stop scoring while
+            # collections exist. Upgrade: the description as one more scorer row.
+            return centroid_score, "collection"
 
     lr_signal = None
     if model is not None:
@@ -877,9 +885,18 @@ def interest_signal(
 
 
 def resolve_interest_source(config: dict | None) -> str:
-    """Honest label for the interest score component: "learned" or "centroid"."""
+    """Honest label for the interest score component: "collection", "learned" or "centroid".
+
+    "collection" is read from the profile cache (no DB, like ``peek_learned_model``),
+    so whoever renders explanations builds the profile first.
+    """
     try:
+        from app.services.interest_model import get_cached_interest_profile
+
         prefs = learned_preferences(config)
+        profile = get_cached_interest_profile()
+        if profile is not None and profile.centroids is not None:
+            return "collection"
         if prefs.get("enabled", True) and peek_learned_model() is not None:
             return "learned"
     except Exception:  # pragma: no cover - label resolution must never break rendering

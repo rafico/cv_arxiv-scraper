@@ -125,7 +125,10 @@ whitelists:
 **🧠 It learns your taste, not just your keywords.**
 Start with simple author / lab / topic whitelists. After you save ~5 papers, it builds a
 learned interest profile (embedding centroids in SPECTER2 space) and starts ranking new work
-against what you've *actually* liked — not just literal keyword hits.
+against what you've *actually* liked — not just literal keyword hits. Keep your reading in
+collections and they become the profile instead: each new paper is scored by how close it
+sits to one of them, and the closest are let in without any whitelist hit, named after
+their collection.
 
 **🔬 Every ranking shows its work.**
 Expand any paper for **"Score 80.0 · Why this ranked here"** — a breakdown over authors,
@@ -186,10 +189,10 @@ opening the PDF:
 | Area | What you get |
 |---|---|
 | **Finding papers** | Daily/on-demand arXiv scrape with interest matching · hybrid search (keyword · semantic · combined) · historical backfill of any date range · monitor extra arXiv categories beyond cs.CV |
-| **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · learned interest profile · per-paper "why it ranked" explanations + optional inline score-factor bars · optional AI relevance scoring |
+| **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · interest profile learned from your collections or your saves · per-paper "why it ranked" explanations + optional inline score-factor bars · optional AI relevance scoring |
 | **Chat & cold-start** | Chat with your saved papers or a collection (grounded, cited RAG answers) · seed your profile from a pasted list of arXiv IDs · active-learning prompts surface borderline papers to sharpen ranking |
 | **Summaries** | Extractive TL;DR with no API needed · optional AI TL;DR + structured insights when an LLM is enabled |
-| **Organization** | Save / skip / prioritize / share to train rankings · collections (create, rename, bulk add) seeded from pasted arXiv ids/URLs/.bib or an arXiv search, grown with prior works (outside papers 2+ members cite), screened include / maybe / exclude for a literature review · custom tags · notes · reading status · saved searches |
+| **Organization** | Save / skip / prioritize / share to train rankings (until collections become the profile) · collections (create, rename, bulk add) seeded from pasted arXiv ids/URLs/.bib or an arXiv search, grown with prior works (outside papers 2+ members cite), screened include / maybe / exclude for a literature review · custom tags · notes · reading status · saved searches |
 | **Citation graph** | Your library as a force-directed network of real citation edges (Semantic Scholar + OpenAlex reference lists) · node size = PageRank influence within your corpus · color by year · collection & year filters |
 | **Export & sync** | BibTeX (single, bulk, or per collection; `@misc` preprint, or `@inproceedings`/`@article` once accepted) · per-collection CSV screening spreadsheet · shareable collection bundles (plain JSON — import on another instance without duplicating papers) · Mendeley · Zotero · HTML report · daily Gmail digest · one-click full backup & restore (DB + search index + config) |
 | **Enrichment** | Citation counts (Semantic Scholar, OpenAlex) · topic classifications & open-access status · GitHub repo stars/license · PDF thumbnails · related-paper recommendations · corpus analytics (clusters & emerging trends) |

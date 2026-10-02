@@ -114,6 +114,7 @@
             <p class="mt-1 text-sm text-fg-muted">
                 Paste arXiv IDs or links (one per line, or comma-separated). We'll save them as positive
                 signals so ranking learns your taste right away — the learned profile activates after 5 saved papers.
+                While you have collections, they rank papers instead.
             </p>
             <textarea id="bootstrap-ids" rows="5"
                       class="input-base mt-3 w-full text-sm font-mono"
@@ -460,7 +461,7 @@
                 <h3 class="text-sm font-semibold text-fg">Interest profiles</h3>
                 <span class="text-xs text-fg-subtle">Each profile has its own learned ranker, feed &amp; digest section</span>
             </div>
-            <p class="text-xs text-fg-muted mb-4">Keep separate feeds (e.g. "3D reconstruction" vs "VLM efficiency"). The active profile ranks your dashboard and trains from your saves/skips. An editable description blends into scoring so a brand-new profile ranks sensibly before it has ratings.</p>
+            <p class="text-xs text-fg-muted mb-4">Keep separate feeds (e.g. "3D reconstruction" vs "VLM efficiency"). The active profile ranks your dashboard and trains from your saves/skips. An editable description blends into scoring so a brand-new profile ranks sensibly before it has ratings. While you have collections, they rank papers instead, for every profile.</p>
 
             <div class="space-y-4">
                 {% for profile in interest_profiles %}
@@ -577,7 +578,7 @@
                         ('ai', 'AI relevance', 'LLM-scored relevance (if enabled)', preferences.ranking.ai_weight, 'amber'),
                         ('citation', 'Citation count', 'Highly-cited papers get a boost', preferences.ranking.citation_weight|default(0.5), 'sky'),
                         ('venue', 'Venue acceptance', 'Papers accepted at CVPR, ICCV, NeurIPS, etc.', preferences.ranking.venue_weight|default(8.0), 'purple'),
-                        ('interest', 'Learned interests', 'Learned from your saves/skips (needs ≥5 saved papers)', preferences.ranking.interest_weight|default(12.0), 'rose'),
+                        ('interest', 'Learned interests', 'Learned from your saves/skips (needs ≥5 saved papers) or from your collections', preferences.ranking.interest_weight|default(12.0), 'rose'),
                     ] %}
 
                     <div class="space-y-4">
@@ -615,7 +616,7 @@
                                 {%- endif -%}
                             </span>
                         </div>
-                        <p class="text-xs text-fg-subtle ml-6 mb-3">A personal model retrained from every save/skip. When active it sharpens the "Learned interests" signal above and admits on-topic papers beyond your whitelists.</p>
+                        <p class="text-xs text-fg-subtle ml-6 mb-3">A personal model retrained from every save/skip. When active it sharpens the "Learned interests" signal above and admits on-topic papers beyond your whitelists. Collections, when you have them, do both instead.</p>
                         <label for="slider_learned_blend" class="block text-sm font-medium text-fg-muted mb-1">Model vs. saved-paper profile blend</label>
                         <input type="range" min="0" max="100" step="5" id="slider_learned_blend"
                                value="{{ (preferences.learned.blend * 100)|round|int }}"
@@ -1166,12 +1167,13 @@
                         <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
                             <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Learned Ranking</div>
                             <div class="mt-2 text-sm font-semibold {{ 'text-fg' if feature_status.interest_signal_ready else 'text-priority' }}">{% if feature_status.interest_signal_ready %}Active{% else %}{{ feature_status.positive_feedback_needed }} more saved paper{{ 's' if feature_status.positive_feedback_needed != 1 }} needed{% endif %}</div>
-                            <div class="mt-1 text-xs text-fg-muted">{{ feature_status.positive_feedback }} positive rating{{ 's' if feature_status.positive_feedback != 1 }} so far. Below the threshold the ranker and the interest profile stay off{% if interest_gate_on %}, and so do off-whitelist recommendations unless the active profile has a description{% endif %}.</div>
+                            {#- A collection profile ranks alone, however many ratings there are. -#}
+                            <div class="mt-1 text-xs text-fg-muted">{% if feature_status.collection_profile %}Your collections rank papers{% if interest_gate_on %} and admit the closest new ones beyond your whitelists{% endif %}. Ratings and the profile description are not used while they do.{% else %}{{ feature_status.positive_feedback }} positive rating{{ 's' if feature_status.positive_feedback != 1 }} so far. Below the threshold the ranker and the interest profile stay off{% if interest_gate_on %}, and so do off-whitelist recommendations unless the active profile has a description{% endif %}.{% endif %}</div>
                         </div>
                         <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
                             <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Beyond Whitelists</div>
                             <div class="mt-2 text-sm font-semibold {{ 'text-fg' if feature_status.dense_retrieval_papers else 'text-priority' }}">{{ feature_status.dense_retrieval_papers }} papers</div>
-                            <div class="mt-1 text-xs text-fg-muted">Found by interest similarity rather than an author/title/affiliation match. {% if interest_gate_on %}Needs learned ranking active or a profile description.{% else %}Switched off in your learned-ranking settings.{% endif %}</div>
+                            <div class="mt-1 text-xs text-fg-muted">Found by interest similarity rather than an author/title/affiliation match. {% if interest_gate_on %}Needs collections, learned ranking active or a profile description.{% else %}Switched off in your learned-ranking settings.{% endif %}</div>
                         </div>
                         <div class="rounded-xl border border-edge bg-surface-2 px-4 py-3">
                             <div class="text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">Enrichment</div>

@@ -362,7 +362,8 @@ def bootstrap_from_arxiv_ids(arxiv_ids: list[str], *, app=None) -> dict:
     except Exception:
         LOGGER.warning("Bootstrap recompute failed (non-fatal)", exc_info=True)
 
-    summary["profile_active"] = build_interest_profile(app) is not None
+    # Only a profile learned from the saves counts: collections form one whatever is pasted.
+    summary["profile_active"] = getattr(build_interest_profile(app), "pos_centroid", None) is not None
     summary["saved_total"] = _saved_paper_count()
     return summary
 

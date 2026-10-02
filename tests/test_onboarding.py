@@ -340,6 +340,20 @@ class BootstrapTests(FlaskDBTestCase):
         self.assertEqual(summary["ingested"], ["2401.00002"])
         self.assertEqual(summary["saved_total"], 2)
 
+    @patch("app.services.interest_model.recompute_interest_similarities", return_value=0)
+    @patch("app.services.onboarding.fetch_arxiv_metadata", return_value=([], []))
+    def test_bootstrap_does_not_take_a_collection_profile_for_the_learned_one(self, _fetch, _recompute):
+        # Collections form a profile whatever is pasted (here: one id that fails); only a
+        # profile learned from the saves may report "Learned profile is now active".
+        from app.services.interest_model import InterestProfile
+
+        collections = InterestProfile(pos_centroid=None, neg_centroid=None, fingerprint=(), centroids=np.zeros((1, 2)))
+        with patch("app.services.interest_model.build_interest_profile", return_value=collections):
+            summary = bootstrap_from_arxiv_ids(["2401.00003"], app=self.app)
+
+        self.assertEqual(summary["failed"], ["2401.00003"])
+        self.assertFalse(summary["profile_active"])
+
     def test_bootstrap_empty_returns_zero_summary(self):
         summary = bootstrap_from_arxiv_ids([], app=self.app)
         self.assertEqual(summary["requested"], 0)

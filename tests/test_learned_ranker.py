@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +14,7 @@ from app.models import Paper, PaperFeedback, RecommendationMetric, db
 from app.services import learned_ranker
 from app.services.interest_model import (
     InterestProfile,
+    fit_collection_profile,
     reset_interest_profile_cache,
 )
 from app.services.learned_ranker import (
@@ -57,6 +59,24 @@ def _random_unit(seed: int) -> np.ndarray:
     rng = np.random.default_rng(1000 + seed)
     vec = rng.normal(0, 1, DIM).astype(np.float32)
     return (vec / np.linalg.norm(vec)).astype(np.float32)
+
+
+def _collection_profile() -> InterestProfile:
+    """Collection 7 ("Topic A") around axis 0 with 250 random background papers; zero corpus mean."""
+    return fit_collection_profile(
+        {7: np.asarray([_noisy_unit(0, seed) for seed in range(6)])},
+        np.asarray([_random_unit(seed) for seed in range(250)]),
+        np.zeros(DIM, dtype=np.float32),
+        labels={7: "Topic A"},
+    )
+
+
+def _at_z(profile: InterestProfile, z: float) -> np.ndarray:
+    """A unit vector whose affinity to ``_collection_profile()``'s collection is ``z``."""
+    centroid = profile.centroids[0]
+    cosine = float(profile.bg_mean[0] + z * profile.bg_std[0])
+    other = _unit(5) - float(_unit(5) @ centroid) * centroid
+    return (cosine * centroid + np.sqrt(1.0 - cosine**2) * other / np.linalg.norm(other)).astype(np.float32)
 
 
 class FakeEmbeddingService:
@@ -435,6 +455,50 @@ class DenseRetrievalCandidateTests(LearnedRankerTestCase):
         # Exactly top_k admitted, and they are the best-scored — not the first seen.
         self.assertEqual({result["title"] for result in results}, {f"Interest paper {i}" for i in range(25, 30)})
 
+    def test_collection_gate_admits_by_z_and_names_the_collection(self):
+        profile = _collection_profile()
+        # candidate_threshold belongs to the float scorer: at 0.0 it would let z = 1 through.
+        settings = {"enabled": True, "blend": 0.7, "candidate_threshold": 0.0, "candidate_top_k": 10}
+        set_runtime_learned_prefs(settings)
+
+        def gate(z: float, **generator_kwargs):
+            generator = WhitelistCandidateGenerator(whitelists=self._WHITELISTS, scraper_config={}, **generator_kwargs)
+            entry = _entry("2606.10", "Unrelated topic", _at_z(profile, z))
+            # As in a scrape: a worker thread has no app context, so no database for the gate.
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                return worker.submit(generator.process_single, entry).result()
+
+        with patch("app.services.interest_model.get_cached_interest_profile", return_value=profile):
+            near, far, unscorable = gate(3.0), gate(1.0), gate(float("nan"))
+            switched_off = gate(3.0, interest_settings={**settings, "candidate_top_k": 0})
+
+        self.assertEqual(near.match_types, ["Interest"])
+        self.assertEqual(near.matched_terms, ["Topic A"])
+        # The raw z (what the scrape buffer sorts on), not the clipped [-1, 1] signal.
+        self.assertAlmostEqual(near.raw_features["interest_candidate_score"], 3.0, places=2)
+        self.assertEqual(near.raw_features["interest_collection_id"], 7)
+        self.assertIsNone(far)
+        self.assertIsNone(unscorable)  # NaN compares false with everything: it must not pass the floor
+        self.assertIsNone(switched_off)
+
+    def test_collection_candidates_are_admitted_round_robin(self):
+        from app.services import scrape_engine
+        from app.services.pipeline import ScoredCandidate
+
+        def candidate(title: str, z: float, collection_id: int) -> ScoredCandidate:
+            features = {"interest_candidate_score": z, "interest_collection_id": collection_id}
+            return ScoredCandidate({"title": title}, ["Interest"], [], raw_features=features)
+
+        # A narrow collection (1) with five strong candidates, a broad one (2) with two weak ones.
+        buffer = [candidate("b1", 2.2, 2), *(candidate(f"a{i}", 6.0 - i, 1) for i in range(5)), candidate("b0", 2.5, 2)]
+
+        def admitted(top_k: int) -> list[str]:
+            return [c.entry_data["title"] for c in scrape_engine._select_interest_candidates(buffer, top_k)]
+
+        # Every collection's best, then every second best, then the third; never a fourth.
+        self.assertEqual(admitted(10), ["a0", "b0", "a1", "b1", "a2"])
+        self.assertEqual(admitted(3), ["a0", "b0", "a1"])
+
     def test_whitelist_match_still_wins_over_interest_gate(self):
         generator = self._generator()
         candidate = generator.process_single(_entry("2606.4", "A paper", _unit(0), authors=["Jane Doe"]))
@@ -543,6 +607,24 @@ class ExplainHonestyTests(LearnedRankerTestCase):
         learned_ranker._set_cache(self._fake_model(), (1, 1, 1), "available")
         explanations = generate_ranking_explanation(paper, config=self.app.config["SCRAPER_CONFIG"])
         self.assertIn("Matches your learned interest model", explanations)
+
+    def test_ranking_explanation_names_the_collection(self):
+        paper = _paper("2606.7778")
+        paper.match_type = "Interest"
+        paper.matched_terms = ["Topic A"]  # what the collection gate stores
+        paper.interest_similarity = 0.8
+        db.session.add(paper)
+        db.session.commit()
+        config = self.app.config["SCRAPER_CONFIG"]
+
+        # Even with a trained model around, a collection profile is the source.
+        learned_ranker._set_cache(self._fake_model(), (1, 1, 1), "available")
+        with patch("app.services.interest_model.get_cached_interest_profile", return_value=_collection_profile()):
+            self.assertEqual(resolve_interest_source(config), "collection")
+            explanations = generate_ranking_explanation(paper, config=config)
+
+        self.assertIn("Close to your collection: Topic A", explanations)
+        self.assertIn("Close to your collections", explanations)
 
     def test_resolve_interest_source_respects_enabled_flag(self):
         learned_ranker._set_cache(self._fake_model(), (1, 1, 1), "available")

@@ -252,9 +252,10 @@ def explain_score(
     )
     feedback_bonus = round(feedback_score * FEEDBACK_BOOST, 3)
 
-    # Honest labeling of the interest component: "learned" when the trained
-    # per-user model produced/produces the signal, else "centroid" (the
-    # embedding-similarity interest profile). None when no interest signal.
+    # Honest labeling of the interest component: "collection" when collections
+    # are the interest model, "learned" when the trained per-user model
+    # produced/produces the signal, else "centroid" (the embedding-similarity
+    # interest profile). None when no interest signal.
     interest_source = None
     if interest_similarity is not None:
         from app.services.learned_ranker import resolve_interest_source
@@ -440,7 +441,11 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
             else:
                 explanations.append("Title matches your interests")
         elif mt == "Interest":
-            explanations.append("Matched your learned interests")
+            # The collection gate stores the collection's name as the matched term.
+            if matched_terms:
+                explanations.append(f"Close to your collection: {matched_terms[0]}")
+            else:
+                explanations.append("Matched your learned interests")
 
     # Venue acceptance explanation
     if paper.venue and paper.acceptance_status and paper.acceptance_status != "mentioned":
@@ -471,10 +476,13 @@ def generate_ranking_explanation(paper, config: dict | None = None) -> list[str]
     if float(breakdown["recency_multiplier"] or 0.0) > 0.9:
         explanations.append("Published very recently")
 
-    # Interest signal: learned model (LR over embeddings) or centroid profile.
+    # Interest signal: collections, learned model (LR over embeddings) or centroid
+    # profile. For collections 0.5 is z = 2 (AFFINITY_Z_SCALE), the admission floor.
     if paper.interest_similarity is not None and paper.interest_similarity > 0.5:
         if breakdown.get("interest_source") == "learned":
             explanations.append("Matches your learned interest model")
+        elif breakdown.get("interest_source") == "collection":
+            explanations.append("Close to your collections")
         else:
             explanations.append("Closely matches papers you saved")
 

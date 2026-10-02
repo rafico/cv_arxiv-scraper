@@ -124,7 +124,7 @@
         }
     }
 
-    /* ── Screening decisions (collection view): review-scoped, never trains the ranker ── */
+    /* ── Screening decisions (collection view): review-scoped, no feedback rows ── */
     const SCREENING = { collection: {{ current_filters.collection | tojson }}, filter: {{ current_filters.decision | tojson }} };
     const DECISION_STYLES = {
         include: FEEDBACK_STYLES.save.active,

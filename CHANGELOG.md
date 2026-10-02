@@ -9,7 +9,35 @@ follow [Semantic Versioning](https://semver.org/).
 Wave 6: collections become the interest model (see `ROADMAP.md` and
 `docs/wave6-research.md`).
 
+### Added
+- **Collections are the interest model.** Once a collection has five or more
+  embedded papers in review and at least 200 papers sit outside every
+  collection, ranking and whitelist-free admission run on the collections: one
+  mean-centred centroid per collection, and a paper's affinity is its best
+  z-score against them, measured against the papers in no collection. A new
+  paper without a whitelist match is admitted at z >= 2, round-robin over the
+  collections and at most three per collection within `candidate_top_k` (set
+  it to at least the number of collections: below that, a scrape admits one
+  paper each for `candidate_top_k` of them and none for the rest). It is
+  tagged *Interest*, carries its collection's name, and explains itself as
+  "Close to your collection: …". The name is stored as the paper's matched
+  term, so with `llm.structured_insights` on it is also sent to the configured
+  LLM with that paper. Papers marked Exclude do not count as members.
+  `cv-arxiv-backfill interest` rescores the stored papers.
+- **`scripts/eval_collection_affinity.py`** measures that scorer on an
+  instance's own data, read-only: `holdout` (per-collection and macro AUC, plus
+  recall and background pass rate at z = 2.0 / 2.5 / 3.0), `replay` (was a paper
+  that later joined a collection in its scrape day's top 10?), `checkpoint`
+  (share of new collection papers the feed had already stored) and
+  `--self-test`.
+
 ### Changed
+- While a collection profile exists, the profile description and the learned
+  ranker no longer feed the "Learned interests" signal or the admission gate
+  (`candidate_threshold` is not used either), for every interest profile.
+  The Settings status card, the inbox checklist and `/healthz`
+  (`features.collection_profile`) say when the collections rank. Without
+  collections everything behaves as before.
 - The server launcher moved from the top-level `run.py` into the package
   (`app/cli/webserver.py`). `run.py` stays as an alias, so `python run.py`,
   `./run.sh`, `make run` and the Docker image work as before.

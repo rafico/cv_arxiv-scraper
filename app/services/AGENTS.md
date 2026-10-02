@@ -33,8 +33,11 @@ from here — add logic here, not there.
 - `pipeline/` — feature extraction, candidate generation, `ranker`.
 - `matching.py` (author/whitelist matching), `ranking.py`, `venues.py`
   (`parse_venue` detects conference acceptance from arXiv comments),
-  `interest_model.py` (learned interest centroids from feedback + the vector
-  index; inert below 5 saved papers), `feedback.py`
+  `interest_model.py` (the interest profile. Collections first: one mean-centred
+  centroid per collection, a paper's affinity is its best z against them —
+  pure NumPy `fit_collection_profile` / `affinity_scores`, which also drive the
+  interest gate in `pipeline/candidate_generation.py`. Else centroids from
+  feedback + the vector index; inert below 5 saved papers), `feedback.py`
   (save/skip/priority/shared actions — **toggling**: re-applying an action clears
   it), `onboarding.py` (cold-start: ingests pasted arXiv IDs as implicit saves to
   seed the profile; active-learning `select_uncertain_papers` surfaces boundary
@@ -76,3 +79,11 @@ from here — add logic here, not there.
   `jobs.py` converts them to a job error; the historical route returns 502.
   Don't reintroduce silent catch-all swallowing.
 - `now_utc()` / `utc_today()` live in `text.py`; use them for timestamps.
+- The collection scorer (`interest_model.py`: centring, z, `AFFINITY_Z_*`,
+  `MIN_BACKGROUND`) was settled by measurement. Before changing it, run
+  `scripts/eval_collection_affinity.py --self-test`, then its `holdout` and
+  `replay` views on a real instance (read-only) and compare the numbers.
+- Scrape worker threads have no app context: the interest gate reads the
+  profile from `get_cached_interest_profile()`, never from the DB. In a web
+  process that cache starts empty, so code that labels the interest signal
+  (`resolve_interest_source`) needs `build_interest_profile` called first.

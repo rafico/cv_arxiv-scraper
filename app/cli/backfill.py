@@ -766,10 +766,10 @@ def backfill_insights(app, *, limit: int = 200, emit: Emit = print) -> int:
 
 
 def backfill_interest(app, *, emit: Emit = print) -> int:
-    """Recompute learned-interest similarities from feedback + the FAISS index."""
+    """Recompute interest similarities (collections, else feedback) from the vector index."""
     from app.rank import recompute_interest_similarities
 
-    emit("Recomputing interest similarities from feedback...")
+    emit("Recomputing interest similarities from collections or feedback...")
     updated = recompute_interest_similarities(app)
     emit(f"Interest backfill complete: {updated} papers updated")
     return updated
@@ -931,7 +931,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_rebuild.add_argument("--batch-size", type=_positive_int, default=EMBEDDINGS_BATCH_SIZE)
     abstracts = subparsers.add_parser("abstracts", help="Re-clean stored abstracts (strip arXiv RSS boilerplate)")
     abstracts.add_argument("--batch-size", type=_positive_int, default=200)
-    subparsers.add_parser("interest", help="Recompute learned-interest similarities from feedback")
+    subparsers.add_parser("interest", help="Recompute interest similarities from collections or feedback")
     insights = subparsers.add_parser("insights", help="Run structured LLM extraction for papers without insights")
     insights.add_argument("--limit", type=_positive_int, default=200, help="Max papers to analyze (one LLM call each)")
 
