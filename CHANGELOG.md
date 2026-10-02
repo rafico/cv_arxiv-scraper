@@ -49,8 +49,31 @@ Wave 6: collections become the interest model (see `ROADMAP.md` and
 - **`cv-arxiv-mcp --read-only`** registers no write tool, for unattended runs,
   and does not run the built-in scrape scheduler in that process. The rest of
   app start-up is unchanged: it still runs its idempotent schema check.
+- **MCP triage writes, for attended sessions.** `set_decision` records a
+  screening decision (include / maybe / exclude) for one paper in a collection,
+  with a required one-line reason. A paper that is not in the collection yet is
+  filed with the decision, so an exclude turns a `whats_new` candidate down for
+  good. `tag_papers` adds one tag (lowercase, checked against a pattern) to up
+  to 50 papers, all or nothing. There is no undo and no tag removal over MCP,
+  and a decision you made is never overwritten. Every write is appended to
+  `mcp_writes.jsonl` next to the database before it is committed; a write that
+  fails (a locked database) comes back as an error and changes nothing.
+- **An agent's decision does not pass as yours.** A row an agent decided or
+  added keeps the agent's reason in the new `paper_collections.decision_note`
+  column (added to an existing database at start-up). The collection page
+  shows such a row with an "Agent" mark and the reason until you decide:
+  clicking the same decision, or pressing its key, confirms it, and any other
+  decision overrules it. The reason is in the collection CSV (`decision_note`);
+  no MCP tool returns it and bundles do not carry it. The eval script's
+  `checkpoint` counts such a row only once you have confirmed it.
 
 ### Changed
+- **MCP `add_to_collection` no longer creates a collection for an unknown
+  name.** A mistyped name used to start a new collection silently; it is an
+  error now, and `create=true` asks for a new one. Papers it files are marked
+  as added by the agent until you screen them.
+- The MCP server's instructions say that titles, abstracts, section text and
+  notes are third-party content to quote, never instructions to follow.
 - While a collection profile exists, the profile description and the learned
   ranker no longer feed the "Learned interests" signal or the admission gate
   (`candidate_threshold` is not used either), for every interest profile.
@@ -62,6 +85,7 @@ Wave 6: collections become the interest model (see `ROADMAP.md` and
   `./run.sh`, `make run` and the Docker image work as before.
 
 ### Fixed
+- The "Getting Started" banner no longer shows above a collection's papers.
 - **A long-running server sees the papers a later scrape embeds.** The vector
   index was read once per process, so a web or MCP server started before the
   daily scrape (another process) never saw the new vectors: semantic search

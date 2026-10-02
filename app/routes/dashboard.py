@@ -655,13 +655,17 @@ def index():
     screening_counts = None
     if collection_id:
         screening_counts = decision_counts(collection_id)
-        page_decisions = dict(
-            db.session.query(PaperCollection.paper_id, PaperCollection.decision).filter(
+        # The decision, and the note an agent's write left on it (None once the owner has decided).
+        page_decisions = {
+            paper_id: (decision, note)
+            for paper_id, decision, note in db.session.query(
+                PaperCollection.paper_id, PaperCollection.decision, PaperCollection.decision_note
+            ).filter(
                 PaperCollection.collection_id == collection_id, PaperCollection.paper_id.in_([p.id for p in papers])
             )
-        )
+        }
         for paper in papers:
-            paper.collection_decision = page_decisions.get(paper.id)
+            paper.collection_decision, paper.collection_decision_note = page_decisions.get(paper.id, (None, None))
 
     type_counts_row = (
         query.order_by(None)

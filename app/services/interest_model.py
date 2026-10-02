@@ -242,8 +242,9 @@ def _collection_profile(service, fingerprint: tuple[int, ...]) -> InterestProfil
     from app.models import Collection, Paper, PaperCollection, db, in_review_clause
 
     # ponytail: every in-review membership counts at once, whoever added it (a query
-    # import, an agent, the owner). Upgrade: a created-by marker and centroids from
-    # owner-confirmed rows only, if the eval's checkpoint shows the centroids drifting.
+    # import, an agent, the owner). Upgrade: centroids from owner-confirmed rows only
+    # (an agent's unconfirmed rows carry decision_note; query imports are not marked
+    # yet), if the eval's checkpoint shows the centroids drifting.
     members: dict[int, list[int]] = {}
     for collection_id, paper_id in (
         db.session.query(PaperCollection.collection_id, PaperCollection.paper_id)

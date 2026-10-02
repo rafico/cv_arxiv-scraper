@@ -16,6 +16,7 @@ from app.models import (
 )
 from app.routes.api import api_bp
 from app.routes.api._validation import optional_str, require_list, require_str
+from app.services.screening import apply_decision
 
 
 @api_bp.route("/collections", methods=["GET"])
@@ -124,6 +125,7 @@ _CSV_COLUMNS = (
     "reading_status",
     "link",
     "decision",
+    "decision_note",
 )
 
 
@@ -147,7 +149,7 @@ def export_collection_csv(collection_id: int):
     db.session.get(Collection, collection_id) or abort(404)
     # Every member, excluded ones too: this is the screening spreadsheet.
     rows = (
-        db.session.query(Paper, PaperCollection.decision)
+        db.session.query(Paper, PaperCollection.decision, PaperCollection.decision_note)
         .join(PaperCollection, PaperCollection.paper_id == Paper.id)
         .filter(PaperCollection.collection_id == collection_id, Paper.is_hidden.is_(False))
         .order_by(Paper.id)
@@ -156,7 +158,7 @@ def export_collection_csv(collection_id: int):
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(_CSV_COLUMNS)
-    for p, decision in rows:
+    for p, decision, decision_note in rows:
         row = (
             p.arxiv_id,
             p.title,
@@ -173,6 +175,7 @@ def export_collection_csv(collection_id: int):
             p.reading_status,
             p.link,
             decision,
+            decision_note,  # set while the row is an agent's and the owner has not confirmed it
         )
         writer.writerow([_csv_cell(v) for v in row])
     response = Response(buf.getvalue(), mimetype="text/csv")
@@ -325,7 +328,7 @@ def _stage_new_memberships(paper_ids: list, collection_id: int, decision: str | 
         if existing:
             # An explicit add is the user asking for it back; Suggest similar never offers excluded members.
             if decision is None and existing.decision == "exclude":
-                existing.decision = None
+                apply_decision(collection_id, [pid], None)
                 added += 1
             continue
         db.session.add(PaperCollection(paper_id=pid, collection_id=collection_id, decision=decision))
@@ -354,12 +357,14 @@ def _require_decision(payload: dict) -> str | None:
 
 # Screening is review-scoped: these never write PaperFeedback. An exclude does take the
 # paper out of the collection's interest centroid (interest_model) at its next rebuild.
+# These are the owner's writes: apply_decision clears an agent's mark, so a PUT of the
+# decision an agent made confirms it.
 @api_bp.route("/collections/<int:collection_id>/papers/<int:paper_id>/decision", methods=["PUT"])
 def set_paper_decision(collection_id: int, paper_id: int):
     validate_csrf_token()
     decision = _require_decision(request.get_json(silent=True) or {})
-    pc = PaperCollection.query.filter_by(paper_id=paper_id, collection_id=collection_id).first() or abort(404)
-    pc.decision = decision
+    if not apply_decision(collection_id, [paper_id], decision):  # nothing updated: not a member
+        abort(404)
     db.session.commit()
     return jsonify({"paper_id": paper_id, "decision": decision, "counts": decision_counts(collection_id)})
 
@@ -371,8 +376,6 @@ def set_paper_decisions(collection_id: int):
     payload = request.get_json(silent=True) or {}
     decision = _require_decision(payload)
     ids = [pid for pid in require_list(payload, "paper_ids") if isinstance(pid, int) and not isinstance(pid, bool)]
-    updated = PaperCollection.query.filter(
-        PaperCollection.collection_id == collection_id, PaperCollection.paper_id.in_(ids)
-    ).update({"decision": decision}, synchronize_session=False)
+    updated = len(apply_decision(collection_id, ids, decision))
     db.session.commit()
     return jsonify({"updated": updated, "counts": decision_counts(collection_id)})

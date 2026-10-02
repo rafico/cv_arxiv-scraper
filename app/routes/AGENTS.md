@@ -39,12 +39,18 @@ belongs in [app/services](../services).
   target semantic hooks, not utility classes: `.paper-card`, `.paper-link`,
   `.paper-pdf-link`, `.feedback-btn[data-action]` + `data-active`,
   `.reading-status-select`, `.card-toggle`, `[data-card-details]`,
-  `.decision-btn[data-decision]` + `data-active`, `[data-decision-badge]`,
+  `.decision-btn[data-decision]` + `data-active` + `data-agent`, `[data-decision-badge]`,
   `[data-decision-filter]` / `[data-decision-count]` (collection screening),
+  `[data-agent-note]` (an agent's unconfirmed decision and its reason),
   pagination `a[rel=prev|next]`,
   `#paper-list` / `#paper-grid`, `#theme-toggle`, `#scrape-btn`, `#app-sidebar`,
   settings tabs' `data-active`. Don't rename these when restyling; assert on
   them rather than on Tailwind classes.
+- **Screening decisions go through `apply_decision`**
+  ([app/services/screening.py](../services/screening.py)). A route's write is the
+  owner's: it leaves `note` unset, which clears `decision_note`, the mark of an
+  agent's unconfirmed write over MCP. That text is agent-written: show it through
+  autoescape or `textContent`, never inside inline JS.
 - **Map upstream failures to honest status codes.** Services raise on failure;
   surface that — e.g. `search_historical` returns **502** when the arXiv fetch
   fails rather than letting it become an unhandled 500.

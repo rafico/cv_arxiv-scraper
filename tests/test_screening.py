@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 from datetime import date, datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -62,6 +63,17 @@ class ScreeningTests(FlaskDBTestCase):
     def _decision(self, paper_id: int):
         return PaperCollection.query.filter_by(paper_id=paper_id, collection_id=self.cid).one().decision
 
+    def _state(self, paper_id: int) -> tuple:
+        """(decision, note): a note marks the row as an agent's, not yet confirmed by the owner."""
+        row = PaperCollection.query.filter_by(paper_id=paper_id, collection_id=self.cid).one()
+        return row.decision, row.decision_note
+
+    def _mark_agent(self, *paper_ids: int, note: str = "agent's reason") -> None:
+        PaperCollection.query.filter(
+            PaperCollection.collection_id == self.cid, PaperCollection.paper_id.in_(paper_ids)
+        ).update({"decision_note": note}, synchronize_session=False)
+        db.session.commit()
+
     def _view(self, query: str = "") -> str:
         return self.client.get(f"/?collection={self.cid}&timeframe=all{query}").get_data(as_text=True)
 
@@ -84,6 +96,23 @@ class ScreeningTests(FlaskDBTestCase):
         # Existing memberships survive and read as unscreened.
         self.assertEqual(PaperCollection.query.filter_by(collection_id=self.cid).count(), 4)
         self.assertIsNone(self._decision(self.included))
+
+    def test_ensure_schema_adds_decision_note_to_legacy_db(self):
+        from app.schema import ensure_schema
+
+        # A database from before agent writes: it has decisions, and no note column.
+        db.session.execute(text("ALTER TABLE paper_collections DROP COLUMN decision_note"))
+        db.session.commit()
+
+        ensure_schema()
+        ensure_schema()  # idempotent
+
+        self.assertIn("decision_note", {c["name"] for c in inspect(db.engine).get_columns("paper_collections")})
+        # The decisions made so far survive, and every one of them reads as the owner's.
+        self.assertEqual(
+            [self._state(paper_id) for paper_id in (self.unscreened, self.included, self.maybe, self.excluded)],
+            [(None, None), ("include", None), ("maybe", None), ("exclude", None)],
+        )
 
     # ── API ──
 
@@ -150,6 +179,34 @@ class ScreeningTests(FlaskDBTestCase):
         self.assertIsNone(self._decision(self.excluded))
         self.assertEqual(response.get_json()["counts"]["unscreened"], 2)
 
+    def test_owner_put_of_the_same_decision_keeps_it_and_clears_the_note(self):
+        headers = {"X-CSRF-Token": self._csrf_token()}
+        self._mark_agent(self.included, self.maybe, self.excluded)
+
+        # The decision the agent made, sent by the owner: it stays, and is the owner's now.
+        url = f"/api/collections/{self.cid}/papers/{self.included}/decision"
+        self.assertEqual(self.client.put(url, json={"decision": "include"}, headers=headers).status_code, 200)
+        self.assertEqual(self._state(self.included), ("include", None))
+
+        # So does every other write of the owner's: the bulk PUT, and the re-add of an excluded member.
+        bulk = self.client.put(
+            f"/api/collections/{self.cid}/decisions",
+            json={"paper_ids": [self.maybe], "decision": "include"},
+            headers=headers,
+        )
+        self.assertEqual(bulk.get_json()["updated"], 1)
+        self.assertEqual(self._state(self.maybe), ("include", None))
+        self.client.post(f"/api/collections/{self.cid}/papers", json={"paper_id": self.excluded}, headers=headers)
+        self.assertEqual(self._state(self.excluded), (None, None))
+
+        # Rows the owner files carry no note to begin with.
+        self.client.post(
+            f"/api/collections/{self.cid}/papers",
+            json={"paper_id": self.outsider, "decision": "exclude"},
+            headers=headers,
+        )
+        self.assertEqual(self._state(self.outsider), ("exclude", None))
+
     def test_membership_and_skip_responses_carry_chip_counts(self):
         headers = {"X-CSRF-Token": self._csrf_token()}
         added = self.client.post(
@@ -199,6 +256,30 @@ class ScreeningTests(FlaskDBTestCase):
         inbox = self.client.get("/?timeframe=all").get_data(as_text=True)
         self.assertNotIn('class="decision-btn', inbox)
         self.assertNotIn("data-decision-filter=", inbox)
+        # The onboarding banner belongs to the inbox, not to a collection page.
+        self.assertIn("Getting Started", inbox)
+        self.assertNotIn("Getting Started", default)
+
+    def test_agent_decision_is_marked_until_the_owner_confirms(self):
+        self._mark_agent(self.included, note='near <b>dataset</b> "work"')
+
+        html = self._view()
+        # The chip with the reason on that one card, whose buttons know that a click confirms.
+        self.assertEqual(html.count("<span data-agent-note"), 1)
+        self.assertEqual(html.count('data-agent="true"'), 3)
+        # Agent-written text: escaped where it is shown, and it reaches no script.
+        self.assertEqual(html.count("near &lt;b&gt;dataset&lt;/b&gt; &#34;work&#34;"), 1)
+        self.assertNotIn("<b>dataset</b>", html)
+
+        self.client.put(
+            f"/api/collections/{self.cid}/papers/{self.included}/decision",
+            json={"decision": "include"},
+            headers={"X-CSRF-Token": self._csrf_token()},
+        )
+        confirmed = self._view()
+        self.assertNotIn("<span data-agent-note", confirmed)
+        self.assertNotIn('data-agent="true"', confirmed)
+        self.assertRegex(confirmed, r'data-decision="include"\s+data-active="true"')
 
     def test_collection_view_drops_the_stale_paper_total(self):
         # The live chips carry the counts; a server-rendered total goes stale as cards leave.
@@ -237,12 +318,15 @@ class ScreeningTests(FlaskDBTestCase):
         self.assertEqual(counts[self.cid], 3)
 
     def test_csv_keeps_every_member_with_its_decision(self):
+        self._mark_agent(self.maybe, note="=borderline: a survey")
         rows = list(
             csv.DictReader(
                 io.StringIO(self.client.get(f"/api/collections/{self.cid}/table.csv").get_data(as_text=True))
             )
         )
         self.assertEqual([r["decision"] for r in rows], ["", "include", "maybe", "exclude"])
+        # An agent's unconfirmed decision carries its reason, neutralised like the other free text.
+        self.assertEqual([r["decision_note"] for r in rows], ["", "", "'=borderline: a survey", ""])
 
     def test_prior_works_chat_and_neighbors_seed_from_the_review(self):
         with patch("app.services.citation_graph.missing_references", return_value={"results": []}) as refs:
@@ -292,8 +376,10 @@ class ScreeningTests(FlaskDBTestCase):
     def test_bundle_carries_decisions_fill_only(self):
         from app.services.collection_share import export_collection, import_collection
 
+        self._mark_agent(self.excluded, note="agent's reason: off-topic")
         bundle = export_collection(self.cid)
         self.assertEqual([p["decision"] for p in bundle["papers"]], [None, "include", "maybe", "exclude"])
+        self.assertNotIn("off-topic", json.dumps(bundle))  # an agent's reason stays with the owner
 
         # Into a collection that already screened two of them: local decisions win,
         # blanks fill, and junk values from the untrusted bundle are dropped.
@@ -310,3 +396,8 @@ class ScreeningTests(FlaskDBTestCase):
         self.assertEqual(
             got, {self.unscreened: None, self.included: "exclude", self.maybe: "maybe", self.excluded: "exclude"}
         )
+        # Imported rows carry no agent mark (the bundle has none to carry).
+        marked = PaperCollection.query.filter(
+            PaperCollection.collection_id == target.id, PaperCollection.decision_note.isnot(None)
+        )
+        self.assertEqual(marked.count(), 0)

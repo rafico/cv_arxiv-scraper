@@ -7,8 +7,9 @@ is unit-testable against a seeded DB without the optional MCP extra installed.
 
 Every function runs inside the *current* Flask app context (the MCP wrapper pushes
 one per call; tests run inside ``FlaskDBTestCase``'s pushed context). Read paths
-are the default; the single mutation (:func:`add_to_collection`) is clearly
-separated and never invoked by the read tools.
+are the default; the three write tools (:func:`set_decision`, :func:`tag_papers`,
+:func:`add_to_collection`) are clearly separated, never invoked by the read tools,
+and each write is validated and logged before it is committed.
 
 Design rules mirrored from the rest of the app:
 
@@ -22,7 +23,9 @@ Design rules mirrored from the rest of the app:
 from __future__ import annotations
 
 import json
+import re
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from app.enums import SortOption
@@ -40,6 +43,7 @@ from app.models import (
 from app.services.bibtex import _make_cite_key
 from app.services.implementation_readiness import implementation_readiness
 from app.services.preferences import first_author_name
+from app.services.screening import apply_decision
 from app.services.text import now_utc
 
 # Bounds so an assistant can never ask for an unbounded result set (each row costs
@@ -55,6 +59,14 @@ _TEXT_MAX_CHARS = 20_000
 # added-since filter only needs a bound that keeps the date arithmetic in range.
 _WHATS_NEW_MAX_DAYS = 90
 _ADDED_SINCE_MAX_DAYS = 3650
+# What an agent may write. A reason is shown to the owner and a new collection's name to
+# everyone, so each is one printable line; a tag is read back by agents, so it is a pattern.
+_REASON_CHARS = 200
+_NAME_CHARS = 128  # Collection.name
+_TAG_RE = re.compile(r"[a-z0-9][a-z0-9 ._-]{0,31}")
+# decision_note of a row add_to_collection files: the agent mark, with no decision made.
+_AGENT_ADDED_NOTE = "added by agent"
+WRITE_LOG_NAME = "mcp_writes.jsonl"
 
 SEARCH_MODES = ("hybrid", "semantic", "keyword")
 # get_collection(decision=...): a screening decision, or the rows without one.
@@ -706,44 +718,181 @@ def ask_paper(paper_id: str | int, question: str) -> dict[str, Any]:
         return {"error": "not_found", "identifier": str(paper_id)}
 
 
-# ─────────────────────────── the single mutation ────────────────────────────
+# ─────────────────────────── write tools ────────────────────────────
+# For attended sessions: `cv-arxiv-mcp --read-only` registers none of them. Each is
+# narrow, validates what the agent sends, and logs the write before committing it.
 
 
-def add_to_collection(collection_name_or_id: str | int, paper_id: str | int) -> dict[str, Any]:
-    """Add a paper to a collection — the ONE write tool. Idempotent.
+def _one_line(text: object, most: int) -> str | None:
+    """``text`` stripped, if it is one printable line of 1..``most`` characters; else None.
 
-    ``collection_name_or_id`` is a numeric id (must already exist) or a name
-    (created on first use). Returns ``added=False`` when the paper is already a
-    member, so repeated calls converge on the same state. Unknown papers or a
-    numeric id with no matching collection return a graceful error.
+    ``str.isprintable`` turns down newlines and control characters, and with them the
+    invisible format characters (zero-width, bidi overrides).
+    """
+    cleaned = text.strip() if isinstance(text, str) else ""
+    return cleaned if 0 < len(cleaned) <= most and cleaned.isprintable() else None
+
+
+def _commit_logged(tool: str, **entry: Any) -> dict[str, Any] | None:
+    """Flush the pending write, append its line to the write log, commit; None when it went through.
+
+    The line is written before the commit, so nothing is committed that the log does
+    not show (a line whose commit then failed describes a write that did not happen).
+    Any failure rolls back and comes back as an error payload: a locked database, or a
+    log that cannot be written, must not raise out of a tool.
+    """
+    try:
+        db.session.flush()
+        # Next to the database file, not in app.instance_path: the log belongs to that
+        # database, and every test's temporary database gets its own.
+        log_path = Path(db.engine.url.database).with_name(WRITE_LOG_NAME)
+        line = json.dumps({"time": now_utc().isoformat(timespec="seconds") + "Z", "tool": tool, **entry})
+        with log_path.open("a", encoding="utf-8") as log:
+            log.write(line + "\n")
+        db.session.commit()
+    except Exception as exc:  # noqa: BLE001 — a database error and an OS error alike
+        db.session.rollback()
+        return {"error": "write_failed", "cause": type(exc).__name__}
+    return None
+
+
+def set_decision(collection: str | int, paper: str | int, decision: str, reason: str) -> dict[str, Any]:
+    """Record an agent's screening decision for ONE paper in a collection, with its reason.
+
+    ``decision`` is one of SCREENING_DECISIONS and ``reason`` one printable line of at
+    most 200 characters. The collection is resolved by id or exact name and never
+    created. A paper with no row in it yet is filed with the decision: an ``exclude``
+    is how a ``whats_new`` candidate is turned down, so it is not offered again.
+
+    The reason is stored as the row's ``decision_note``, which marks the decision as
+    the agent's until the owner confirms or overrules it in the web UI. No read tool
+    returns it, and neither does this one. A decision the owner made (one without that
+    mark) is refused, never overwritten; the agent's own earlier one may be changed.
+    Returns the previous decision (None: unscreened, or no row at all when
+    ``created``). There is no undo here: that is the owner's, in the web UI.
+    """
+    if decision not in SCREENING_DECISIONS:
+        return {"error": "invalid_decision", "decision": str(decision), "allowed": list(SCREENING_DECISIONS)}
+    note = _one_line(reason, _REASON_CHARS)
+    if note is None:
+        return {"error": "invalid_reason", "expected": f"one printable line of 1 to {_REASON_CHARS} characters"}
+    found = _resolve_paper(paper)
+    if found is None:
+        return {"error": "not_found", "resource": "paper", "identifier": str(paper)}
+    target, _created = _resolve_or_create_collection(collection, create=False)
+    if target is None:
+        return {"error": "not_found", "resource": "collection", "identifier": str(collection)}
+
+    # ponytail: check, then write, in two statements. An owner click that lands between
+    # them (in the web process) is overwritten by this decision, which stays marked as
+    # the agent's. Upgrade: one UPDATE guarded by the same condition.
+    row = PaperCollection.query.filter_by(paper_id=found.id, collection_id=target.id).first()
+    if row is not None and row.decision is not None and row.decision_note is None:
+        return {"error": "owner_decision", "collection_id": target.id, "paper_id": found.id, "decision": row.decision}
+    previous = apply_decision(target.id, [found.id], decision, note=note, create=True)
+    result = {
+        "collection_id": target.id,
+        "collection_name": target.name,
+        "paper_id": found.id,
+        "arxiv_id": found.arxiv_id,
+        "title": found.title,  # said back: a mistyped id is a real paper more often than not
+        "decision": decision,
+        "previous": previous.get(found.id),
+        "created": found.id not in previous,
+    }
+    failed = _commit_logged(
+        "set_decision",
+        collection_id=result["collection_id"],
+        paper_ids=[result["paper_id"]],
+        previous=result["previous"],
+        value=decision,
+        created=result["created"],
+        reason=note,
+    )
+    return failed or result
+
+
+def tag_papers(papers: list[str | int], tag: str) -> dict[str, Any]:
+    """Add one user tag to up to 50 papers. Add-only: no tool removes a tag.
+
+    ``tag`` must match ``[a-z0-9][a-z0-9 ._-]{0,31}`` in full: agents read tags back
+    (every listed paper carries its ``user_tags``), so free text is not accepted. All
+    or nothing: when any id is unknown nothing is tagged, and the unknown ids come
+    back. Papers that carry the tag already are left alone (``already_tagged``).
+    """
+    cleaned = tag.strip() if isinstance(tag, str) else ""
+    if not _TAG_RE.fullmatch(cleaned):
+        return {"error": "invalid_tag", "pattern": _TAG_RE.pattern}
+    if not isinstance(papers, list) or not 0 < len(papers) <= _MAX_LIMIT:
+        return {"error": "invalid_papers", "expected": f"a list of 1 to {_MAX_LIMIT} paper ids"}
+    resolved = [(identifier, _resolve_paper(identifier)) for identifier in papers]
+    unknown = [str(identifier) for identifier, found in resolved if found is None]
+    if unknown:
+        return {"error": "not_found", "resource": "paper", "identifiers": unknown}
+
+    # One paper may be named twice (by row id and by arXiv id): tag it once.
+    unique = {found.id: found for _identifier, found in resolved}
+    # ponytail: a read-modify-write of each paper's JSON list, outside the lock the REST
+    # tag routes take (_TAG_WRITE_LOCK in routes/api/papers.py is process-local, and
+    # this is another process): of two tag edits that reach the same paper at the same
+    # moment, one can be lost. Upgrade: a single-statement JSON update (json_insert /
+    # json_remove) in both writers.
+    tagged = [found for found in unique.values() if cleaned not in found.user_tags_list]
+    for found in tagged:
+        found.user_tags = [*found.user_tags_list, cleaned]
+    result = {
+        "tag": cleaned,
+        "tagged": [{"id": found.id, "arxiv_id": found.arxiv_id, "title": found.title} for found in tagged],
+        "already_tagged": len(unique) - len(tagged),
+    }
+    if not tagged:
+        return result
+    return _commit_logged("tag_papers", paper_ids=[row["id"] for row in result["tagged"]], value=cleaned) or result
+
+
+def add_to_collection(collection_name_or_id: str | int, paper_id: str | int, create: bool = False) -> dict[str, Any]:
+    """File a paper into a collection. Idempotent.
+
+    ``collection_name_or_id`` is a numeric id or an exact name. An unknown name is an
+    error, not a new collection (a mistyped name used to create one silently), unless
+    ``create`` is set and the name is one printable line; a number is always an id and
+    is never created. Returns ``added=False`` when the paper already has a row there
+    (an excluded one too), so repeated calls converge on the same state. The row it
+    adds is unscreened and carries the agent mark (``decision_note``) until the owner
+    screens it.
     """
     paper = _resolve_paper(paper_id)
     if paper is None:
         return {"error": "not_found", "resource": "paper", "identifier": str(paper_id)}
 
-    collection, created = _resolve_or_create_collection(collection_name_or_id)
+    collection, created = _resolve_or_create_collection(collection_name_or_id, create=False)
+    if collection is None and create and _one_line(collection_name_or_id, _NAME_CHARS):
+        # ponytail: the helper commits the new collection on its own, before the logged
+        # write below; if that write then fails, an empty collection is left without a
+        # log line. Upgrade: create it in the same transaction.
+        collection, created = _resolve_or_create_collection(collection_name_or_id)
     if collection is None:
         return {"error": "not_found", "resource": "collection", "identifier": str(collection_name_or_id)}
 
-    existing = PaperCollection.query.filter_by(paper_id=paper.id, collection_id=collection.id).first()
-    if existing is not None:
-        return {
-            "collection_id": collection.id,
-            "collection_name": collection.name,
-            "paper_id": paper.id,
-            "added": False,
-            "created_collection": created,
-        }
-
-    db.session.add(PaperCollection(paper_id=paper.id, collection_id=collection.id))
-    db.session.commit()
-    return {
+    added = PaperCollection.query.filter_by(paper_id=paper.id, collection_id=collection.id).first() is None
+    result = {
         "collection_id": collection.id,
         "collection_name": collection.name,
         "paper_id": paper.id,
-        "added": True,
+        "added": added,
         "created_collection": created,
     }
+    if not added:
+        return result
+    apply_decision(collection.id, [paper.id], None, note=_AGENT_ADDED_NOTE, create=True)
+    failed = _commit_logged(
+        "add_to_collection",
+        collection_id=result["collection_id"],
+        paper_ids=[result["paper_id"]],
+        created=True,
+        created_collection=created,
+    )
+    return failed or result
 
 
 def _resolve_or_create_collection(

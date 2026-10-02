@@ -81,6 +81,18 @@ from here — add logic here, not there.
   `whats_new` (new papers close to a collection) reads stored vectors only and
   must stay that way: `get_paper_vectors` / `index_size` never load the
   embedding model, `encode` does.
+  The three write tools (`set_decision`, `tag_papers`, `add_to_collection`) are
+  for attended sessions. Keep them narrow: validate what the agent sends (a
+  reason is one printable line, a tag a pattern, a collection is never created
+  by a mistyped name), never overwrite a decision the owner made, and write
+  through `_commit_logged`: flush, append one line to `mcp_writes.jsonl` next to
+  the database file (never `app.instance_path`), then commit; a failure rolls
+  back and returns `{"error": "write_failed"}`. No read tool, and no bundle,
+  returns `decision_note`.
+- `screening.py` — `apply_decision`, the one writer of a membership's
+  `decision` and `decision_note`. An agent write passes its reason as `note`;
+  an owner write (the REST routes) leaves it unset, which clears the note.
+  Non-NULL `decision_note` means "an agent's, not yet confirmed by the owner".
 
 **Persistence helpers**
 - `_save_results` in `scrape_engine.py` maps explicit fields onto `Paper` (it

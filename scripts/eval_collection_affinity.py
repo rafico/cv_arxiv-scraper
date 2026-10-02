@@ -28,7 +28,8 @@ functions (``fit_collection_profile`` / ``affinity_scores``) and reports three v
 ``checkpoint``
     Of the papers added to collections since a date, how many the feed had already
     stored. A paper imported before the feed reached it stays an import, so this
-    undercounts.
+    undercounts. Rows an agent wrote over MCP count only once the owner has confirmed
+    them.
 
 ``--collections`` restricts the model and the papers counted to some collection ids;
 papers of every collection stay out of the background either way.
@@ -68,7 +69,7 @@ class Corpus(NamedTuple):
     """An instance as plain rows; dates are the ISO text SQLite stores."""
 
     papers: dict[int, tuple]  # id -> (match_type, scraped_at, publication_dt, paper_score)
-    memberships: list[tuple]  # (collection_id, paper_id, added_at, decision)
+    memberships: list[tuple]  # (collection_id, paper_id, added_at, decision, decision_note)
     rows: dict[int, int]  # paper id -> row of ``vectors``
     vectors: np.ndarray
 
@@ -83,7 +84,11 @@ def load(data_dir: Path) -> Corpus:
             row[0]: row[1:]
             for row in conn.execute("SELECT id, match_type, scraped_at, publication_dt, paper_score FROM papers")
         }
-        member_rows = conn.execute("SELECT collection_id, paper_id, added_at, decision FROM paper_collections")
+        # decision_note marks a row an agent wrote and the owner has not confirmed; a
+        # database from before the MCP write tools has no such column.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(paper_collections)")}
+        note = "decision_note" if "decision_note" in columns else "NULL"
+        member_rows = conn.execute(f"SELECT collection_id, paper_id, added_at, decision, {note} FROM paper_collections")
         memberships = [row for row in member_rows if row[1] in papers]
     finally:
         conn.close()
@@ -103,7 +108,7 @@ def _corpus(papers: dict[int, tuple], memberships: list[tuple], id_map: list[int
 def _members(corpus: Corpus, collection_ids: set[int] | None) -> dict[int, list[int]]:
     """Indexed in-review members of the selected collections."""
     members: dict[int, list[int]] = {}
-    for collection_id, paper_id, _added_at, decision in corpus.memberships:
+    for collection_id, paper_id, _added_at, decision, _note in corpus.memberships:
         selected = collection_ids is None or collection_id in collection_ids
         if selected and decision != "exclude" and paper_id in corpus.rows:
             members.setdefault(collection_id, []).append(paper_id)
@@ -112,7 +117,7 @@ def _members(corpus: Corpus, collection_ids: set[int] | None) -> dict[int, list[
 
 def _background(corpus: Corpus) -> list[int]:
     """The app's background: papers with no row in any collection that its gate did not admit."""
-    filed = {paper_id for _collection_id, paper_id, _added_at, _decision in corpus.memberships}
+    filed = {paper_id for _collection_id, paper_id, *_rest in corpus.memberships}
     return [pid for pid in corpus.rows if pid not in filed and corpus.papers[pid][0] != "Interest"]
 
 
@@ -223,13 +228,14 @@ def replay(corpus: Corpus, collection_ids: set[int] | None = None, until: str | 
 def checkpoint(
     corpus: Corpus, since: str, collection_ids: set[int] | None = None, published_since: str | None = None
 ) -> dict:
-    # ponytail: every in-review membership counts, an agent's unconfirmed additions
-    # included. Upgrade: leave those out once memberships record who added them.
+    # A row an agent wrote and the owner has not confirmed (decision_note set) does not
+    # count: the agent files what whats_new offers, which the feed stored by construction.
     added = {
         paper_id
-        for collection_id, paper_id, added_at, decision in corpus.memberships
+        for collection_id, paper_id, added_at, decision, note in corpus.memberships
         if (collection_ids is None or collection_id in collection_ids)
         and decision != "exclude"
+        and note is None
         and (added_at or "")[:10] >= since
         and (published_since is None or (corpus.papers[paper_id][2] or "") >= published_since)
     }
@@ -262,16 +268,19 @@ def self_test(seed: int = 0) -> dict:
         topic = rng.normal(size=dim)
         for index in range(24):  # imported members; the last four joined late
             pid = add("import", "2026-01-05", f"2025-{1 + index // 2:02d}-01", topic)
-            memberships.append((collection_id, pid, "2026-03-01" if index >= 20 else "2026-01-10", None))
+            memberships.append((collection_id, pid, "2026-03-01" if index >= 20 else "2026-01-10", None, None))
         if collection_id == 2:
             # One paper in two collections: this newest import is held out of collection 1,
             # so the split has to take it out of collection 2's centroid as well.
-            memberships.append((1, pid, "2026-01-10", None))
+            memberships.append((1, pid, "2026-01-10", None, None))
         for index in range(6):  # members the feed caught, two per scrape day, filed later
             pid = add("Title", days[index % 3], "2026-01-20", topic)
-            memberships.append((collection_id, pid, "2026-03-01", "include" if index else None))
+            memberships.append((collection_id, pid, "2026-03-01", "include" if index else None, None))
+    # The last of them was an agent's decision, not confirmed by the owner: a member like
+    # the others, but the checkpoint leaves it out.
+    memberships[-1] = (*memberships[-1][:4], "on-topic")
     # An off-topic feed paper excluded from a collection: neither a member nor background.
-    memberships.append((1, add("Title", days[0], "2026-01-20"), "2026-03-01", "exclude"))
+    memberships.append((1, add("Title", days[0], "2026-01-20"), "2026-03-01", "exclude", None))
     for day in days:
         for _ in range(150):
             add("Title", day, "2026-01-20")
@@ -290,7 +299,7 @@ def self_test(seed: int = 0) -> dict:
     assert result["holdout"]["macro_auc"] > 0.95, f"scorer failed to separate synthetic clusters: {result}"
     assert result["holdout"]["recall"] > 0.9, f"held-out members below the floor, centring or z lost: {result}"
     assert result["replay"]["positives"] == result["replay"]["affinity"] == 12, f"replay missed positives: {result}"
-    assert result["checkpoint"] == {"feed_stored": 18, "added": 30}, f"checkpoint miscounted: {result}"
+    assert result["checkpoint"] == {"feed_stored": 17, "added": 29}, f"checkpoint miscounted: {result}"
     return result
 
 

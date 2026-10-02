@@ -283,10 +283,20 @@ Restart Claude Desktop and the tools appear:
 | `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes and screening decisions (paged; excluded papers only with `include_excluded`). Optional filters: `tag` (exact), `decision` (`include` / `maybe` / `exclude` / `unscreened`), `added_since_days` |
 | `get_paper_text` | A paper's section table of contents + abstract, then any section's verbatim text (paged) |
 | `whats_new` | Papers that arrived in the last N days, are in no collection yet and score close to one: candidates to screen, each with its z, the collection it is closest to (wrong about one time in five) and the nearest paper already in it. Filter with `collection` |
-| `add_to_collection` | The one write tool — file a paper into a collection (idempotent) |
+| `set_decision` | Write: a screening decision (`include` / `maybe` / `exclude`) for one paper in a collection, with a required one-line reason. Files the paper if it is not in the collection yet; never overwrites a decision you made |
+| `tag_papers` | Write: add one tag to up to 50 papers (add-only; all or nothing if an id is unknown) |
+| `add_to_collection` | Write: file a paper into a collection (idempotent). An unknown name is an error unless `create=true` |
 
 Every paper in a list carries your `user_tags` and `has_full_text`, so the
 assistant knows which papers it can read in full without asking for each.
+
+The three write tools are meant for sessions you attend. Each write is appended
+to `mcp_writes.jsonl` next to the database (time, tool, ids, previous and new
+value, reason) before it is committed. A decision or a paper the assistant adds
+shows on the collection page with an **Agent** mark and its reason until you
+confirm it (click the same decision) or overrule it (click another); the reason
+is never returned by a tool. There is no undo tool: undoing is yours, in the web
+UI.
 
 Start it with `cv-arxiv-mcp --read-only` (`"args": ["--read-only"]` in the config
 above) to register no write tool at all, for example for an unattended run. The
