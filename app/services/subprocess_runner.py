@@ -7,7 +7,8 @@ work in a short-lived child process turns a native crash into a catchable
 ``NativeCrashError`` in the parent, so the single web/scrape worker survives.
 
 Isolation is on by default and can be disabled with ``CV_ARXIV_NATIVE_ISOLATION=0``
-(the test suite does this so it can keep mocking the in-process functions).
+(the test suite does this so it can keep mocking the in-process functions). Inline
+calls then run one at a time: PDFium (pdfplumber's renderer) is not thread-safe.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import os
+import threading
 import time
 from collections.abc import Callable
 from queue import Empty
@@ -27,6 +29,17 @@ LOGGER = logging.getLogger(__name__)
 _CTX = mp.get_context("spawn")
 
 _ENV_FLAG = "CV_ARXIV_NATIVE_ISOLATION"
+
+# Stands in for the process boundary when isolation is off. PDFium (behind
+# pdfplumber's ``to_image``) is not thread-safe: two thumbnail-warmer threads rendering
+# in-process at once crashed the process or left PDFium rejecting every later PDF
+# ("Data format error") until restart. Re-entrant so a target may itself call
+# run_isolated.
+# ponytail: one lock for all inline native work, taken without a timeout, so a target
+# that never returns blocks every later inline call. Isolated mode (the default) has
+# neither limit: it runs calls in parallel and kills a child that overruns. Per-library
+# locks if in-process throughput ever matters.
+_INLINE_LOCK = threading.RLock()
 
 
 class NativeCrashError(RuntimeError):
@@ -52,11 +65,13 @@ def run_isolated(target: Callable[..., Any], *args: Any, timeout: float | None =
 
     Raises ``NativeCrashError`` if the child dies from a signal, ``TimeoutError`` if
     it overruns ``timeout``, or re-raises any Python exception the child raised. When
-    isolation is disabled the target runs inline. ``target`` must be importable
-    (module-level) and the arguments / return value must be picklable.
+    isolation is disabled the target runs inline, one call at a time, and ``timeout``
+    is not enforced. ``target`` must be importable (module-level) and the arguments /
+    return value must be picklable.
     """
     if not isolation_enabled():
-        return target(*args, **kwargs)
+        with _INLINE_LOCK:
+            return target(*args, **kwargs)
 
     name = getattr(target, "__name__", repr(target))
     queue = _CTX.Queue()

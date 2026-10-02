@@ -186,9 +186,12 @@ def bulk_feedback():
 def paper_explain(paper_id: int):
     """Return ranking explanations for a paper."""
     from app.services.implementation_readiness import implementation_readiness
+    from app.services.interest_model import build_interest_profile
     from app.services.ranking import explain_score, generate_ranking_explanation
 
     paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
+    # explain_score reads the interest label from the profile cache (see the dashboard).
+    build_interest_profile(current_app._get_current_object())
     config = current_app.config["SCRAPER_CONFIG"]
     match_types = paper.match_types
     breakdown = explain_score(

@@ -51,6 +51,22 @@ jobs:
       - name: Verify WSGI entrypoint
         run: python -m gunicorn --check-config wsgi:app
 
+      # Build the wheel and start its console scripts from outside the checkout,
+      # so a module the wheel does not ship (as top-level run.py once was for
+      # `cv-arxiv serve`) fails here instead of on a user's `pip install`.
+      # Must stay the LAST step: it replaces the editable install with the wheel.
+      # ponytail: reuses this job's installed deps (no second torch download), so
+      # it catches missing modules, not undeclared dependencies or package data.
+      # Upgrade path: install the wheel with its deps into a fresh venv.
+      - name: Wheel smoke
+        run: |
+          python -m pip wheel --no-deps -w "$RUNNER_TEMP/dist" .
+          python -m pip install --no-deps --force-reinstall "$RUNNER_TEMP"/dist/*.whl
+          cd "$RUNNER_TEMP"
+          cv-arxiv --version
+          cv-arxiv serve --help
+          cv-arxiv-mcp --help
+
   type:
     name: Type check
     runs-on: ubuntu-latest

@@ -33,8 +33,11 @@ from here — add logic here, not there.
 - `pipeline/` — feature extraction, candidate generation, `ranker`.
 - `matching.py` (author/whitelist matching), `ranking.py`, `venues.py`
   (`parse_venue` detects conference acceptance from arXiv comments),
-  `interest_model.py` (learned interest centroids from feedback + the vector
-  index; inert below 5 saved papers), `feedback.py`
+  `interest_model.py` (the interest profile. Collections first: one mean-centred
+  centroid per collection, a paper's affinity is its best z against them —
+  pure NumPy `fit_collection_profile` / `affinity_scores`, which also drive the
+  interest gate in `pipeline/candidate_generation.py`. Else centroids from
+  feedback + the vector index; inert below 5 saved papers), `feedback.py`
   (save/skip/priority/shared actions — **toggling**: re-applying an action clears
   it), `onboarding.py` (cold-start: ingests pasted arXiv IDs as implicit saves to
   seed the profile; active-learning `select_uncertain_papers` surfaces boundary
@@ -44,7 +47,14 @@ from here — add logic here, not there.
 
 **Search / embeddings / corpus**
 - `embeddings.py` (`EmbeddingService`, exact NumPy vector index; singleton via
-  `get_embedding_service`), `embed_backfill.py`, `search.py` (BM25 + semantic +
+  `get_embedding_service`, which re-reads the paper index when another process —
+  the daily scrape — has saved it: `reload_if_changed`, one stat per call, and
+  rows not yet saved are kept; `save()` builds on the index on disk the same
+  way. A pair on disk that cannot be used is logged once and not read again
+  until a file changes; a reload of a whole pair also turns saving back on for
+  a service that started degraded. Don't `reset_embedding_service()` just to
+  see new vectors: that also drops the loaded model),
+  `embed_backfill.py`, `search.py` (BM25 + semantic +
   hybrid/RRF), `rag.py` (corpus chat: scope is a collection's `paper_ids`, else the **saved**
   papers — ranked exactly by per-id vectors — else the whole corpus via hybrid
   search, labelled `scope`; optionally synthesizes via the LLM client with `[n]`
@@ -60,6 +70,17 @@ from here — add logic here, not there.
   committed** — every component is copied onto its target filesystem first so the
   commit is a same-fs rename: cross-device-safe, all-or-nothing with rollback, and
   size-bounded against decompression bombs).
+- `mcp_tools.py` — the logic behind the MCP tools: plain functions returning
+  compact dicts, no `mcp` SDK import (the thin wrappers are in
+  `app/mcp_server.py`; `cv-arxiv-mcp --read-only` registers the read tools only
+  and stops the built-in scheduler that `create_app()` may have started).
+  Unknown ids and an unknown `decision` come back as `{"error": ...}`, not
+  exceptions (a string of digits is an id only when `_is_row_id` says so, and is
+  never a collection name); limits and day windows are clamped, and the window
+  applied is said back.
+  `whats_new` (new papers close to a collection) reads stored vectors only and
+  must stay that way: `get_paper_vectors` / `index_size` never load the
+  embedding model, `encode` does.
 
 **Persistence helpers**
 - `_save_results` in `scrape_engine.py` maps explicit fields onto `Paper` (it
@@ -76,3 +97,14 @@ from here — add logic here, not there.
   `jobs.py` converts them to a job error; the historical route returns 502.
   Don't reintroduce silent catch-all swallowing.
 - `now_utc()` / `utc_today()` live in `text.py`; use them for timestamps.
+- `get_embedding_service()` with no app and no app context (a worker thread, a
+  unit test) resolves `FAISS_INDEX_DIR`, then `CV_ARXIV_INSTANCE_PATH/faiss_index`,
+  and only then `./instance/faiss_index`. Pass the app when you have one.
+- The collection scorer (`interest_model.py`: centring, z, `AFFINITY_Z_*`,
+  `MIN_BACKGROUND`) was settled by measurement. Before changing it, run
+  `scripts/eval_collection_affinity.py --self-test`, then its `holdout` and
+  `replay` views on a real instance (read-only) and compare the numbers.
+- Scrape worker threads have no app context: the interest gate reads the
+  profile from `get_cached_interest_profile()`, never from the DB. In a web
+  process that cache starts empty, so code that labels the interest signal
+  (`resolve_interest_source`) needs `build_interest_profile` called first.

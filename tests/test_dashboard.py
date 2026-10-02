@@ -145,6 +145,23 @@ class DashboardRouteTests(FlaskDBTestCase):
         self.assertNotIn("Paper 0", permalink.get_data(as_text=True))
         self.assertNotIn("Permalink Target Paper", inbox.get_data(as_text=True))
 
+    def test_muted_affiliation_spares_a_collection_admission(self):
+        # The interest gate stores the collection's name as the matched term. A muted
+        # affiliation that happens to occur inside that name ("MIT" in "Transmitter")
+        # must not hide the paper; a paper matched on the affiliation still goes.
+        self._add_paper(title="Muted Lab Paper", arxiv_id="2602.9004", published_days_ago=0)
+        self._add_paper(title="Collection Admission Paper", arxiv_id="2602.9005", published_days_ago=0)
+        muted, admitted = Paper.query.filter(Paper.arxiv_id.in_(["2602.9004", "2602.9005"])).order_by(Paper.arxiv_id)
+        muted.match_type, muted.matched_terms = "Affiliation", ["MIT"]
+        admitted.match_type, admitted.matched_terms = "Interest", ["Transmitter design"]
+        db.session.commit()
+        self.app.config["SCRAPER_CONFIG"]["preferences"] = {"muted": {"affiliations": ["MIT"]}}
+
+        text = self.client.get("/").get_data(as_text=True)
+
+        self.assertIn("Collection Admission Paper", text)
+        self.assertNotIn("Muted Lab Paper", text)
+
     def test_feedback_endpoint_toggles_action(self):
         paper = Paper.query.first()
         token = self._csrf_token()

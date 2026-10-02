@@ -9,6 +9,9 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
       - id: end-of-file-fixer
+        # The Tailwind CLI writes the minified stylesheet without a final newline,
+        # so "fixing" it here fails CI again after every `make tailwind`.
+        exclude: ^app/static/style\.css$
       - id: trailing-whitespace
 
   - repo: https://github.com/astral-sh/ruff-pre-commit

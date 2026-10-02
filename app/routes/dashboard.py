@@ -11,7 +11,7 @@ from flask_sqlalchemy.query import Query
 
 from app.constants import ARXIV_CATEGORY_NAMES, DASHBOARD_PER_PAGE
 from app.csrf import get_or_create_csrf_token
-from app.enums import FeedbackAction, SortOption
+from app.enums import FeedbackAction, MatchType, SortOption
 from app.models import (
     SCREENING_DECISIONS,
     DigestRun,
@@ -26,7 +26,12 @@ from app.models import (
 )
 from app.services.feedback import get_feedback_snapshot
 from app.services.implementation_readiness import implementation_readiness
-from app.services.interest_model import MIN_POSITIVE_FEEDBACK, POSITIVE_ACTIONS
+from app.services.interest_model import (
+    MIN_POSITIVE_FEEDBACK,
+    POSITIVE_ACTIONS,
+    build_interest_profile,
+    get_cached_interest_profile,
+)
 from app.services.preferences import first_author_name, get_preferences
 from app.services.ranking import (
     combined_rank_score,
@@ -160,7 +165,13 @@ def _apply_muted_filters(query: Query, config: dict, *, active: bool) -> Query:
         query = query.filter(~db.cast(Paper.topic_tags, db.Text).ilike(escaped, escape="\\"))
     for affiliation in muted["affiliations"]:
         escaped = f"%{_escape_like_term(affiliation)}%"
-        query = query.filter(~db.cast(Paper.matched_terms, db.Text).ilike(escaped, escape="\\"))
+        # Not for the interest gate's admissions: their matched term is a collection's name.
+        query = query.filter(
+            ~db.and_(
+                Paper.match_type != MatchType.INTEREST.value,
+                db.cast(Paper.matched_terms, db.Text).ilike(escaped, escape="\\"),
+            )
+        )
     return query
 
 
@@ -277,7 +288,18 @@ def _build_onboarding_steps(config: dict, *, positive_count: int, has_successful
     # active profile has a non-empty description (the candidate interest gate).
     remaining = max(0, MIN_POSITIVE_FEEDBACK - positive_count)
     learned = get_preferences(config)["learned"]
-    if not learned["enabled"] or int(learned["candidate_top_k"]) <= 0:
+    gate_off = not learned["enabled"] or int(learned["candidate_top_k"]) <= 0
+    profile = get_cached_interest_profile()  # built for this page by the cards, which come first
+    when_done = "Learned ranking is active. Keep saving and skipping to sharpen it."
+    if profile is not None and profile.centroids is not None:
+        # Collections are the interest model: they rank (and, with the gate on, admit)
+        # on their own, and neither saves nor a description are read.
+        beyond_whitelists = when_done = (
+            "Your collections already rank papers"
+            + ("" if gate_off else " and bring in recommendations beyond your whitelists")
+            + "; saves are not used while they do."
+        )
+    elif gate_off:
         # The gate returns early here: neither saves nor a description admit anything.
         beyond_whitelists = (
             f"Save {remaining} more to train your ranking. Recommendations beyond your "
@@ -310,9 +332,7 @@ def _build_onboarding_steps(config: dict, *, positive_count: int, has_successful
         {
             "label": "Save or skip papers",
             "description": (
-                f"Saved {positive_count}/{MIN_POSITIVE_FEEDBACK}. {beyond_whitelists}"
-                if remaining
-                else "Learned ranking is active. Keep saving and skipping to sharpen it."
+                f"Saved {positive_count}/{MIN_POSITIVE_FEEDBACK}. {beyond_whitelists}" if remaining else when_done
             ),
             "complete": remaining == 0,
             "href": "/",
@@ -320,11 +340,12 @@ def _build_onboarding_steps(config: dict, *, positive_count: int, has_successful
     ]
     if not (config.get("email", {}) or {}).get("recipient"):
         # The digest carries the one-tap feedback links, so an unconfigured
-        # digest is a hole in the training loop, not just a missing email.
+        # digest is a hole in the training loop, not just a missing email. The
+        # copy promises the links, not training: a collection profile reads no feedback.
         steps.append(
             {
                 "label": "Set a digest recipient",
-                "description": "Email digests train your ranking from one-tap 👍/👎 links.",
+                "description": "Get the day's top papers by email, with one-tap 👍/👎 links.",
                 "complete": False,
                 "href": "/settings?section=automation",
             }
@@ -407,6 +428,10 @@ def _enrich_cards_with_feedback_and_related(papers: list[Paper], candidate_pool:
     # Resolve the active RankingConfig once for the whole page instead of issuing a
     # fresh query + DEFAULT_PREFERENCES deepcopy inside explain_score for every row.
     active_ranking_config = get_active_ranking_config()
+    # Likewise build the interest profile (cached on its fingerprint) once per page:
+    # explain_score labels the interest signal from that cache, and a web process
+    # starts without one because the daily scrape runs in another process.
+    build_interest_profile(current_app._get_current_object())
     figure_static_root = _static_root()
 
     for paper in papers:

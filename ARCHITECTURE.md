@@ -33,7 +33,8 @@ flow, and step-by-step recipes for common extensions.
 
 **Façade packages** `app/{ingest,rank,search_,enrich,web}` re-export from
 `app/services/*` for readable imports and hold no logic. Top-level `*_cli.py`
-files are backward-compat shims via `app/_module_alias.py`. Put new logic in
+files and `run.py` (the server launcher, `app/cli/webserver.py`) are
+backward-compat shims via `app/_module_alias.py`. Put new logic in
 `app/services/`, then re-export.
 
 ## Scrape data flow
@@ -45,8 +46,9 @@ files are backward-compat shims via `app/_module_alias.py`. Put new logic in
 ingest.orchestrator.fetch(mode)            # RSS + arXiv-API backends, resumable
    → enrich_entries_with_api_metadata      # arXiv API affiliations/comments/links
    → _prefetch_affiliation_text            # fetches PDFs → result["pdf_content"]
-   → _process_entries_with_pipeline        # features (venue, learned-interest sim)
-                                           #   + ranking + LLM summary/insights
+   → _process_entries_with_pipeline        # whitelist + interest gate, features
+                                           #   (venue, interest similarity),
+                                           #   ranking, LLM summary/insights
    → _refresh_stale_citations              # daily only: S2 counts/refs older than 7 days
    → _enrich_results_with_citations        # Semantic Scholar
    → _enrich_results_with_openalex         # OpenAlex
@@ -70,6 +72,17 @@ The stale-citation refresh runs before `_save_results` so the edge sync picks up
 the refreshed references. The pipeline score lacks the implementation-readiness
 bonus (result dicts get their GitHub/HF inputs only after save), so
 `_rescore_saved_papers` rescores the saved rows with the canonical `score_paper`.
+
+**Interest model.** `build_interest_profile` (`interest_model.py`) runs at scrape
+start and is cached for the worker threads. When a collection has at least five
+embedded members in review and at least 200 papers sit outside every collection,
+the profile is one mean-centred centroid per collection: a paper's signal is its
+best z against them (stored as `interest_similarity`, `clip(z / 4, -1, 1)`), and an
+entry with no whitelist match is admitted as `Interest` at z >= 2, round-robin over
+the collections, at most three each and `candidate_top_k` in total. Otherwise the
+profile comes from save/skip feedback, blended with the learned ranker and the
+profile description. `scripts/eval_collection_affinity.py` measures the collection
+scorer read-only (holdout AUC, replay hit@10).
 
 **arXiv refusals.** Every export-API call goes through `request_arxiv_api`
 (`ingest/arxiv_api_backend.py`). A 403/406, or a 429 that outlives the retries,

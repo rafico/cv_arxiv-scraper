@@ -40,7 +40,9 @@ DEFAULT_PREFERENCES: dict[str, dict] = {
         "blend": 0.7,
         # Dense-retrieval candidates: papers with no whitelist match are
         # admitted when the interest score (probability, 0-1) clears this
-        # threshold — at most candidate_top_k per scrape (0 disables).
+        # threshold — at most candidate_top_k per scrape (0 disables). A
+        # collection profile ignores the threshold (it has its own z floor,
+        # interest_model.AFFINITY_Z_MIN) and keeps candidate_top_k.
         "candidate_threshold": 0.6,
         "candidate_top_k": 10,
     },

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import signal
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -73,3 +75,24 @@ def test_runs_inline_when_isolation_disabled(monkeypatch):
     monkeypatch.setenv("CV_ARXIV_NATIVE_ISOLATION", "0")
     # Inline mode returns directly and never spawns a process.
     assert run_isolated(_double, 5) == 10
+
+
+def test_inline_calls_never_overlap(monkeypatch):
+    # Inline there is no process boundary, and PDFium is not thread-safe: two
+    # thumbnail-warmer threads rendering in-process at once crashed the suite or left
+    # PDFium rejecting every later PDF ("Data format error") in unrelated tests.
+    monkeypatch.setenv("CV_ARXIV_NATIVE_ISOLATION", "0")
+    both_inside = threading.Barrier(2, timeout=0.5)
+
+    def target() -> str:
+        try:
+            both_inside.wait()  # only passes while two calls are inside at once
+        except threading.BrokenBarrierError:
+            return "alone"
+        return "overlapped"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(run_isolated, target) for _ in range(2)]
+        results = [future.result() for future in futures]
+
+    assert results == ["alone", "alone"]

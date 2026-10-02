@@ -1,7 +1,7 @@
 """``cv-arxiv serve`` — launch the web server against a single data directory.
 
-A thin wrapper over ``run.main`` (the same gunicorn/Flask path ``run.py`` uses)
-for ``pip``/``uvx`` installs. It resolves one *data directory* that holds the
+A thin wrapper over ``app.cli.webserver.main`` (the gunicorn/Flask path ``run.py``
+uses) for ``pip``/``uvx`` installs. It resolves one *data directory* that holds the
 SQLite DB, FAISS index, ``config.yaml``, and secret dotfiles, points the app's
 existing path-resolution env vars at it (``CV_ARXIV_INSTANCE_PATH`` /
 ``CV_ARXIV_CONFIG``), seeds a config on first run, then hands off to the server.
@@ -102,7 +102,7 @@ def prepare_data_dir(data_dir: Path, *, environ: dict[str, str] | None = None) -
 
 
 def _serve_help() -> str:
-    import run
+    from app.cli import webserver
 
     return (
         "usage: cv-arxiv serve [--data-dir DIR] [server options]\n\n"
@@ -110,7 +110,7 @@ def _serve_help() -> str:
         "config, and secrets all live under it).\n\n"
         f"  --data-dir DIR   Data directory. Precedence: --data-dir > ${DATA_DIR_ENV_VAR}\n"
         f"                   > {DEFAULT_DATA_DIR}\n\n"
-        "Forwarded server options:\n\n" + run.build_parser().format_help()
+        "Forwarded server options:\n\n" + webserver.build_parser().format_help()
     )
 
 
@@ -119,7 +119,9 @@ def _run_serve(argv: Sequence[str]) -> int:
         print(_serve_help())
         return 0
 
-    import run
+    # Imported as a module and called through its attribute: ``run`` is an alias of
+    # this same module object, so patching ``run.main`` still takes effect here.
+    from app.cli import webserver
 
     parser = argparse.ArgumentParser(prog="cv-arxiv serve", add_help=False)
     parser.add_argument("--data-dir", default=None)
@@ -127,7 +129,7 @@ def _run_serve(argv: Sequence[str]) -> int:
 
     data_dir = resolve_data_dir(known.data_dir)
     prepare_data_dir(data_dir)
-    return run.main(rest)
+    return webserver.main(rest)
 
 
 def _print_help() -> None:

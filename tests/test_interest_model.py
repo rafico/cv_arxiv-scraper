@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
-from app.models import Paper, PaperFeedback, db
+from app.models import Collection, Paper, PaperCollection, PaperFeedback, db
+from app.services.embeddings import EmbeddingService, add_papers_to_index, reset_embedding_service
 from app.services.interest_model import (
+    AFFINITY_Z_MIN,
     MIN_POSITIVE_FEEDBACK,
+    affinity_scores,
     build_interest_profile,
+    collection_affinity,
+    fit_collection_profile,
+    nearest_member,
     recompute_interest_similarities,
     reset_interest_profile_cache,
     score_vector,
 )
+from app.services.learned_ranker import interest_signal, resolve_interest_source
+from app.services.metrics import feature_liveness
 from tests.helpers import FlaskDBTestCase
 
 
@@ -180,6 +189,199 @@ class InterestProfileTests(FlaskDBTestCase):
         db.session.expire_all()
         stored = Paper.query.filter_by(arxiv_id="2798.88888").one()
         self.assertIsNone(stored.interest_similarity)
+
+    def test_collection_affinity_profile(self):
+        """Collections alone are the interest model: centred centroids, z against the background."""
+        rng = np.random.default_rng(0)
+        shared = rng.normal(size=768)  # what every abstract has in common; centring removes it
+        vectors: dict[int, np.ndarray] = {}
+
+        def embed(topic=None) -> np.ndarray:
+            vec = shared + (rng.normal(size=768) if topic is None else topic + 0.3 * rng.normal(size=768))
+            return (vec / np.linalg.norm(vec)).astype(np.float32)
+
+        def add(vector: np.ndarray, match_type: str = "Title") -> int:
+            paper = _paper(f"2801.{10000 + len(vectors)}")
+            paper.match_type = match_type
+            db.session.add(paper)
+            db.session.flush()
+            vectors[paper.id] = vector
+            return paper.id
+
+        topics = {"Alpha": rng.normal(size=768), "Beta": rng.normal(size=768)}
+        collections, members = {}, {}
+        for name, topic in topics.items():
+            collection = Collection(name=name)
+            db.session.add(collection)
+            db.session.flush()
+            collections[name] = collection.id
+            members[name] = [add(embed(topic)) for _ in range(MIN_POSITIVE_FEEDBACK)]  # just enough for a row
+            db.session.add_all(PaperCollection(paper_id=pid, collection_id=collection.id) for pid in members[name])
+        # A Beta-like paper excluded from Alpha: neither an Alpha member nor background.
+        excluded = add(embed(topics["Beta"]))
+        db.session.add(PaperCollection(paper_id=excluded, collection_id=collections["Alpha"], decision="exclude"))
+        # Admitted by the gate itself and filed nowhere: kept out of the background too.
+        add(embed(topics["Alpha"]), match_type="Interest")
+        background = [add(embed()) for _ in range(250)]
+        db.session.commit()
+        service = _FakeEmbeddingService(vectors)
+
+        with patch("app.services.embeddings.get_embedding_service", return_value=service):
+            profile = build_interest_profile(self.app)
+
+            # The scorer, recomputed by hand from the spec.
+            mean = np.asarray(list(vectors.values())).mean(axis=0)
+            outside = np.asarray([vectors[pid] for pid in background])
+            unrelated = outside - mean
+            unrelated /= np.linalg.norm(unrelated, axis=1, keepdims=True)
+            for name, collection_id in collections.items():
+                row = profile.collection_ids.index(collection_id)
+                centroid = (np.asarray([vectors[pid] for pid in members[name]]) - mean).mean(axis=0)
+                centroid /= np.linalg.norm(centroid)
+                np.testing.assert_allclose(profile.centroids[row], centroid, atol=1e-5)
+                cosines = unrelated @ centroid
+                np.testing.assert_allclose(profile.bg_mean[row], cosines.mean(), atol=1e-5)
+                np.testing.assert_allclose(profile.bg_std[row], cosines.std(), atol=1e-5)
+                self.assertEqual(profile.labels[row], name)
+            # One member fewer than MIN_POSITIVE_FEEDBACK and a collection gets no row.
+            too_few = np.asarray([vectors[pid] for pid in members["Alpha"][1:]])
+            self.assertIsNone(fit_collection_profile({1: too_few}, outside, mean))
+
+            held_out = embed(topics["Alpha"])
+            z, collection_id = collection_affinity(profile, held_out)
+            self.assertGreaterEqual(z, AFFINITY_Z_MIN)
+            self.assertEqual(collection_id, collections["Alpha"])
+            self.assertEqual(score_vector(profile, held_out), 1.0)  # z / 4, clipped
+            # The best collection, not the first: the excluded paper is Beta-like.
+            self.assertEqual(collection_affinity(profile, vectors[excluded])[1], collections["Beta"])
+
+            randoms = np.asarray([embed() for _ in range(20)])
+            scores = affinity_scores(profile, randoms)
+            self.assertEqual(scores.shape, (20, 2))
+            self.assertGreaterEqual((scores.max(axis=1) < AFFINITY_Z_MIN).mean(), 0.8)
+            # Scoring centres the paper too, before the cosine and the z.
+            centred = randoms - mean
+            centred /= np.linalg.norm(centred, axis=1, keepdims=True)
+            by_hand = (centred @ profile.centroids.T - profile.bg_mean) / profile.bg_std
+            np.testing.assert_allclose(scores, by_hand, atol=1e-3)
+            # The nearest member: each member is its own, and a non-finite row never wins.
+            pool = np.vstack([np.full(768, np.nan), *(vectors[pid] for pid in members["Alpha"])])
+            self.assertEqual(nearest_member(profile, pool[[4, 2]], pool).tolist(), [4, 2])
+            # Closest by direction once the corpus mean is taken off both sides. u and v are
+            # at right angles to the mean and to each other. Row 0 is nearly the mean, like
+            # the paper, so it is the closest before centring; row 2 is long, so it has the
+            # largest dot product; row 1 is the one that points the paper's way.
+            u, v = np.linalg.qr(np.column_stack([mean, _basis_vector(0), _basis_vector(1)]))[0].T[1:]
+            rows = np.vstack([mean + 0.01 * v, 0.3 * mean + u, mean + 5 * (u + v)])
+            self.assertEqual(nearest_member(profile, mean + 0.2 * u, rows).tolist(), [1])
+
+            # The description (here: the paper itself, cosine 1) is not blended in: the signal
+            # is the best z over 4 (AFFINITY_Z_SCALE), which makes the "> 0.5" explanation z > 2.
+            far = randoms[int(scores.max(axis=1).argmin())]
+            signal, source = interest_signal(far, profile, None, 0.7, description_vector=far)
+            self.assertEqual(source, "collection")
+            self.assertAlmostEqual(signal, float(scores.max(axis=1).min()) / 4.0, places=4)
+            self.assertLess(signal, 0.5)
+
+            client = self.app.test_client()
+            self.assertIs(feature_liveness()["interest_signal_ready"], True)
+            self.assertIn("Your collections rank papers", client.get("/settings").get_data(as_text=True))
+
+            # A web process starts with an empty cache (the daily scrape is another
+            # process): the pages that explain scores build the profile themselves.
+            for url in ("/", f"/api/papers/{background[0]}/explain"):
+                reset_interest_profile_cache()
+                self.assertEqual(resolve_interest_source(None), "centroid")
+                self.assertEqual(client.get(url).status_code, 200)
+                self.assertEqual(resolve_interest_source(None), "collection", url)
+
+            # Rescoring the stored papers needs no encoder: the description is not embedded.
+            with patch("app.services.learned_ranker.active_description_vector") as embed_description:
+                recompute_interest_similarities(self.app)
+            embed_description.assert_not_called()
+            db.session.expire_all()
+            self.assertEqual(db.session.get(Paper, members["Alpha"][0]).interest_similarity, 1.0)
+
+            fingerprints = [profile.fingerprint]
+
+            def rebuilt():
+                """The profile after the pending edit, which must have changed the fingerprint."""
+                db.session.commit()
+                fresh = build_interest_profile(self.app)
+                self.assertNotIn(fresh.fingerprint, fingerprints)
+                fingerprints.append(fresh.fingerprint)
+                return fresh
+
+            # A new membership changes the fingerprint, so the cached profile is rebuilt.
+            db.session.add(PaperCollection(paper_id=background[0], collection_id=collections["Beta"]))
+            rebuilt()
+            # So does every edit that keeps the in-review count and id sums: a rename (the
+            # gate stores the name on the papers it admits), two members swapped between the
+            # collections, and an excluded row for a background paper.
+            db.session.get(Collection, collections["Alpha"]).name = "Gamma"
+            self.assertIn("Gamma", rebuilt().labels)
+            for name, other in (("Alpha", "Beta"), ("Beta", "Alpha")):
+                PaperCollection.query.filter_by(paper_id=members[name][0]).one().collection_id = collections[other]
+            rebuilt()
+            db.session.add(
+                PaperCollection(paper_id=background[1], collection_id=collections["Alpha"], decision="exclude")
+            )
+            rebuilt()
+
+            # A non-finite row in the index is left out instead of turning every z into NaN.
+            add(np.full(768, np.nan, dtype=np.float32))
+            self.assertTrue(np.isfinite(rebuilt().bg_std).all())
+
+            # Enough ratings for a feedback profile change nothing while collections are the
+            # model, and the Settings card keeps saying who ranks.
+            saved = background[-MIN_POSITIVE_FEEDBACK:]
+            db.session.add_all(PaperFeedback(paper_id=pid, action="save") for pid in saved)
+            self.assertIsNotNone(rebuilt().centroids)
+            status = feature_liveness()
+            self.assertEqual((status["positive_feedback_needed"], status["collection_profile"]), (0, True))
+            self.assertIn("Your collections rank papers", client.get("/settings").get_data(as_text=True))
+
+            # Too small a background for z statistics: no collection profile. The saved
+            # papers leave the index with it, so there is no feedback profile either.
+            for pid in background[51:]:
+                del service.vectors_by_id[pid]
+            self.assertIsNone(build_interest_profile(self.app))
+
+    def test_member_embedded_by_another_process_reaches_the_profile(self):
+        """A long-running process picks up what the scrape (another process) embedded after it started."""
+        index_dir = Path(self._tmpdir.name) / "faiss_index"
+        self.app.config["FAISS_INDEX_DIR"] = str(index_dir)
+        reset_embedding_service()
+        self.addCleanup(reset_embedding_service)
+        rng = np.random.default_rng(0)
+        topic = rng.normal(size=768)
+
+        def add(vector: np.ndarray) -> tuple[int, np.ndarray]:
+            paper = _paper(f"2802.{10000 + Paper.query.count()}")
+            db.session.add(paper)
+            db.session.flush()
+            return paper.id, (vector / np.linalg.norm(vector)).astype(np.float32)
+
+        collection = Collection(name="Alpha")
+        db.session.add(collection)
+        db.session.flush()
+        members = [add(topic + 0.3 * rng.normal(size=768)) for _ in range(MIN_POSITIVE_FEEDBACK)]
+        db.session.add_all(PaperCollection(paper_id=pid, collection_id=collection.id) for pid, _ in members)
+        background = [add(rng.normal(size=768)) for _ in range(200)]
+        db.session.commit()
+        # When this process starts, the scrape has embedded every paper but one member.
+        (late_id, late_vector), *embedded = [*members, *background]
+        seeded = EmbeddingService(index_dir)
+        seeded.add_papers([pid for pid, _ in embedded], [""] * len(embedded), vectors=[vec for _, vec in embedded])
+        seeded.save()
+        self.assertIsNone(build_interest_profile(self.app))  # one embedded member short of a centroid
+
+        add_papers_to_index(str(index_dir), [late_id], [""], vectors=[late_vector])
+
+        self.assertEqual(recompute_interest_similarities(self.app), len(members) + len(background))
+        self.assertEqual(build_interest_profile(self.app).collection_ids, (collection.id,))
+        db.session.expire_all()
+        self.assertEqual(db.session.get(Paper, late_id).interest_similarity, 1.0)
 
 
 if __name__ == "__main__":

@@ -125,7 +125,10 @@ whitelists:
 **🧠 It learns your taste, not just your keywords.**
 Start with simple author / lab / topic whitelists. After you save ~5 papers, it builds a
 learned interest profile (embedding centroids in SPECTER2 space) and starts ranking new work
-against what you've *actually* liked — not just literal keyword hits.
+against what you've *actually* liked — not just literal keyword hits. Keep your reading in
+collections and they become the profile instead: each new paper is scored by how close it
+sits to one of them, and the closest are let in without any whitelist hit, named after
+their collection.
 
 **🔬 Every ranking shows its work.**
 Expand any paper for **"Score 80.0 · Why this ranked here"** — a breakdown over authors,
@@ -186,10 +189,10 @@ opening the PDF:
 | Area | What you get |
 |---|---|
 | **Finding papers** | Daily/on-demand arXiv scrape with interest matching · hybrid search (keyword · semantic · combined) · historical backfill of any date range · monitor extra arXiv categories beyond cs.CV |
-| **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · learned interest profile · per-paper "why it ranked" explanations + optional inline score-factor bars · optional AI relevance scoring |
+| **Smart ranking** | Personalized multi-factor score (authors, labs, topics, recency, citations, your feedback) · interest profile learned from your collections or your saves · per-paper "why it ranked" explanations + optional inline score-factor bars · optional AI relevance scoring |
 | **Chat & cold-start** | Chat with your saved papers or a collection (grounded, cited RAG answers) · seed your profile from a pasted list of arXiv IDs · active-learning prompts surface borderline papers to sharpen ranking |
 | **Summaries** | Extractive TL;DR with no API needed · optional AI TL;DR + structured insights when an LLM is enabled |
-| **Organization** | Save / skip / prioritize / share to train rankings · collections (create, rename, bulk add) seeded from pasted arXiv ids/URLs/.bib or an arXiv search, grown with prior works (outside papers 2+ members cite), screened include / maybe / exclude for a literature review · custom tags · notes · reading status · saved searches |
+| **Organization** | Save / skip / prioritize / share to train rankings (until collections become the profile) · collections (create, rename, bulk add) seeded from pasted arXiv ids/URLs/.bib or an arXiv search, grown with prior works (outside papers 2+ members cite), screened include / maybe / exclude for a literature review · custom tags · notes · reading status · saved searches |
 | **Citation graph** | Your library as a force-directed network of real citation edges (Semantic Scholar + OpenAlex reference lists) · node size = PageRank influence within your corpus · color by year · collection & year filters |
 | **Export & sync** | BibTeX (single, bulk, or per collection; `@misc` preprint, or `@inproceedings`/`@article` once accepted) · per-collection CSV screening spreadsheet · shareable collection bundles (plain JSON — import on another instance without duplicating papers) · Mendeley · Zotero · HTML report · daily Gmail digest · one-click full backup & restore (DB + search index + config) |
 | **Enrichment** | Citation counts (Semantic Scholar, OpenAlex) · topic classifications & open-access status · GitHub repo stars/license · PDF thumbnails · related-paper recommendations · corpus analytics (clusters & emerging trends) |
@@ -272,14 +275,25 @@ Restart Claude Desktop and the tools appear:
 | Tool | What it does |
 |---|---|
 | `search_papers` | Hybrid / semantic / keyword search over your corpus |
-| `get_paper` | Full metadata + citation/readiness/enrichment summary (by id or arXiv id) |
+| `get_paper` | Full metadata + citation/readiness/enrichment summary (by id or arXiv id), your tags, why the feed kept it, and the collections it is in |
 | `get_summary` | Stored TL;DR summary and structured LLM insights |
 | `top_ranked_today` | Today's top-ranked fresh papers (optional interest-profile lens) |
 | `list_collections` | Your collections and their paper counts |
 | `ask_paper` | Grounded Q&A over one paper's own text, with section citations |
-| `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes and screening decisions (paged; excluded papers only with `include_excluded`) |
+| `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes and screening decisions (paged; excluded papers only with `include_excluded`). Optional filters: `tag` (exact), `decision` (`include` / `maybe` / `exclude` / `unscreened`), `added_since_days` |
 | `get_paper_text` | A paper's section table of contents + abstract, then any section's verbatim text (paged) |
+| `whats_new` | Papers that arrived in the last N days, are in no collection yet and score close to one: candidates to screen, each with its z, the collection it is closest to (wrong about one time in five) and the nearest paper already in it. Filter with `collection` |
 | `add_to_collection` | The one write tool — file a paper into a collection (idempotent) |
+
+Every paper in a list carries your `user_tags` and `has_full_text`, so the
+assistant knows which papers it can read in full without asking for each.
+
+Start it with `cv-arxiv-mcp --read-only` (`"args": ["--read-only"]` in the config
+above) to register no write tool at all, for example for an unattended run. The
+app still starts as usual: its idempotent schema check runs on the database, and
+scrape runs that a crash left marked as running are closed. The built-in scrape
+scheduler does not run in a read-only server, even when the config enables it.
+A running server picks up the papers a later scrape embeds; no restart is needed.
 
 The `mcp` package is an **optional extra**: the core install and web server work
 without it, and `cv-arxiv-mcp` prints an install hint and exits non-zero if it is

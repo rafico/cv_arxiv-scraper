@@ -53,6 +53,9 @@ _FIGURES_TIMEOUT_SECONDS = 180.0
 # stdlib parse — no subprocess). PDF-fallback parsing keeps its own native-stage cap.
 _SECTION_HTML_TIMEOUT_SECONDS = 180.0
 
+# Collection-gate admissions per collection and run (see _select_interest_candidates).
+_INTEREST_PER_COLLECTION = 3
+
 # Serializes the FAISS index read-append-rename performed by run_isolated inside
 # _generate_embeddings / _extract_sections. The historical search
 # (POST /api/search/historical) runs the pipeline synchronously in the request
@@ -167,6 +170,38 @@ def _enrich_candidate_with_llm(
     entry["topic_tags"] = extract_topic_tags(title, abstract)
 
 
+def _select_interest_candidates(buffer: list, top_k: int) -> list:
+    """The run's interest admissions, best first: at most ``top_k`` of ``buffer``.
+
+    Collection-gate candidates carry a collection id and are taken round-robin:
+    every collection's best candidate, then every second best, then the third
+    (``_INTEREST_PER_COLLECTION``); within a round the higher z goes first. A plain
+    sort by z would hand the narrow collections nearly every slot, because their
+    members sit much closer to the centroid than a broad collection's do.
+    Candidates without a collection id (the float-scorer path) all fall in the
+    first round, which is the plain top-K by score.
+    """
+    # ponytail: the gate takes the maximum z over all collections, so with many
+    # collections a large share of candidates clears the floor and these caps, not
+    # the floor, bound what is admitted. Upgrade: per-collection thresholds.
+    # ponytail: with more collections than top_k the first round fills the run: one
+    # paper each for the top_k collections with the strongest best candidate, none for
+    # the rest, and the cap of 3 is never reached. Way out: candidate_top_k at or above
+    # the number of collections (three times that for the full cap; it stops at 50).
+    taken: dict[int, int] = {}
+    rounds = []
+    for candidate in sorted(buffer, key=lambda c: c.raw_features.get("interest_candidate_score", 0.0), reverse=True):
+        collection_id = candidate.raw_features.get("interest_collection_id")
+        round_no = 0
+        if collection_id is not None:
+            round_no = taken.get(collection_id, 0)
+            taken[collection_id] = round_no + 1
+        if round_no < _INTEREST_PER_COLLECTION:
+            rounds.append((round_no, candidate))
+    rounds.sort(key=lambda item: item[0])  # stable: score order survives within a round
+    return [candidate for _round, candidate in rounds[: max(0, top_k)]]
+
+
 def _process_entries_with_pipeline(
     entries: list[dict],
     whitelists: dict,
@@ -182,10 +217,11 @@ def _process_entries_with_pipeline(
     Yields (processed, matched, result_dict) tuples for streaming progress;
     result_dict is None for entries that did not match. Whitelist matches stream
     as they complete; interest-gate (dense-retrieval) candidates are buffered for
-    the whole run and only the ``candidate_top_k`` best by interest score are
-    admitted — a true per-run top-K rather than the first K above threshold in
-    stream order — so their results (and LLM enrichment cost) arrive after the
-    entry loop finishes.
+    the whole run and at most ``candidate_top_k`` are admitted, picked over the
+    whole run rather than the first K above threshold in stream order (see
+    ``_select_interest_candidates``: best by interest score, round-robin over the
+    collections for collection candidates) — so their results (and LLM enrichment
+    cost) arrive after the entry loop finishes.
     """
     max_workers = max(1, int(scraper_config.get("max_workers", DEFAULT_MAX_WORKERS)))
     preferences = get_preferences(product_config)
@@ -241,8 +277,7 @@ def _process_entries_with_pipeline(
         from app.services.learned_ranker import get_runtime_learned_prefs
 
         top_k = int((get_runtime_learned_prefs() or {}).get("candidate_top_k", 10))
-        interest_buffer.sort(key=lambda cand: cand.raw_features.get("interest_candidate_score", 0.0), reverse=True)
-        for candidate in interest_buffer[: max(0, top_k)]:
+        for candidate in _select_interest_candidates(interest_buffer, top_k):
             _enrich_candidate_with_llm(candidate, llm_client, interests_text, structured_insights)
             ranked_list = ranker.rank([candidate])
             if ranked_list:

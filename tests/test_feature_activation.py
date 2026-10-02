@@ -14,6 +14,8 @@ import unittest
 from datetime import date, datetime, timezone
 from unittest.mock import patch
 
+import numpy as np
+
 from app.models import DigestRun, Paper, PaperFeedback, PaperSection, db
 from app.routes.dashboard import _build_onboarding_steps
 from app.services.interest_model import MIN_POSITIVE_FEEDBACK
@@ -83,6 +85,29 @@ class OnboardingActivationThresholdTests(FlaskDBTestCase):
         self.assertIn("Beyond Whitelists", text)
         self.assertNotIn("unless the active profile has a description", text)
         self.assertNotIn("or a profile description", text)
+
+    def test_copy_credits_the_collections_once_they_are_the_interest_model(self):
+        # A collection profile ranks and admits on its own, and neither saves nor the
+        # description are read: the copy must not promise that either will switch it on.
+        from app.services.interest_model import InterestProfile
+        from app.services.profiles import get_active_profile, update_description
+
+        update_description(get_active_profile().id, "Robot learning from video")
+        profile = InterestProfile(pos_centroid=None, neg_centroid=None, fingerprint=(), centroids=np.zeros((1, 2)))
+        gate_off = {"whitelists": {}, "preferences": {"learned": {"enabled": False}}}
+        with patch("app.routes.dashboard.get_cached_interest_profile", return_value=profile):
+            description = _save_step(self._steps(1))["description"]
+            description_at_threshold = _save_step(self._steps(MIN_POSITIVE_FEEDBACK))["description"]
+            description_gate_off = _save_step(
+                _build_onboarding_steps(gate_off, positive_count=1, has_successful_scrape=True)
+            )["description"]
+
+        self.assertIn("Your collections already rank papers and bring in recommendations", description)
+        self.assertNotIn("more to", description)
+        self.assertNotIn("profile description", description)
+        self.assertNotIn("Keep saving", description_at_threshold)
+        self.assertIn("Your collections already rank papers", description_gate_off)
+        self.assertNotIn("bring in recommendations", description_gate_off)
 
     def test_digest_step_appears_only_without_a_recipient(self):
         without = _build_onboarding_steps({"whitelists": {}}, positive_count=0, has_successful_scrape=True)

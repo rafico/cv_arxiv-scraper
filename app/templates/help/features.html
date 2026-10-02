@@ -5,7 +5,7 @@
 <section id="ranking" class="scroll-mt-6">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">How Ranking Works</h2>
     <div class="help-admonition bg-surface-2 border-l-4 border-edge-strong p-4 rounded-r-lg mb-4">
-        <p class="text-sm text-fg-muted">The score is a recommendation signal, not a judgment of paper quality. If something looks wrong, use <strong>Save</strong> or <strong>Not Interested</strong> and the ranking will adapt.</p>
+        <p class="text-sm text-fg-muted">The score is a recommendation signal, not a judgment of paper quality. If something looks wrong, use <strong>Save</strong> or <strong>Not Interested</strong> and the ranking will adapt. While your collections rank papers (see below), that moves or hides only the paper itself.</p>
     </div>
 
     <p class="text-sm text-fg-muted mb-3">Papers rise to the top when they align with more of the signals you care about:</p>
@@ -13,11 +13,13 @@
         <li class="pl-1">They match authors, labs, or topics from your Research Setup.</li>
         <li class="pl-1">They are recent, unless your freshness settings prefer older work too.</li>
         <li class="pl-1">They are highly cited.</li>
-        <li class="pl-1">You have previously saved similar papers.</li>
+        <li class="pl-1">They sit close to one of your collections or, when you have none, to papers you saved.</li>
         <li class="pl-1">AI scoring is enabled and rates the paper as relevant.</li>
     </ul>
 
     <p class="text-sm text-fg-muted mt-4">Signals stack. A paper by a tracked author at a tracked lab on a tracked topic will usually rank much higher than a paper matching only one weak signal.</p>
+
+    <p class="text-sm text-fg-muted mt-4"><strong>Collections are the interest model.</strong> Once a collection holds at least five papers and your library has at least 200 papers outside every collection, each paper is scored by how much closer it sits to its nearest collection than unrelated papers do. The closest new papers without a whitelist match are admitted too (at most three per collection and scrape), tagged <em>Interest</em> and named after that collection. While this is active, saves, skips and the profile description do not feed the &ldquo;Learned interests&rdquo; signal; papers you mark <em>Exclude</em> in a collection do not count as its members.</p>
 </section>
 
 <!-- Ranking Explanations -->
@@ -27,6 +29,7 @@
     <ul class="mt-2 space-y-1 text-sm text-fg-muted pl-5 list-disc marker:text-fg-subtle">
         <li class="pl-1">&ldquo;Matched author: Kaiming He&rdquo;</li>
         <li class="pl-1">&ldquo;Highly cited (342 citations)&rdquo;</li>
+        <li class="pl-1">&ldquo;Close to your collection: Radiance fields&rdquo;</li>
         <li class="pl-1">&ldquo;Similar to saved: NeRF in the Wild&rdquo;</li>
     </ul>
     <div class="mt-4 rounded-xl border border-edge bg-surface p-5 shadow-sm">
@@ -38,7 +41,7 @@
 <!-- Cold-Start & Active Learning -->
 <section id="cold-start" class="scroll-mt-6 pt-12">
     <h2 class="text-2xl font-bold text-fg mb-4 pb-2 border-b border-edge">Cold-Start &amp; Active Learning</h2>
-    <p class="text-sm text-fg-muted mb-4">The learned interest profile needs about five saved papers before it kicks in. These two tools get you there faster on a fresh install.</p>
+    <p class="text-sm text-fg-muted mb-4">Without collections, the learned interest profile needs about five saved papers before it kicks in. These two tools get you there faster on a fresh install.</p>
     <div class="grid gap-4 md:grid-cols-2">
         <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
             <h3 class="text-sm font-bold text-fg mb-2">Bootstrap from arXiv IDs</h3>
@@ -46,7 +49,7 @@
         </div>
         <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
             <h3 class="text-sm font-bold text-fg mb-2">Help ranking learn</h3>
-            <p class="text-sm text-fg-muted">Once you have a few saves, the dashboard sidebar shows a <strong>Help ranking learn</strong> widget with a couple of borderline papers &mdash; the ones the model is most unsure about. Saving or skipping them is the most informative feedback you can give.</p>
+            <p class="text-sm text-fg-muted">Once you have a few saves, the dashboard sidebar shows a <strong>Help ranking learn</strong> widget with a couple of borderline papers &mdash; the ones the model is most unsure about. Without collections, saving or skipping them is the most informative feedback you can give.</p>
         </div>
     </div>
 </section>

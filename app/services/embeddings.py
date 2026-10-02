@@ -202,6 +202,19 @@ def _save_matrix_atomic(matrix: np.ndarray, npy_path: Path) -> None:
     os.replace(tmp_path, str(npy_path))
 
 
+def _file_stamp(path: Path) -> tuple[int, int] | None:
+    """(mtime, size) of a file from one stat call; None when the file is missing.
+
+    The size is in there because two saves inside one clock tick share an mtime,
+    while every added paper makes both index files longer.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
 class EmbeddingService:
     """Manages SPECTER2 embeddings and the on-disk vector index."""
 
@@ -223,10 +236,18 @@ class EmbeddingService:
         # Separate from _lock so a (slow, one-time) model load doesn't serialize
         # with index search/add.
         self._model_lock = threading.Lock()
+        # Rows of the index from here on came from add_papers() and are not on disk yet:
+        # a reload carries them over, save() writes them.
+        self._saved_rows = 0
+        # Stamps of the last pair on disk that a reload read and could not use.
+        self._rejected_pair: tuple | None = None
 
         self._load_index()
 
     def _load_index(self) -> None:
+        # What _rebase_on_disk() compares against. Taken before the files are read: a save
+        # landing in between then shows up as a change, never as already loaded.
+        self._loaded_stamp = _file_stamp(self._id_map_path)
         # Persisting is safe unless we detect a corrupt/partial on-disk pair below, in
         # which case save() must NOT overwrite the surviving file with an empty/drifted
         # index — that would turn a recoverable partial state into total data loss.
@@ -287,7 +308,67 @@ class EmbeddingService:
             self._id_map = self._id_map[:keep]
 
         self._pk_to_row = {pk: row for row, pk in enumerate(self._id_map)}
+        self._saved_rows = len(self._id_map)
         LOGGER.info("Loaded vector index with %d vectors", self._index.ntotal)
+
+    def reload_if_changed(self) -> None:
+        """Pick up what another process has saved to the paper index since it was loaded.
+
+        The daily scrape is its own process, so a long-running web or MCP server would
+        otherwise keep the index it started with and never see the papers embedded
+        since. When nothing changed this costs one stat call.
+        """
+        with self._lock:
+            self._rebase_on_disk()
+
+    def _rebase_on_disk(self) -> None:
+        """Rebase the index on the pair on disk when that pair has changed. Caller holds _lock.
+
+        id_map.json is the file save() renames last, so a new stamp on it means a save
+        has finished. Rows added here that were never saved are not thrown away: they
+        stay, on top of what the other writer saved.
+        """
+        stamp = _file_stamp(self._id_map_path)
+        if stamp is None or stamp == self._loaded_stamp:
+            return
+        # A pair that was read and could not be used is read again only once one of its
+        # files has changed. Both stamps are from before the read, as in _load_index().
+        pair = (stamp, _file_stamp(self._index_path))
+        if pair == self._rejected_pair:
+            return
+        try:
+            matrix = _read_matrix(self._index_path, self._legacy_index_path)
+            with open(self._id_map_path) as f:
+                id_map = json.load(f)
+        except Exception:
+            LOGGER.warning("Vector index on disk could not be read; keeping the loaded one", exc_info=True)
+            self._rejected_pair = pair
+            return
+        # A writer between its two renames, or one that finished while this read was
+        # under way, leaves the two files disagreeing: keep the loaded index until a
+        # file changes.
+        # ponytail: length is the only test. A same-length pair from two saves would load
+        # with its rows mis-mapped (only an index rebuild can write one, and it renames
+        # the two files back to back). Upgrade: a generation number stored in both files.
+        if matrix is None or not isinstance(id_map, list) or len(matrix) != len(id_map):
+            LOGGER.warning(
+                "Vector index on disk is not a matching pair (a save under way, or one cut short); "
+                "keeping the loaded one"
+            )
+            self._rejected_pair = pair
+            return
+        on_disk = set(id_map)
+        unsaved = [row for row in range(self._saved_rows, len(self._id_map)) if self._id_map[row] not in on_disk]
+        self._saved_rows = len(id_map)
+        if unsaved:
+            matrix = np.vstack([matrix, self._index.matrix[unsaved]])
+            id_map += [self._id_map[row] for row in unsaved]
+        self._index = _FlatIndex(matrix)
+        self._id_map = id_map
+        self._pk_to_row = {pk: row for row, pk in enumerate(id_map)}
+        self._loaded_stamp = stamp
+        self._persistable = True  # the saved part is what disk holds again
+        LOGGER.info("Reloaded vector index with %d vectors", self._saved_rows)
 
     @staticmethod
     def _prefix_index(index: _FlatIndex, keep: int) -> _FlatIndex:
@@ -361,12 +442,16 @@ class EmbeddingService:
         embeddings = np.asarray(new_vectors, dtype=np.float32)
 
         with self._lock:
-            self._index.add(embeddings)
-            for pid in new_ids:
-                self._pk_to_row[pid] = len(self._id_map)
-                self._id_map.append(pid)
+            # A reload (or another thread's add) may have indexed some of these while
+            # they were being encoded: a second row for a paper would orphan its first.
+            rows = [idx for idx, pid in enumerate(new_ids) if pid not in self._pk_to_row]
+            if rows:
+                self._index.add(embeddings[rows])
+                for idx in rows:
+                    self._pk_to_row[new_ids[idx]] = len(self._id_map)
+                    self._id_map.append(new_ids[idx])
 
-        return len(new_ids)
+        return len(rows)
 
     def index_size(self) -> int:
         """Number of vectors in the index. Cheap — does not load the model."""
@@ -637,6 +722,10 @@ class EmbeddingService:
         self.save_sections()
 
         with _index_file_lock(self._index_dir).acquire(), self._lock:
+            # Another process may have saved since this index was loaded (it often has,
+            # when this save had to wait for the file lock): put our new rows on top of
+            # its rows instead of writing a stale index over them.
+            self._rebase_on_disk()
             if not self._persistable:
                 # Loaded from a partial/corrupt on-disk state (see _load_index). Writing
                 # our empty/degraded in-memory index would clobber the surviving file.
@@ -649,6 +738,9 @@ class EmbeddingService:
             with open(tmp_map, "w") as f:
                 json.dump(self._id_map, f)
             os.replace(tmp_map, str(self._id_map_path))
+            # Disk now holds what memory holds: our own save is nothing to reload.
+            self._loaded_stamp = _file_stamp(self._id_map_path)
+            self._saved_rows = len(self._id_map)
 
     def has_paper(self, paper_id: int) -> bool:
         # Guard the read: add_papers() mutates _pk_to_row under _lock, so an unlocked
@@ -691,11 +783,19 @@ def add_sections_to_index(index_dir: str, entries: list[tuple[int, str, str]]) -
 
 
 def get_embedding_service(app=None) -> EmbeddingService:
-    """Return the singleton EmbeddingService, creating it if needed."""
+    """Return the singleton EmbeddingService, creating it if needed.
+
+    Every reader (search, related papers, chat, the interest profile, the MCP tools)
+    fetches the service here once per request, so this is where an index another
+    process saved is picked up: one stat call per fetch, and none on the instances
+    that writers create directly for a load-add-save under the file lock.
+    """
     global _service_instance
 
-    if _service_instance is not None:
-        return _service_instance
+    service = _service_instance
+    if service is not None:
+        service.reload_if_changed()
+        return service
 
     with _service_lock:
         if _service_instance is not None:
@@ -715,10 +815,12 @@ def get_embedding_service(app=None) -> EmbeddingService:
                 str(Path(current_app.instance_path) / "faiss_index"),
             )
         else:
-            index_dir = os.environ.get(
-                "FAISS_INDEX_DIR",
-                str(Path.cwd() / "instance" / "faiss_index"),
-            )
+            # No app in reach (a worker thread, a unit test). Honour the instance-path
+            # override create_app() honours before the working directory: the test
+            # suite sandboxes itself with it, and from a checkout ./instance is real data.
+            instance_path = os.environ.get("CV_ARXIV_INSTANCE_PATH", "").strip()
+            instance_dir = Path(instance_path).expanduser().resolve() if instance_path else Path.cwd() / "instance"
+            index_dir = os.environ.get("FAISS_INDEX_DIR", "").strip() or str(instance_dir / "faiss_index")
 
         _service_instance = EmbeddingService(index_dir)
         return _service_instance

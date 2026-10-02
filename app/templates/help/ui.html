@@ -36,11 +36,11 @@
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <div class="rounded-xl bg-surface p-4 border border-edge">
             <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs">Save</span></h4>
-            <p class="mt-2 text-sm text-fg-muted">Keeps the paper in your shortlist and tells the ranking system to show you more like it.</p>
+            <p class="mt-2 text-sm text-fg-muted">Keeps the paper in your shortlist and, unless <a href="{{ url_for('help.view_page', page='features') }}#ranking" class="font-medium text-blue-600 hover:text-blue-800">your collections rank papers</a>, tells the ranking system to show you more like it.</p>
         </div>
         <div class="rounded-xl bg-surface p-4 border border-edge">
             <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs text-rose-600">Not Interested</span></h4>
-            <p class="mt-2 text-sm text-fg-muted">Hides the paper and teaches the app to show fewer papers with similar signals.</p>
+            <p class="mt-2 text-sm text-fg-muted">Hides the paper and, unless your collections rank papers, teaches the app to show fewer papers with similar signals.</p>
         </div>
         <div class="rounded-xl bg-surface p-4 border border-edge">
             <h4 class="text-sm font-bold text-fg"><span class="px-2 py-1 bg-surface border border-edge rounded shadow-sm text-xs text-amber-600">Priority</span></h4>

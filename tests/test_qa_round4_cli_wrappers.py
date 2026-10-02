@@ -22,6 +22,7 @@ WRAPPERS = [
     ("scrape_cli.py", "app.cli.scrape"),
     ("sync_cli.py", "app.cli.sync"),
     ("backfill_cli.py", "app.cli.backfill"),
+    ("run.py", "app.cli.webserver"),
 ]
 
 
@@ -55,6 +56,10 @@ class CliWrapperMainGuardTests(unittest.TestCase):
 
     def test_g1_backfill_cli_invokes_main(self) -> None:
         self._assert_wrapper_runs_main("backfill_cli.py", "app.cli.backfill")
+
+    def test_run_py_invokes_main(self) -> None:
+        # The same kind of shim: ./run.sh, `make run` and the Docker CMD run it as a script.
+        self._assert_wrapper_runs_main("run.py", "app.cli.webserver")
 
 
 if __name__ == "__main__":

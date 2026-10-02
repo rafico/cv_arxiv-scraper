@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 
@@ -15,6 +15,9 @@ from app.services.matching import (
     check_whitelist_match,
     dedupe_preserve_order,
 )
+
+if TYPE_CHECKING:
+    from app.services.interest_model import InterestProfile
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,9 +40,13 @@ class WhitelistCandidateGenerator:
     interest gate: when the learned ranker (or the centroid interest profile as
     cold-start fallback) scores their embedding above a configurable threshold,
     they are admitted with match type "Interest" and their score in
-    ``raw_features``. The per-scrape ``candidate_top_k`` cap is enforced by the
-    caller (scrape_engine keeps the top-K *by score* across the whole run, not
-    the first K seen in stream order), so a bad model can never flood the feed.
+    ``raw_features``. With a collection profile the gate asks it directly instead:
+    an entry is admitted when its best collection z reaches ``AFFINITY_Z_MIN``, and
+    carries that collection's name and id. The per-scrape ``candidate_top_k`` cap
+    is enforced by the caller (scrape_engine picks over the whole run, not the
+    first K seen in stream order: the top-K *by score*, or for collection
+    candidates round-robin over the collections, at most 3 each — see
+    ``_select_interest_candidates``), so a bad model can never flood the feed.
     """
 
     def __init__(
@@ -64,6 +71,8 @@ class WhitelistCandidateGenerator:
         self._interest_scorer = interest_scorer
         self._interest_settings = interest_settings
         self._interest_resolved = interest_scorer is not None
+        # Set instead of the scorer when collections are the interest model.
+        self._collection_profile: InterestProfile | None = None
 
     def generate(self, papers: list[dict[str, Any]]) -> list[ScoredCandidate]:
         candidates = []
@@ -135,6 +144,9 @@ class WhitelistCandidateGenerator:
 
                 model = learned_ranker.peek_learned_model()
                 profile = get_cached_interest_profile()
+                if profile is not None and profile.centroids is not None:
+                    self._collection_profile = profile
+                    return
                 description_vector = None
                 try:
                     ref = learned_ranker.get_runtime_active_profile()
@@ -160,7 +172,8 @@ class WhitelistCandidateGenerator:
     def _interest_candidate(self, entry_data: dict) -> ScoredCandidate | None:
         """Admit a non-whitelist entry when the interest model scores it highly."""
         self._resolve_interest_gate()
-        if self._interest_scorer is None:
+        profile = self._collection_profile
+        if self._interest_scorer is None and profile is None:
             return None
         settings = self._interest_settings or {}
         threshold = float(settings.get("candidate_threshold", 0.6))
@@ -168,6 +181,8 @@ class WhitelistCandidateGenerator:
         if self._is_muted(entry_data):
             return None
 
+        matched_terms: list[str] = []
+        raw_features: dict[str, Any] = {}
         try:
             vector = entry_data.get("_embedding")
             if vector is None:
@@ -177,20 +192,36 @@ class WhitelistCandidateGenerator:
                 vector = get_embedding_service().encode([text])[0]
                 # Stash for reuse by feature extraction / _generate_embeddings.
                 entry_data["_embedding"] = vector
-            score = self._interest_scorer(vector)
+            if profile is not None:
+                from app.services.interest_model import AFFINITY_Z_MIN, collection_affinity
+
+                # Raw z against its own floor: candidate_threshold is a probability
+                # and belongs to the float scorer below.
+                score, collection_id = collection_affinity(profile, vector)
+                threshold = AFFINITY_Z_MIN
+                # ponytail: the collection's name is frozen into matched_terms at
+                # admission (where it also counts as one matched term in the score, and
+                # is the matched term the in-app LLM is sent when structured insights
+                # are on), so a rename leaves the old name on stored papers. Upgrade:
+                # store the collection id and resolve the name when rendering.
+                matched_terms = [profile.labels[profile.collection_ids.index(collection_id)]]
+                raw_features["interest_collection_id"] = collection_id
+            else:
+                score = self._interest_scorer(vector)
         except Exception:
             LOGGER.warning("Interest candidate scoring failed (non-fatal)", exc_info=True)
             return None
 
-        if score is None or score < threshold:
+        if score is None or not score >= threshold:  # "not >=" also turns a NaN score away
             return None
 
+        raw_features["interest_candidate_score"] = round(float(score), 4)
         return ScoredCandidate(
             entry_data=entry_data,
             match_types=[MatchType.INTEREST.value],
-            matched_terms=[],
+            matched_terms=matched_terms,
             pdf_content=entry_data.get("pdf_content"),
-            raw_features={"interest_candidate_score": round(float(score), 4)},
+            raw_features=raw_features,
         )
 
     def process_single(self, entry_data: dict) -> ScoredCandidate | None:

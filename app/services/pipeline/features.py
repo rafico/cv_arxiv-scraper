@@ -42,7 +42,8 @@ class FeatureVector:
     venue_bonus: float = 0.0
     interest_similarity: float | None = None
     interest_bonus: float = 0.0
-    # "learned" (LR model), "centroid" (interest profile), or None (no signal).
+    # "collection" (collection profile), "learned" (LR model), "centroid" (feedback
+    # profile), "description", or None (no signal).
     interest_source: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -99,9 +100,10 @@ class DefaultFeatureExtractor:
 
         Uses the learned-ranker probability blended with the centroid profile
         when the trained model is available, else the centroid alone (existing
-        behavior). The vector is stashed in the entry (transient, like
-        pdf_content) so _generate_embeddings can reuse it instead of encoding
-        twice.
+        behavior). A collection profile scores alone (see
+        learned_ranker.interest_signal). The vector is stashed in the entry
+        (transient, like pdf_content) so _generate_embeddings can reuse it
+        instead of encoding twice.
         """
         model = self._resolve_learned_model()
         if self.interest_profile is None and model is None and self.description_vector is None:

@@ -4,6 +4,104 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/), and the project aims to
 follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Wave 6: collections become the interest model (see `ROADMAP.md` and
+`docs/wave6-research.md`).
+
+### Added
+- **Collections are the interest model.** Once a collection has five or more
+  embedded papers in review and at least 200 papers sit outside every
+  collection, ranking and whitelist-free admission run on the collections: one
+  mean-centred centroid per collection, and a paper's affinity is its best
+  z-score against them, measured against the papers in no collection. A new
+  paper without a whitelist match is admitted at z >= 2, round-robin over the
+  collections and at most three per collection within `candidate_top_k` (set
+  it to at least the number of collections: below that, a scrape admits one
+  paper each for `candidate_top_k` of them and none for the rest). It is
+  tagged *Interest*, carries its collection's name, and explains itself as
+  "Close to your collection: …". The name is stored as the paper's matched
+  term, so with `llm.structured_insights` on it is also sent to the configured
+  LLM with that paper. Papers marked Exclude do not count as members.
+  `cv-arxiv-backfill interest` rescores the stored papers.
+- **`scripts/eval_collection_affinity.py`** measures that scorer on an
+  instance's own data, read-only: `holdout` (per-collection and macro AUC, plus
+  recall and background pass rate at z = 2.0 / 2.5 / 3.0), `replay` (was a paper
+  that later joined a collection in its scrape day's top 10?), `checkpoint`
+  (share of new collection papers the feed had already stored) and
+  `--self-test`.
+- **MCP tool `whats_new`**: the papers that arrived in the last `since_days`
+  (default 7), are in review in no collection and clear the collection scorer's
+  floor (z >= 2), best first, each with its z, the collection it is closest to
+  and the nearest paper already in that collection. They are candidates to
+  screen: the attribution is wrong about one time in five. A paper excluded
+  from a collection is not offered to that collection again. The header
+  reports the last scrape, how many papers arrived, how many have no stored
+  embedding yet and how many pass per collection; `collection` narrows the
+  list to one. It reads stored vectors only and never loads the embedding model.
+- **MCP read surface**: every listed paper carries `user_tags` and
+  `has_full_text`; `get_paper` adds those plus `match_type`, `matched_terms`
+  and the paper's collections with their screening decision; `get_collection`
+  takes `tag` (one whole tag, case-sensitive like the tags themselves),
+  `decision` (`include` / `maybe` / `exclude` / `unscreened`) and
+  `added_since_days` (what was filed in the last N days, for example by a
+  query refresh; clamped to 1..3650, and the answer names the window applied).
+- **`cv-arxiv-mcp --read-only`** registers no write tool, for unattended runs,
+  and does not run the built-in scrape scheduler in that process. The rest of
+  app start-up is unchanged: it still runs its idempotent schema check.
+
+### Changed
+- While a collection profile exists, the profile description and the learned
+  ranker no longer feed the "Learned interests" signal or the admission gate
+  (`candidate_threshold` is not used either), for every interest profile.
+  The Settings status card, the inbox checklist and `/healthz`
+  (`features.collection_profile`) say when the collections rank. Without
+  collections everything behaves as before.
+- The server launcher moved from the top-level `run.py` into the package
+  (`app/cli/webserver.py`). `run.py` stays as an alias, so `python run.py`,
+  `./run.sh`, `make run` and the Docker image work as before.
+
+### Fixed
+- **A long-running server sees the papers a later scrape embeds.** The vector
+  index was read once per process, so a web or MCP server started before the
+  daily scrape (another process) never saw the new vectors: semantic search
+  and related papers missed them, and the collection profile was built
+  without the members embedded since. The index is now re-read when another
+  process has saved it; additions a process has not saved yet are kept. A
+  pair of index files that cannot be used (a save cut short, an unreadable
+  file) is reported once and left alone until a file changes. A process that
+  started on an incomplete index, with saving switched off to protect what
+  was left, saves again once the index on disk is whole.
+- **Saving the vector index no longer drops vectors another process saved.**
+  A process that embedded papers itself (the onboarding bootstrap in the web
+  server, `cv-arxiv-backfill embeddings`) wrote its own copy of the index
+  back, without the vectors a scrape had saved since that process loaded the
+  index. A save now builds on the index on disk.
+- **The vector index no longer falls back to `./instance` while
+  `CV_ARXIV_INSTANCE_PATH` is set.** Code that reached the embedding service
+  with no Flask app in reach ignored that override, so a test run from a
+  source checkout could open, and later write to, the real index there.
+- **A number that is no row id is "not found", not a crash.** A paper,
+  collection or profile selector made of a digit `int()` rejects (such as `²`)
+  or of more than 18 digits made the MCP tools raise, and the import-ids API
+  answer 500. It is now not found, and never taken for a collection name, so
+  nothing is created for it.
+- **`cv-arxiv serve` starts from an installed wheel.** It imported the
+  top-level `run` module, which the wheel (it packages only `app*`) never
+  shipped. CI now builds the wheel and runs its console scripts ("Wheel smoke").
+- **Crashes and broken PDF rendering with `CV_ARXIV_NATIVE_ISOLATION=0`**, the
+  setting the test suite runs under. The two thumbnail-warmer threads rendered
+  PDFs in-process at the same time, and PDFium is not thread-safe: the process
+  segfaulted, or PDFium rejected every later PDF ("Data format error"). This
+  is what failed CI on rotating Python versions. In-process native calls now
+  run one at a time, and the browser tests no longer download and render real
+  PDFs from arxiv.org.
+- CI lint: `end-of-file-fixer` skips `app/static/style.css`, which the
+  Tailwind CLI writes without a final newline.
+- Test suite with the `mcp` extra installed: `test_builds_with_the_installed_sdk`
+  called `asyncio.run()` on the main thread and failed whenever it ran after the
+  browser tests, because Playwright keeps an event loop running there.
+
 ## [0.7.0] — 2026-09-28
 
 Wave 5: collections as a literature-review workspace.

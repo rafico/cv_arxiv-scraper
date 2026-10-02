@@ -85,7 +85,9 @@ preferences:
     citation_weight: 0.05
     venue_weight: 8.0
     # Learned interest signal (see preferences.learned below); inert until
-    # >= 5 saved papers have embeddings. This weight multiplies the signal.
+    # >= 5 saved papers have embeddings, or until your collections form a
+    # profile (>= 5 papers in one, >= 200 papers outside all of them), which
+    # then replaces the feedback signal. This weight multiplies the signal.
     interest_weight: 12.0
     # Implementation-readiness boost: a small additive bonus for "runnable"
     # papers, from already-extracted signals (has-code repo + star count +
@@ -107,6 +109,12 @@ preferences:
     # to the feed (match type "Interest") when the model scores them above
     # this probability threshold — at most candidate_top_k per scrape.
     # Set candidate_top_k: 0 to keep the feed whitelist-only.
+    # With a collection profile the threshold is not used: a paper needs
+    # z >= 2 against its nearest collection, at most 3 per collection.
+    # Collections take turns, so with more collections than candidate_top_k
+    # a scrape admits one paper each for candidate_top_k of them and none
+    # for the others: set it to at least your number of collections, and to
+    # three times that for the full 3 per collection (the maximum is 50).
     candidate_threshold: 0.6
     candidate_top_k: 10
     # Multiple interest profiles (e.g. "3D reconstruction" vs "VLM efficiency"),

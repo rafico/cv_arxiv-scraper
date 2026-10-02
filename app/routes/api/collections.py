@@ -222,7 +222,8 @@ def import_collection_ids():
     """Seed a collection from arXiv ids/URLs/.bib text pasted as ``text``.
 
     ``name`` is a collection name (created on miss) or a numeric id. Unlike the
-    onboarding bootstrap, no feedback rows are written, so the ranker is untouched.
+    onboarding bootstrap, no feedback rows are written: the papers shape ranking
+    only as members of the collection (``interest_model``).
     Optional ``s2_ids`` ({arxiv_id: S2 paperId}, from prior works) fills empty
     Semantic Scholar ids so the papers link into the citation graph right away.
     """
@@ -351,7 +352,8 @@ def _require_decision(payload: dict) -> str | None:
     return decision
 
 
-# Screening is review-scoped, not taste: these never write PaperFeedback, so the ranker is untouched.
+# Screening is review-scoped: these never write PaperFeedback. An exclude does take the
+# paper out of the collection's interest centroid (interest_model) at its next rebuild.
 @api_bp.route("/collections/<int:collection_id>/papers/<int:paper_id>/decision", methods=["PUT"])
 def set_paper_decision(collection_id: int, paper_id: int):
     validate_csrf_token()
