@@ -9,6 +9,28 @@ follow [Semantic Versioning](https://semver.org/).
 Wave 6: collections become the interest model (see `ROADMAP.md` and
 `docs/wave6-research.md`).
 
+### Changed
+- The server launcher moved from the top-level `run.py` into the package
+  (`app/cli/webserver.py`). `run.py` stays as an alias, so `python run.py`,
+  `./run.sh`, `make run` and the Docker image work as before.
+
+### Fixed
+- **`cv-arxiv serve` starts from an installed wheel.** It imported the
+  top-level `run` module, which the wheel (it packages only `app*`) never
+  shipped. CI now builds the wheel and runs its console scripts ("Wheel smoke").
+- **Crashes and broken PDF rendering with `CV_ARXIV_NATIVE_ISOLATION=0`**, the
+  setting the test suite runs under. The two thumbnail-warmer threads rendered
+  PDFs in-process at the same time, and PDFium is not thread-safe: the process
+  segfaulted, or PDFium rejected every later PDF ("Data format error"). This
+  is what failed CI on rotating Python versions. In-process native calls now
+  run one at a time, and the browser tests no longer download and render real
+  PDFs from arxiv.org.
+- CI lint: `end-of-file-fixer` skips `app/static/style.css`, which the
+  Tailwind CLI writes without a final newline.
+- Test suite with the `mcp` extra installed: `test_builds_with_the_installed_sdk`
+  called `asyncio.run()` on the main thread and failed whenever it ran after the
+  browser tests, because Playwright keeps an event loop running there.
+
 ## [0.7.0] — 2026-09-28
 
 Wave 5: collections as a literature-review workspace.

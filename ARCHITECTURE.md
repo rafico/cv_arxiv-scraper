@@ -33,7 +33,8 @@ flow, and step-by-step recipes for common extensions.
 
 **Façade packages** `app/{ingest,rank,search_,enrich,web}` re-export from
 `app/services/*` for readable imports and hold no logic. Top-level `*_cli.py`
-files are backward-compat shims via `app/_module_alias.py`. Put new logic in
+files and `run.py` (the server launcher, `app/cli/webserver.py`) are
+backward-compat shims via `app/_module_alias.py`. Put new logic in
 `app/services/`, then re-export.
 
 ## Scrape data flow

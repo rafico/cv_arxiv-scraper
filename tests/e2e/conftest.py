@@ -5,6 +5,7 @@ import tempfile
 import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -80,7 +81,9 @@ def live_server():
 def seeded_db(live_server):
     """Seed test papers into the DB, clean up after each test."""
     app = live_server["app"]
-    with app.app_context():
+    # A real browser requests every seeded paper's thumbnail. Unpatched, the warmer
+    # downloads those PDFs from arxiv.org and renders them inside this pytest process.
+    with app.app_context(), patch("app.routes.dashboard.THUMBNAIL_WARMER.warm"):
         for i in range(3):
             _db.session.add(_make_paper(i))
         _db.session.commit()

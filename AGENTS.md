@@ -87,7 +87,9 @@ run.py / wsgi.py ── create_app() ── blueprints (app/routes/*) ── ser
   [app/services/AGENTS.md](app/services/AGENTS.md).
 - **app/models.py** — SQLAlchemy models (`Paper`, `Collection`, feedback, etc.).
 - **app/cli/** — installable console scripts (`cv-arxiv-scrape`, `-sync`,
-  `-backfill`, `-digest`); see `[project.scripts]` in `pyproject.toml`.
+  `-backfill`, `-digest`); see `[project.scripts]` in `pyproject.toml`. The
+  server launcher is `app/cli/webserver.py` (what `run.py` and `cv-arxiv serve`
+  both start); it lives in the package because the wheel ships only `app*`.
 - **app/templates/**, **app/static/** — Jinja templates + assets. The shell
   (sidebar + top bar) lives in `base.html`; page-specific chrome fills the
   `page_title` / `topbar_tools` / `sidebar_filters` / `sidebar_extra` blocks.
@@ -104,8 +106,8 @@ run.py / wsgi.py ── create_app() ── blueprints (app/routes/*) ── ser
 
 `app/ingest`, `app/rank`, `app/search_`, `app/enrich`, `app/web` are **façade
 packages that re-export from `app/services/*`** for readable imports — they hold
-no logic. The top-level `*_cli.py` files (`scrape_cli.py`, etc.) are backward-compat
-shims via [app/_module_alias.py](app/_module_alias.py). When you add real logic,
+no logic. The top-level `*_cli.py` files (`scrape_cli.py`, etc.) and `run.py` are
+backward-compat shims via [app/_module_alias.py](app/_module_alias.py). When you add real logic,
 put it in `app/services/` and re-export, don't fork it into the façade.
 
 ### The scrape pipeline (high level)

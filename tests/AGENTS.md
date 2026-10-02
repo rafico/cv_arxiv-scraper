@@ -38,7 +38,15 @@ you touched, then the full suite once before committing.
   (e.g. file contents + `stat.S_IMODE(...) == 0o600`) rather than asserting mock
   call args — it catches more (see `test_settings.py::test_upload_saves_valid_json`).
 - **e2e/** holds Playwright browser tests (`pytest-playwright`); they need browsers
-  installed (`playwright install`) and are excluded with `-m "not e2e"`.
+  installed (`playwright install`) and are excluded with `-m "not e2e"`. A real
+  browser fetches every `<img>`, so the `seeded_db` fixture patches the thumbnail
+  warmer; without it the suite downloads the seeded papers' PDFs from arxiv.org.
+  Playwright's sync API keeps an event loop running on the main thread for the rest
+  of the session, so a test must not call `asyncio.run()` there: run it in a worker
+  thread (as `test_mcp_tools.py::BuildServerTests` does).
+- **Native work runs in-process** (`conftest.py` sets `CV_ARXIV_NATIVE_ISOLATION=0`
+  so mocks reach it). `run_isolated` then runs one call at a time: PDFium is not
+  thread-safe, and concurrent use breaks it for every later test in the process.
 - **Assert on semantic hooks, not styling.** UI tests target stable ids/classes
   and `data-*` attributes (`#paper-list`, `.feedback-btn[data-action]` +
   `data-active`, `#theme-toggle`, settings tabs' `data-active`), never Tailwind

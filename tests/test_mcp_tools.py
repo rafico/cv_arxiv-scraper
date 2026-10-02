@@ -396,11 +396,15 @@ class BuildServerTests(FlaskDBTestCase):
     def test_builds_with_the_installed_sdk(self):
         # Guards SDK API drift (mcp 2.x renamed FastMCP -> MCPServer).
         import asyncio
+        from concurrent.futures import ThreadPoolExecutor
 
         from app.mcp_server import _load_fastmcp, build_server
 
         server = build_server(self.app, _load_fastmcp())
-        names = {tool.name for tool in asyncio.run(server.list_tools())}
+        # In a worker thread: after the browser tests Playwright's sync API still has an
+        # event loop running on the main thread, and asyncio.run() refuses to start there.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            names = {tool.name for tool in pool.submit(asyncio.run, server.list_tools()).result()}
         self.assertTrue({"get_collection", "get_paper_text", "search_papers"} <= names)
 
 
