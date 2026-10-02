@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/), and the project aims to
 follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Wave 6: collections become the interest model (see `ROADMAP.md` and
+`docs/wave6-research.md`).
+
 ## [0.7.0] — 2026-09-28
 
 Wave 5: collections as a literature-review workspace.

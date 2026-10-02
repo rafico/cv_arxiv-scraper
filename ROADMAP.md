@@ -280,19 +280,136 @@ Tier 3 delivered (its trigger fired):
 Tier 3 (each only on its trigger):
 
 - **`near=<collection>` watch filter** ("new similar this week") — when
-  collections are being revisited.
+  collections are being revisited. Its trigger fired; Wave 6 item 30 builds it
+  as the MCP tool `whats_new`.
 - **Review-matrix LLM cells** — when the in-app LLM is actually on.
-- **S2 "outside your library" recommendations** — when collections are in use
-  and an S2 key is set.
+- **S2 "outside your library" recommendations** — measured in Wave 6: 0-20%
+  on-topic for three collections, so dropped (see "Deliberately not doing").
 - **Related-work `outline.md`** — when `get_collection` over MCP proves
   insufficient.
+
+## Wave 6 — Collection watch (October 2026, branch `feat/wave6-collection-watch`)
+
+Method: read-only. Subsystem mappers plus two audits of the real DB, vectors
+and logs; ten competitor tracks and ten literature themes, each re-fetched by a
+fact-checker; three experiments on the real data; four design drafts; one
+adversarial skeptic per surviving item; then a five-reviewer pass over the
+whole plan. Evidence: [docs/wave6-research.md](docs/wave6-research.md).
+
+Core finding: the Wave 5 checkpoint fired (ten topic collections, 1,474
+papers), but the daily inbox loop is still unused (0 feedback, 0 decisions) and
+the feed does not serve the collections. It had caught 28 of the 71 recent
+papers that ended up in them and ranked those at chance (6 of 28 in their day's
+top 10), and 98% of collection papers are imports without full text. A scorer
+built from collection membership alone puts 26 of 28 in the top 10 (holdout
+macro AUC 0.93). So collections become the interest model, and the agent gets
+the tools to triage what the watch finds.
+
+Baselines (2026-10-01): replay hit@10 6/28; feed recall of new collection
+members 28/71; must-read papers with full text 21/111; `cites` edges 1,901
+(6,706 available from cached reference lists); CI red on `main`.
+
+27. **Green CI and an entry point that starts** — `style.css` excluded from
+    the end-of-file hook, the PDFium test failures fixed at their cause,
+    `run.py` moved into the package so `cv-arxiv serve` works from a wheel, and
+    a wheel smoke step in CI.
+28. **Collections as the interest model** — one mean-centred centroid per
+    collection; a paper's score is its z against papers in no collection,
+    maximum over collections. Daily admission needs z >= 2, at most 3 per
+    collection, and names the collection. While collections exist the free-text
+    interest description and the learned ranker do not score; whitelists are
+    untouched.
+29. **Eval gate** — `scripts/eval_collection_affinity.py` (`holdout`, `replay`,
+    `checkpoint`, `--self-test`), read-only on the live data. Item 28 ships only
+    at macro AUC >= 0.90 and replay hit@10 >= 24/28.
+30. **MCP read surface** — `whats_new` (fresh non-members, attributed to their
+    nearest collection), tags and full-text flags in every result,
+    `get_collection` filters (`tag`, `decision`, `added_since_days`), an index
+    that reloads when a scrape adds vectors, and `cv-arxiv-mcp --read-only`.
+31. **MCP triage writes, attended sessions only** — `set_decision` (reason
+    required), add-only `tag_papers`, `add_to_collection` no longer creates
+    collections, an append-only write log, and an "Agent" chip so an agent's
+    decision never passes as the owner's until confirmed.
+32. **Full text on demand** — `get_paper_text` fetches and stores sections on
+    first read (never under `--read-only`).
+33. **Scrape hygiene** — automatic pre-scrape snapshot (7 kept), `empty` run
+    status, timestamped logs, and the never-read section embeddings removed.
+
+Items 27-30 ship as one pull request, 31-33 as a second.
+
+### Owner actions (zero code)
+
+- **Snapshot, then `cv-arxiv-backfill citation-edges` without API keys** —
+  cached Semantic Scholar reference lists (7-day TTL) are written through; an
+  OpenAlex key saved first makes the second pass skip them.
+- **API keys** — Semantic Scholar and OpenAlex under Settings → Automation →
+  Data Sources; unkeyed pools return 429.
+- **`cv-arxiv-backfill sections --batch-size 1 --delay 3`** in an evening —
+  full text for imported papers; batch size 1 keeps the write lock short.
+- **After deploying item 28** — `cv-arxiv-backfill interest`, then the eval's
+  `replay`; raise the "Learned interests" weight only by measurement.
+- **Weekly routine** — re-run the collection queries by collection id, then a
+  headless agent run against `cv-arxiv-mcp --read-only` with no built-in tools
+  writes a brief of candidates per collection.
+
+### Next (each at most a day)
+
+- **Honest dates** — RSS replacements and late cross-lists are stored with the
+  announce date (713 of 2,970 scraped rows); clamp to the id month. After the
+  weekly brief works, because clamped papers leave the daily inbox.
+- **Reference lists** — `backfill citations` drops the references it fetches.
+- **Sections backfill** — commit per paper; stop resetting the bulk rate limit.
+- **`verify_quotes`** over MCP (found is not the same as supported).
+- **Scoped search and `related_papers`** over MCP.
+- **Tags as links** on collection rows; confirm before deleting a tag.
+- **Weekly-brief MCP prompt** — after real runs have settled the wording.
+- **Per-run scrape stats** in `scrape_runs.stats`.
+- **Encoder and search hygiene** — no silent fallback encoder; MCP keyword mode
+  on FTS5 BM25.
+
+### Checkpoint (about 2026-11-08)
+
+Run the eval's `checkpoint`: of the memberships added since Wave 6 shipped, the
+share whose paper the feed had already stored (baseline 28 of 71). If no paper
+admitted by the collection watch became a confirmed or query-matched member,
+set `candidate_top_k: 0` and keep `whats_new` plus the weekly refresh.
+
+### Backlog (each only on its trigger)
+
+- **Public release** (PyPI publisher, tag, README truth pass) — a month of real
+  use, or the first outside user.
+- **Interest description as one more scorer row** — the owner wants it kept.
+- **Per-collection thresholds or TF-IDF fusion** — broad collections still
+  recall poorly at the checkpoint.
+- **Centroids from owner-confirmed rows only** — the checkpoint shows drift.
+- **Per-collection logistic regression** — 128 or more confirmed decisions in
+  one collection.
+- **Better PDF text extraction** — must-read papers still without text after
+  the sections backfill.
+- **Encoder A/B (SPECTER2 proximity adapter) and a LitSearch search eval** —
+  holdout AUC below 0.85, or before any encoder or ranking change.
+- **Title whitelist matches titles only; candidate ledger** — the owner trims
+  the whitelists, or runs exceed about 45 minutes.
+- **Stored collection queries with a refresh command** — refresh wanted from
+  the UI or over MCP.
 
 ## Deliberately not doing
 
 - **Social/commenting features** — alphaXiv's own data shows commenting stalled while
   the AI layer scaled; consume external buzz signals (HF upvotes, star velocity) instead.
-- **Bandit/exploration machinery** — RecSys 2025 evidence says greedy matches bandits
-  here; a small labeled exploration quota suffices.
+- **Bandit/exploration machinery** — there is no feedback to learn from (0 rows). The
+  RecSys 2025 paper cited here earlier shows that offline evaluation is biased against
+  exploration, not that greedy is as good; a small labeled exploration quota suffices.
+- **Re-embedding or swapping the encoder** (Wave 6) — CLS pooling gains +0.005 AUC once
+  vectors are mean-centred, which is noise.
+- **Training the learned ranker from collection membership** (Wave 6) — the centroid
+  scorer matches it without negatives, and naive negatives demote adjacent topics.
+- **Semantic Scholar Recommendations as a source** (Wave 6) — 0-20% on-topic for three
+  collections.
+- **A wide MCP write surface** (Wave 6: notes, deletes, renames, config) — each is an
+  injection sink for text an agent has read; three narrow, logged tools cover triage.
+- **Prompt-injection detectors for paper text** (Wave 6) — they cannot tell a quoted
+  prompt from an attack; the defence is on the write side.
 - **Benchmark/SOTA tracking as a hard dependency** — post-PwC sources are fragile
   (CodeSOTA is a one-person project); revisit as a best-effort bet later.
 - **Auto-generated surveys** — synthesis belongs to the external agent
