@@ -6,7 +6,7 @@ non-zero instead of dumping a traceback.
 
 Usage::
 
-    cv-arxiv-mcp [--data-dir DIR]
+    cv-arxiv-mcp [--data-dir DIR] [--read-only]
 """
 
 from __future__ import annotations

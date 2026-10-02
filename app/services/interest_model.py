@@ -144,13 +144,18 @@ def _normalized_centroid(vectors: np.ndarray) -> np.ndarray | None:
     return (centroid / norm).astype(np.float32)
 
 
-def _centred_cosine(vectors, mean: np.ndarray, centroids: np.ndarray) -> np.ndarray:
-    """Cosine of each mean-centred vector to each centroid: (n, k)."""
+def _centred_unit(vectors, mean: np.ndarray) -> np.ndarray:
+    """Each vector minus the corpus mean, L2-normalized: (n, dim)."""
     import numpy as np
 
     centred = np.atleast_2d(np.asarray(vectors, dtype=np.float32)) - mean
     norms = np.linalg.norm(centred, axis=1, keepdims=True)
-    return (centred / np.where(norms == 0.0, 1.0, norms)) @ centroids.T
+    return centred / np.where(norms == 0.0, 1.0, norms)
+
+
+def _centred_cosine(vectors, mean: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+    """Cosine of each mean-centred vector to each centroid: (n, k)."""
+    return _centred_unit(vectors, mean) @ centroids.T
 
 
 def fit_collection_profile(
@@ -215,6 +220,18 @@ def collection_affinity(model: InterestProfile, vector) -> tuple[float, int]:
     z = affinity_scores(model, vector)[0]
     best = int(np.argmax(z))
     return float(z[best]), model.collection_ids[best]
+
+
+def nearest_member(model: InterestProfile, vectors, members) -> np.ndarray:
+    """For each vector the row of ``members`` closest to it: (n,).
+
+    Cosine in the scorer's space, both sides centred by the corpus mean. A member
+    row that is not finite never wins.
+    """
+    import numpy as np
+
+    cosine = _centred_unit(vectors, model.mean) @ _centred_unit(members, model.mean).T
+    return np.nan_to_num(cosine, nan=-np.inf).argmax(axis=1)
 
 
 def _collection_profile(service, fingerprint: tuple[int, ...]) -> InterestProfile | None:

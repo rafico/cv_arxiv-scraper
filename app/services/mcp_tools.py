@@ -21,14 +21,18 @@ Design rules mirrored from the rest of the app:
 
 from __future__ import annotations
 
+import json
+from datetime import timedelta
 from typing import Any
 
 from app.enums import SortOption
 from app.models import (
+    SCREENING_DECISIONS,
     Collection,
     Paper,
     PaperCollection,
     PaperSection,
+    ScrapeRun,
     db,
     in_review_clause,
     inbox_freshness_clause,
@@ -36,6 +40,7 @@ from app.models import (
 from app.services.bibtex import _make_cite_key
 from app.services.implementation_readiness import implementation_readiness
 from app.services.preferences import first_author_name
+from app.services.text import now_utc
 
 # Bounds so an assistant can never ask for an unbounded result set (each row costs
 # context tokens) or a pathological negative/zero limit.
@@ -46,18 +51,34 @@ _SUMMARY_CHARS = 1500
 # Full-text paging: sections run to ~278k chars, so text is only ever served in pages.
 _TEXT_PAGE_CHARS = 8000
 _TEXT_MAX_CHARS = 20_000
+# Day windows. whats_new is about arrivals, so a quarter is plenty; a collection's
+# added-since filter only needs a bound that keeps the date arithmetic in range.
+_WHATS_NEW_MAX_DAYS = 90
+_ADDED_SINCE_MAX_DAYS = 3650
 
 SEARCH_MODES = ("hybrid", "semantic", "keyword")
+# get_collection(decision=...): a screening decision, or the rows without one.
+DECISION_FILTERS = (*SCREENING_DECISIONS, "unscreened")
 
 
-def _clamp_limit(limit: int | None, *, default: int = _DEFAULT_LIMIT) -> int:
+def _clamp_limit(limit: int | None, *, default: int = _DEFAULT_LIMIT, most: int = _MAX_LIMIT) -> int:
     try:
         value = int(limit) if limit is not None else default
     except (TypeError, ValueError):
         return default
     if value <= 0:
         return default
-    return min(value, _MAX_LIMIT)
+    return min(value, most)
+
+
+def _is_row_id(raw: str) -> bool:
+    """Whether ``int(raw)`` is a number SQLite can look up as a row id.
+
+    isdigit() will not do: it also passes characters int() rejects (a superscript two),
+    and more than 18 digits overflow SQLite's 64-bit INTEGER. Same test as the
+    dashboard's ``?ids=``.
+    """
+    return raw.isdecimal() and len(raw) <= 18
 
 
 def _truncate(text: str | None, limit: int) -> str:
@@ -95,25 +116,48 @@ def _enrichment_summary(paper: Paper) -> dict[str, Any]:
     }
 
 
-def _paper_brief(paper: Paper) -> dict[str, Any]:
-    """A compact list-item dict (search hits, ranked feeds)."""
-    return {
-        "id": paper.id,
-        "arxiv_id": paper.arxiv_id,
-        "title": paper.title,
-        "first_author": first_author_name(paper.authors),
-        "published": _publication_str(paper),
-        "categories": paper.categories_list,
-        "link": paper.link,
-        "score": round(float(paper.paper_score or 0.0), 3),
-        "citation_count": paper.citation_count,
-        "github_repo": paper.github_repo,
-        "abstract": _truncate(paper.abstract_text, _ABSTRACT_CHARS),
-    }
+def _with_full_text(paper_ids) -> set[int]:
+    """The ids among ``paper_ids`` whose paper has extracted sections: one query for all."""
+    ids = list(paper_ids)
+    if not ids:
+        return set()
+    rows = db.session.query(PaperSection.paper_id).filter(PaperSection.paper_id.in_(ids)).distinct()
+    return {paper_id for (paper_id,) in rows}
+
+
+def _briefs(papers) -> list[dict[str, Any]]:
+    """Compact list-item dicts (search hits, ranked feeds, collection members), in order."""
+    papers = list(papers)
+    full_text = _with_full_text(paper.id for paper in papers)
+    return [
+        {
+            "id": paper.id,
+            "arxiv_id": paper.arxiv_id,
+            "title": paper.title,
+            "first_author": first_author_name(paper.authors),
+            "published": _publication_str(paper),
+            "categories": paper.categories_list,
+            "link": paper.link,
+            "score": round(float(paper.paper_score or 0.0), 3),
+            "citation_count": paper.citation_count,
+            "github_repo": paper.github_repo,
+            "abstract": _truncate(paper.abstract_text, _ABSTRACT_CHARS),
+            "user_tags": paper.user_tags_list,
+            # Spares a get_paper_text call per paper just to learn there is no text.
+            "has_full_text": paper.id in full_text,
+        }
+        for paper in papers
+    ]
 
 
 def _paper_detail(paper: Paper) -> dict[str, Any]:
-    """The full single-paper dict (metadata + enrichment summary)."""
+    """The full single-paper dict (metadata, enrichment summary, tags and collections)."""
+    memberships = (
+        db.session.query(Collection.id, Collection.name, PaperCollection.decision)
+        .join(PaperCollection, PaperCollection.collection_id == Collection.id)
+        .filter(PaperCollection.paper_id == paper.id)
+        .order_by(Collection.name)
+    )
     return {
         "id": paper.id,
         "arxiv_id": paper.arxiv_id,
@@ -129,6 +173,13 @@ def _paper_detail(paper: Paper) -> dict[str, Any]:
         "score": round(float(paper.paper_score or 0.0), 3),
         "resource_links": paper.resource_links_list,
         "enrichment": _enrichment_summary(paper),
+        "user_tags": paper.user_tags_list,
+        "has_full_text": paper.id in _with_full_text([paper.id]),
+        # Why the feed kept it: whitelist match types (or "Interest" / "import") and the terms.
+        "match_type": paper.match_type,
+        "matched_terms": paper.matched_terms_list,
+        # Every collection it has a row in, the ones it was excluded from too (see decision).
+        "collections": [{"id": cid, "name": name, "decision": decision} for cid, name, decision in memberships],
     }
 
 
@@ -149,7 +200,7 @@ def _resolve_paper(identifier: str | int) -> Paper | None:
         return None
 
     # A bare integer is ambiguous: prefer the primary key, fall back to arXiv id.
-    if raw.isdigit():
+    if _is_row_id(raw):
         by_pk = db.session.get(Paper, int(raw))
         if by_pk is not None:
             return by_pk
@@ -208,7 +259,7 @@ def search_papers(query: str, mode: str = "hybrid", limit: int = _DEFAULT_LIMIT)
     if not ordered_ids and normalized_mode != "semantic":
         ordered_ids = _keyword_ids(clean_query, n)
         papers_by_id = {p.id: p for p in Paper.query.filter(Paper.id.in_(ordered_ids))}
-    results = [_paper_brief(papers_by_id[pid]) for pid in ordered_ids]
+    results = _briefs(papers_by_id[pid] for pid in ordered_ids)
     return {"query": clean_query, "mode": normalized_mode, "count": len(results), "results": results}
 
 
@@ -274,10 +325,7 @@ def top_ranked_today(limit: int = _DEFAULT_LIMIT, profile: str | int | None = No
     a numeric id, a slug, or a name; ``None`` uses the active profile. The
     resolved profile is echoed so an assistant knows which lens ranked the feed.
     """
-    from datetime import timedelta
-
     from app.services.ranking import rank_score_order_expr
-    from app.services.text import now_utc
 
     n = _clamp_limit(limit)
     resolved_profile = _resolve_profile(profile)
@@ -298,7 +346,7 @@ def top_ranked_today(limit: int = _DEFAULT_LIMIT, profile: str | int | None = No
         "profile": resolved_profile,
         "sort": SortOption.TRENDING.value,
         "count": len(papers),
-        "results": [_paper_brief(paper) for paper in papers],
+        "results": _briefs(papers),
     }
 
 
@@ -313,7 +361,7 @@ def _resolve_profile(profile: str | int | None) -> dict[str, Any]:
     profiles = list_profiles()
     selected = None
     if profile is not None and not isinstance(profile, bool):
-        if isinstance(profile, int) or (isinstance(profile, str) and profile.strip().isdigit()):
+        if isinstance(profile, int) or (isinstance(profile, str) and _is_row_id(profile.strip())):
             wanted_id = int(profile)
             selected = next((p for p in profiles if p.id == wanted_id), None)
         if selected is None and isinstance(profile, str):
@@ -358,7 +406,13 @@ def list_collections() -> dict[str, Any]:
 
 
 def get_collection(
-    collection_name_or_id: str | int, offset: int = 0, limit: int = _MAX_LIMIT, include_excluded: bool = False
+    collection_name_or_id: str | int,
+    offset: int = 0,
+    limit: int = _MAX_LIMIT,
+    include_excluded: bool = False,
+    tag: str | None = None,
+    decision: str | None = None,
+    added_since_days: int | None = None,
 ) -> dict[str, Any]:
     """Return one collection's papers (by id or exact name; never created here).
 
@@ -368,9 +422,18 @@ def get_collection(
     so an assistant's citations resolve against the same .bib.
     ``include_excluded`` adds the screened-out papers back. Paged by
     ``offset``/``limit`` (``limit`` capped at 50); follow ``next_offset``.
+
+    Three optional filters narrow the list, and ``count`` with it. ``tag`` keeps the
+    papers that carry exactly that user tag. ``decision`` keeps one screening state
+    (one of DECISION_FILTERS; ``exclude`` implies ``include_excluded``, and any other
+    value is an error, never an unfiltered list). ``added_since_days`` keeps the
+    papers filed here in the last N days: this is how a reader sees what a query
+    refresh added. It is clamped to 1..3650, and the result names the window applied.
     """
     from app.services.ranking import rank_score_order_expr
 
+    if decision is not None and decision not in DECISION_FILTERS:
+        return {"error": "invalid_decision", "decision": str(decision), "allowed": list(DECISION_FILTERS)}
     collection, _created = _resolve_or_create_collection(collection_name_or_id, create=False)
     if collection is None:
         return {"error": "not_found", "resource": "collection", "identifier": str(collection_name_or_id)}
@@ -382,8 +445,26 @@ def get_collection(
         .filter(PaperCollection.collection_id == collection.id, Paper.is_hidden.is_(False))
         .order_by(rank_score_order_expr().desc(), Paper.id)
     )
-    if not include_excluded:
+    if not include_excluded and decision != "exclude":
         query = query.filter(in_review_clause())
+    if decision == "unscreened":
+        query = query.filter(PaperCollection.decision.is_(None))
+    elif decision is not None:
+        query = query.filter(PaperCollection.decision == decision)
+    if tag is not None:
+        # One whole element of the stored JSON list: json.dumps supplies the quotes around
+        # it. instr rather than LIKE: tags differ by case, and a tag may hold % or _ or be
+        # longer than a LIKE pattern may be.
+        # ponytail: a substring test on the JSON text, so a search for x also finds a tag
+        # that ends in "x, and a search for ", " finds every paper with two tags or more.
+        # Upgrade: json_each equality, behind json_valid (legacy rows may not be JSON).
+        query = query.filter(db.func.instr(Paper.user_tags, json.dumps(str(tag))) > 0)
+    window = {}
+    if added_since_days is not None:
+        days = _clamp_limit(added_since_days, default=1, most=_ADDED_SINCE_MAX_DAYS)
+        query = query.filter(PaperCollection.added_at >= now_utc() - timedelta(days=days))
+        # Said back, because 0, a negative or a huge value is clamped rather than refused.
+        window = {"added_since_days": days}
     total = query.count()
     rows = query.offset(start).limit(_clamp_limit(limit, default=_MAX_LIMIT)).all()
     end = start + len(rows)
@@ -394,16 +475,165 @@ def get_collection(
         "count": total,
         "offset": start,
         "next_offset": end if end < total else None,
+        **window,
         "papers": [
             {
-                **_paper_brief(paper),
+                **brief,
                 "cite_key": _make_cite_key(paper),
                 "user_notes": paper.user_notes or "",
-                "decision": decision,
+                "decision": screened,
             }
-            for paper, decision in rows
+            for brief, (paper, screened) in zip(_briefs(paper for paper, _screened in rows), rows)
         ],
     }
+
+
+def whats_new(since_days: int = 7, collection: str | int | None = None, limit: int = 20) -> dict[str, Any]:
+    """Papers that arrived lately and sit close to a collection without being in one.
+
+    Candidates to screen, not recommendations. They are the visible papers scraped in
+    the last ``since_days`` (at most 90) that are in review in no collection.
+    Each is scored from its stored vector by the collection scorer the feed uses (no
+    embedding model is loaded here) and attributed to its best collection among those
+    it has no row in, so an exclusion is remembered for that one collection only.
+    Results clear the admission floor (z >= AFFINITY_Z_MIN), best z first; ``limit``
+    (capped at 50) is a total over all collections, and ``collection`` (id or exact
+    name, never created) keeps the papers attributed to that one.
+
+    The header says how fresh the corpus is (``last_scrape``), how many candidates
+    there were (``arrived``), how many of them have no stored vector yet
+    (``unscored``) and how many pass per collection (``by_collection``), so a reader
+    knows where to look closer with ``collection=``. Without a collection profile,
+    or with a vector index that cannot be read, the result is empty and ``reason``
+    says why.
+    """
+    import numpy as np
+    from flask import current_app
+
+    from app.services.embeddings import get_embedding_service
+    from app.services.interest_model import (
+        AFFINITY_Z_MIN,
+        MIN_BACKGROUND,
+        MIN_POSITIVE_FEEDBACK,
+        affinity_scores,
+        build_interest_profile,
+        nearest_member,
+    )
+
+    only = None
+    if collection is not None:
+        only, _created = _resolve_or_create_collection(collection, create=False)
+        if only is None:
+            return {"error": "not_found", "resource": "collection", "identifier": str(collection)}
+
+    days = _clamp_limit(since_days, default=7, most=_WHATS_NEW_MAX_DAYS)
+    last_scrape = None
+    last_run = ScrapeRun.query.order_by(ScrapeRun.started_at.desc()).first()
+    if last_run is not None:
+        finished = last_run.finished_at  # stored as naive UTC; None while the run is going
+        last_scrape = {
+            "status": last_run.status,
+            "finished_at": finished.isoformat(timespec="seconds") + "Z" if finished else None,
+        }
+    # ponytail: a paper already in review in one collection is not offered to another.
+    # Upgrade: drop this filter and score every collection the paper has no row in.
+    in_review = db.session.query(PaperCollection.paper_id).filter(in_review_clause())
+    candidates = db.session.query(Paper.id).filter(
+        Paper.is_hidden.is_(False),
+        Paper.scraped_at >= now_utc() - timedelta(days=days),
+        Paper.id.not_in(in_review),
+    )
+    candidate_ids = [paper_id for (paper_id,) in candidates]
+    result: dict[str, Any] = {
+        "since_days": days,
+        # A run that fetched nothing still records "success": `arrived` is the real signal.
+        "last_scrape": last_scrape,
+        "arrived": len(candidate_ids),
+        "unscored": len(candidate_ids),
+        "by_collection": [],
+        "count": 0,
+        "results": [],
+    }
+    try:
+        service = get_embedding_service()
+        scored_ids, vectors = service.get_paper_vectors(candidate_ids)
+    except Exception:  # noqa: BLE001 — as in search_papers: a backend that is down is an answer, not a crash
+        result["reason"] = "The vector index could not be read, so nothing was scored."
+        return result
+    result["unscored"] -= len(scored_ids)
+
+    profile = build_interest_profile(current_app._get_current_object())
+    if profile is None or profile.centroids is None:
+        result["reason"] = (
+            f"No collection can be scored yet: that takes a collection with at least {MIN_POSITIVE_FEEDBACK} "
+            f"embedded papers in review and {MIN_BACKGROUND} embedded papers outside every collection."
+        )
+        return result
+    column = {collection_id: index for index, collection_id in enumerate(profile.collection_ids)}
+    if only is not None and only.id not in column:
+        result["reason"] = (
+            f"Nothing can be scored against {only.name!r}: it has fewer than {MIN_POSITIVE_FEEDBACK} "
+            "embedded papers in review."
+        )
+        return result
+
+    z = affinity_scores(profile, vectors)
+    # A candidate is in review nowhere, so any row it has is an exclusion: that
+    # collection is not offered again, the others still are.
+    row = {paper_id: index for index, paper_id in enumerate(scored_ids)}
+    for paper_id, collection_id in db.session.query(PaperCollection.paper_id, PaperCollection.collection_id).filter(
+        PaperCollection.decision == "exclude"
+    ):
+        if paper_id in row and collection_id in column:
+            z[row[paper_id], column[collection_id]] = -np.inf
+    best = z.argmax(axis=1)
+    best_z = z[np.arange(len(best)), best]
+    passing = np.flatnonzero(best_z >= AFFINITY_Z_MIN)  # false for NaN too: a broken vector never passes
+    counts = np.bincount(best[passing], minlength=len(column))
+    result["by_collection"] = [
+        {"id": collection_id, "name": name, "passing": int(count)}
+        for collection_id, name, count in zip(profile.collection_ids, profile.labels, counts)
+    ]
+    if only is not None:
+        passing = passing[best[passing] == column[only.id]]
+    # ponytail: no paging, so of more than 50 passing papers only the best 50 show
+    # (per collection with collection=). Upgrade: an offset, as get_collection has.
+    top = passing[np.argsort(-best_z[passing], kind="stable")][: _clamp_limit(limit, default=20)].tolist()
+    if not top:
+        return result
+
+    # The member each result sits closest to, among the visible members get_collection lists.
+    nearest: dict[int, int] = {}  # row of `vectors` -> paper id of its nearest member
+    for won in sorted({int(best[index]) for index in top}):
+        rows = [index for index in top if best[index] == won]
+        members = (
+            db.session.query(PaperCollection.paper_id)
+            .join(Paper, Paper.id == PaperCollection.paper_id)
+            .filter(
+                PaperCollection.collection_id == profile.collection_ids[won],
+                in_review_clause(),
+                Paper.is_hidden.is_(False),
+            )
+        )
+        member_ids, member_vectors = service.get_paper_vectors([paper_id for (paper_id,) in members])
+        if member_ids:
+            for index, member in zip(rows, nearest_member(profile, vectors[rows], member_vectors)):
+                nearest[index] = member_ids[member]
+
+    wanted = [scored_ids[index] for index in top] + list(nearest.values())
+    papers = {paper.id: paper for paper in Paper.query.filter(Paper.id.in_(wanted))}
+    for brief, index in zip(_briefs(papers[scored_ids[index]] for index in top), top):
+        member = papers.get(nearest.get(index))
+        result["results"].append(
+            {
+                **brief,
+                "z": round(float(best_z[index]), 2),
+                "collection": {"id": profile.collection_ids[best[index]], "name": profile.labels[best[index]]},
+                "nearest_member": member and {"arxiv_id": member.arxiv_id, "title": member.title},
+            }
+        )
+    result["count"] = len(top)
+    return result
 
 
 def get_paper_text(
@@ -533,7 +763,9 @@ def _resolve_or_create_collection(
     if not raw:
         return None, False
     if raw.isdigit():
-        return db.session.get(Collection, int(raw)), False
+        # A number is an id and never a name, also one that cannot be a row id: no
+        # collection is created for it.
+        return (db.session.get(Collection, int(raw)) if _is_row_id(raw) else None), False
 
     existing = Collection.query.filter_by(name=raw).first()
     if existing is not None or not create:

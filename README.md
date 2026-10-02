@@ -275,14 +275,25 @@ Restart Claude Desktop and the tools appear:
 | Tool | What it does |
 |---|---|
 | `search_papers` | Hybrid / semantic / keyword search over your corpus |
-| `get_paper` | Full metadata + citation/readiness/enrichment summary (by id or arXiv id) |
+| `get_paper` | Full metadata + citation/readiness/enrichment summary (by id or arXiv id), your tags, why the feed kept it, and the collections it is in |
 | `get_summary` | Stored TL;DR summary and structured LLM insights |
 | `top_ranked_today` | Today's top-ranked fresh papers (optional interest-profile lens) |
 | `list_collections` | Your collections and their paper counts |
 | `ask_paper` | Grounded Q&A over one paper's own text, with section citations |
-| `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes and screening decisions (paged; excluded papers only with `include_excluded`) |
+| `get_collection` | A collection's papers with cite keys matching its Export .bib, plus your notes and screening decisions (paged; excluded papers only with `include_excluded`). Optional filters: `tag` (exact), `decision` (`include` / `maybe` / `exclude` / `unscreened`), `added_since_days` |
 | `get_paper_text` | A paper's section table of contents + abstract, then any section's verbatim text (paged) |
+| `whats_new` | Papers that arrived in the last N days, are in no collection yet and score close to one: candidates to screen, each with its z, the collection it is closest to (wrong about one time in five) and the nearest paper already in it. Filter with `collection` |
 | `add_to_collection` | The one write tool — file a paper into a collection (idempotent) |
+
+Every paper in a list carries your `user_tags` and `has_full_text`, so the
+assistant knows which papers it can read in full without asking for each.
+
+Start it with `cv-arxiv-mcp --read-only` (`"args": ["--read-only"]` in the config
+above) to register no write tool at all, for example for an unattended run. The
+app still starts as usual: its idempotent schema check runs on the database, and
+scrape runs that a crash left marked as running are closed. The built-in scrape
+scheduler does not run in a read-only server, even when the config enables it.
+A running server picks up the papers a later scrape embeds; no restart is needed.
 
 The `mcp` package is an **optional extra**: the core install and web server work
 without it, and `cv-arxiv-mcp` prints an install hint and exits non-zero if it is

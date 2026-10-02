@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from flask import has_app_context
 
-from app.services.embeddings import EmbeddingService, add_sections_to_index, reset_embedding_service
+from app.services.embeddings import (
+    EmbeddingService,
+    add_papers_to_index,
+    add_sections_to_index,
+    get_embedding_service,
+    reset_embedding_service,
+)
 
 
 def _fake_encode(texts, **kwargs):
@@ -59,6 +68,93 @@ def test_partial_state_does_not_clobber_surviving_index(tmp_path):
     degraded.save()  # must be a no-op for the main index
 
     assert index_path.read_bytes() == original  # the 3-vector index was preserved
+
+    # Once the pair on disk is whole again, saving is back on: the row added meanwhile goes on top.
+    (index_dir / "id_map.json").write_text("[1, 2, 3]")
+    degraded.save()
+    assert json.loads((index_dir / "id_map.json").read_text()) == [1, 2, 3, 9]
+
+
+def _axis_vec(axis: int) -> np.ndarray:
+    """A vector that names its paper: 1.0 in the paper id's component."""
+    v = np.zeros(768, dtype=np.float32)
+    v[axis] = 1.0
+    return v
+
+
+def _other_process_adds(index_dir, *paper_ids: int) -> None:
+    # What the scrape (another process) does: load the index, add, save.
+    add_papers_to_index(
+        str(index_dir), list(paper_ids), [""] * len(paper_ids), vectors=[_axis_vec(i) for i in paper_ids]
+    )
+
+
+def test_reload_and_save_follow_other_writers(tmp_path, caplog):
+    from app.services import embeddings
+
+    def rereads(service) -> bool:
+        with patch.object(embeddings, "_read_matrix") as read_matrix:
+            service.reload_if_changed()
+        return read_matrix.called
+
+    index_dir = tmp_path / "faiss_index"
+    reader = EmbeddingService(index_dir)  # a long-running web or MCP server, started on an empty index
+    _other_process_adds(index_dir, 1, 2)
+
+    reader.reload_if_changed()
+    assert reader.index_count() == 2 and reader.has_paper(2)
+    assert not rereads(reader)  # loaded once: until the files change again a check is one stat
+
+    # Its own save is nothing to reload: no file is read again.
+    reader.add_papers([3], [""], vectors=[_axis_vec(3)])
+    reader.save()
+    assert not rereads(reader)
+
+    # A row it has not saved yet stays through a reload, on top of someone else's save.
+    reader.add_papers([4], [""], vectors=[_axis_vec(4)])
+    _other_process_adds(index_dir, 5)
+    reader.reload_if_changed()
+    assert reader.has_paper(4) and reader.has_paper(5)
+
+    # A save from a stale index builds on what was saved meanwhile instead of writing over it.
+    stale = EmbeddingService(index_dir)
+    _other_process_adds(index_dir, 6, 7)
+    stale.add_papers([8, 6], ["", ""], vectors=[_axis_vec(8), _axis_vec(6)])  # 6 was embedded by both: kept once
+    stale.save()
+    assert json.loads((index_dir / "id_map.json").read_text()) == [1, 2, 3, 5, 6, 7, 8]
+    reader.save()  # still holds 4, and has seen neither 6, 7 nor 8
+    on_disk = EmbeddingService(index_dir)
+    found, vectors = on_disk.get_paper_vectors(list(range(1, 9)))
+    assert vectors.argmax(axis=1).tolist() == found == list(range(1, 9))  # all there, each row its own paper's
+
+    # A torn pair (the map already names a row the matrix does not have yet) is left
+    # alone: read once, reported once, and loaded as soon as either file makes it agree.
+    matrix = np.load(index_dir / "papers.npy")
+    id_map = json.loads((index_dir / "id_map.json").read_text())
+    (index_dir / "id_map.json").write_text(json.dumps([*id_map, 9]))
+    with caplog.at_level(logging.WARNING, logger="app.services.embeddings"):
+        on_disk.reload_if_changed()
+        assert on_disk.index_count() == 8 and not on_disk.has_paper(9)
+        assert not rereads(on_disk)
+    assert caplog.text.count("not a matching pair") == 1
+    np.save(index_dir / "papers.npy", np.vstack([matrix, _axis_vec(9)]))
+    on_disk.reload_if_changed()
+    assert on_disk.has_paper(9)
+    # A file that cannot be read at all is left alone the same way.
+    (index_dir / "id_map.json").write_text("{not json")
+    on_disk.reload_if_changed()
+    assert on_disk.index_count() == 9 and not rereads(on_disk)
+
+
+def test_no_app_fallback_follows_the_instance_path_override(tmp_path, monkeypatch):
+    # With no app in reach the singleton must land where create_app() would put it (the
+    # sandbox tests/conftest.py sets), not in <cwd>/instance: from a checkout that is real data.
+    monkeypatch.chdir(tmp_path)  # so that a regression makes its ./instance here
+    monkeypatch.delenv("FAISS_INDEX_DIR", raising=False)
+    monkeypatch.setenv("CV_ARXIV_INSTANCE_PATH", str(tmp_path / "sandbox"))
+    assert not has_app_context()
+
+    assert get_embedding_service().index_dir == (tmp_path / "sandbox" / "faiss_index").resolve()
 
 
 def test_ensure_section_index_loads_once(tmp_path):
@@ -248,6 +344,19 @@ class TestEmbeddingService:
         added = service.add_papers([2, 3], ["b", "c"])
         assert added == 1
         assert service.index_count() == 3
+
+    def test_paper_indexed_while_it_was_being_encoded_gets_no_second_row(self, index_dir):
+        # Encoding runs outside the lock, so a reload or another thread's add can index
+        # the same paper meanwhile.
+        service = EmbeddingService(index_dir)
+
+        def encode_while_another_add_lands(texts):
+            service.add_papers([1], [""], vectors=[_axis_vec(1)])
+            return np.stack([_axis_vec(2)] * len(texts))
+
+        with patch.object(EmbeddingService, "encode", side_effect=encode_while_another_add_lands):
+            assert service.add_papers([1], ["a"]) == 0
+        assert service._id_map == [1]
 
     def test_save_and_reload(self, index_dir):
         service = _make_service(index_dir)

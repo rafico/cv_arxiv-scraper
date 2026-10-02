@@ -231,8 +231,7 @@ def import_collection(manifest: object, *, into=None, embed_max: int = MAX_BUNDL
     embedded = len(new_ids) <= embed_max
     if new_ids and embedded:
         # Only this import's papers, via the scrape path's reload-append-save under the
-        # index locks: saving the process singleton would write its stale matrix over
-        # vectors a concurrent scrape or CLI just added.
+        # index locks, the encoder in an isolated child as in the scrape.
         from app.services.embeddings import add_papers_to_index, get_embedding_service, reset_embedding_service
         from app.services.scrape_engine import _INDEX_WRITE_LOCK, _NATIVE_STAGE_TIMEOUT
         from app.services.subprocess_runner import run_isolated

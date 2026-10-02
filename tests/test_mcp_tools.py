@@ -13,12 +13,24 @@ from __future__ import annotations
 import importlib
 import sys
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
-from app.models import Collection, Paper, PaperCollection, PaperSection, db
+import numpy as np
+from sqlalchemy import event
+
+from app.models import Collection, Paper, PaperCollection, PaperSection, ScrapeRun, db
 from app.services import mcp_tools
+from app.services.embeddings import (
+    EmbeddingService,
+    add_papers_to_index,
+    get_embedding_service,
+    reset_embedding_service,
+)
+from app.services.interest_model import AFFINITY_Z_MIN, reset_interest_profile_cache
 from tests.helpers import FlaskDBTestCase
+from tests.test_interest_model import _FakeEmbeddingService
 
 
 def _make_paper(idx: int = 0, **overrides) -> Paper:
@@ -74,7 +86,7 @@ class SearchPapersTests(FlaskDBTestCase):
         self.assertTrue(all("Vision" in t or "vision" in t.lower() for t in titles))
         # Compact brief shape.
         first = result["results"][0]
-        for key in ("id", "arxiv_id", "title", "score", "abstract"):
+        for key in ("id", "arxiv_id", "title", "score", "abstract", "user_tags", "has_full_text"):
             self.assertIn(key, first)
 
     def test_unknown_mode_falls_back_to_hybrid(self):
@@ -158,6 +170,36 @@ class GetPaperTests(FlaskDBTestCase):
     def test_unknown_numeric_id_is_graceful(self):
         result = mcp_tools.get_paper(424242)
         self.assertEqual(result["error"], "not_found")
+        # Digits that are no row id: int() rejects a superscript, SQLite a 20-digit number.
+        for identifier in ("²", "9" * 20):
+            self.assertEqual(mcp_tools.get_paper(identifier)["error"], "not_found", identifier)
+
+    def test_detail_carries_tags_full_text_match_and_collections(self):
+        self.paper.user_tags = ["to-read"]
+        kept, dropped = Collection(name="Kept"), Collection(name="Dropped")
+        db.session.add_all([kept, dropped])
+        db.session.flush()
+        db.session.add_all(
+            [
+                PaperCollection(paper_id=self.paper_id, collection_id=kept.id),
+                PaperCollection(paper_id=self.paper_id, collection_id=dropped.id, decision="exclude"),
+                PaperSection(paper_id=self.paper_id, section_type="method", text="Body.", order_index=0),
+            ]
+        )
+        db.session.commit()
+
+        result = mcp_tools.get_paper(self.paper_id)
+
+        self.assertEqual(result["user_tags"], ["to-read"])
+        self.assertIs(result["has_full_text"], True)
+        self.assertEqual((result["match_type"], result["matched_terms"]), ("Title", ["Vision"]))
+        self.assertEqual(
+            result["collections"],
+            [
+                {"id": dropped.id, "name": "Dropped", "decision": "exclude"},
+                {"id": kept.id, "name": "Kept", "decision": None},
+            ],
+        )
 
 
 class GetSummaryTests(FlaskDBTestCase):
@@ -219,8 +261,9 @@ class TopRankedTodayTests(FlaskDBTestCase):
         self.assertEqual(result["profile"]["id"], created.id)
 
     def test_unknown_profile_falls_back_to_active(self):
-        result = mcp_tools.top_ranked_today(limit=2, profile="does-not-exist")
-        self.assertTrue(result["profile"]["is_active"])
+        for selector in ("does-not-exist", "²", "9" * 5000):  # the last two: digits that are no id
+            result = mcp_tools.top_ranked_today(limit=2, profile=selector)
+            self.assertTrue(result["profile"]["is_active"], selector[:20])
 
 
 class ListCollectionsTests(FlaskDBTestCase):
@@ -281,9 +324,11 @@ class AddToCollectionTests(FlaskDBTestCase):
         self.assertEqual(result["resource"], "paper")
 
     def test_unknown_numeric_collection_is_graceful(self):
-        result = mcp_tools.add_to_collection(999999, self.paper_id)
-        self.assertEqual(result["error"], "not_found")
-        self.assertEqual(result["resource"], "collection")
+        # A number is an id, never a name to create: also one that int() or SQLite cannot take.
+        for selector in (999999, "²", "9" * 20):
+            result = mcp_tools.add_to_collection(selector, self.paper_id)
+            self.assertEqual((result["error"], result["resource"]), ("not_found", "collection"), selector)
+        self.assertEqual(Collection.query.count(), 1)
 
 
 class GetCollectionTests(FlaskDBTestCase):
@@ -318,9 +363,264 @@ class GetCollectionTests(FlaskDBTestCase):
         self.assertIsNone(rest["next_offset"])
 
     def test_unknown_name_is_not_created(self):
-        result = mcp_tools.get_collection("Nope")
-        self.assertEqual(result["error"], "not_found")
-        self.assertIsNone(Collection.query.filter_by(name="Nope").first())
+        for selector in ("Nope", "²", "9" * 20):  # the last two: digits that are no row id
+            self.assertEqual(mcp_tools.get_collection(selector)["error"], "not_found", selector)
+        self.assertEqual(Collection.query.count(), 1)
+
+    def _arxiv_ids(self, **filters) -> list[str]:
+        return sorted(row["arxiv_id"] for row in mcp_tools.get_collection("Review", **filters)["papers"])
+
+    def _membership(self, arxiv_id: str) -> PaperCollection:
+        paper = Paper.query.filter_by(arxiv_id=arxiv_id).one()
+        return PaperCollection.query.filter_by(paper_id=paper.id, collection_id=self.collection_id).one()
+
+    def test_tag_filter_matches_one_whole_tag(self):
+        Paper.query.filter_by(arxiv_id="2607.3001").one().user_tags = ["must-read", "50%_done"]
+        Paper.query.filter_by(arxiv_id="2607.3002").one().user_tags = ["must-read-later"]
+        db.session.commit()
+
+        tagged = mcp_tools.get_collection("Review", tag="must-read")
+        self.assertEqual(tagged["count"], 1)
+        self.assertEqual(tagged["papers"][0]["user_tags"], ["must-read", "50%_done"])
+        # Part of a tag is not that tag, and LIKE wildcards in a tag are plain characters.
+        self.assertEqual(self._arxiv_ids(tag="must"), [])
+        self.assertEqual(self._arxiv_ids(tag="50%_done"), ["2607.3001"])
+        self.assertEqual(self._arxiv_ids(tag="5%"), [])
+        self.assertEqual(self._arxiv_ids(tag="must_read"), [])
+        # Tags differ by case (the app keeps "Must-Read" and "must-read" apart), and a tag
+        # longer than a LIKE pattern may be is an empty answer, not an error.
+        self.assertEqual(self._arxiv_ids(tag="Must-Read"), [])
+        self.assertEqual(self._arxiv_ids(tag="x" * 60_000), [])
+
+    def test_decision_filter_and_unknown_value(self):
+        self._membership("2607.3000").decision = "include"
+        self._membership("2607.3001").decision = "exclude"
+        db.session.commit()
+
+        self.assertEqual(self._arxiv_ids(decision="include"), ["2607.3000"])
+        self.assertEqual(self._arxiv_ids(decision="unscreened"), ["2607.3002"])  # the hidden member stays out
+        self.assertEqual(self._arxiv_ids(decision="maybe"), [])
+        # "exclude" implies include_excluded: without that the in-review filter would hide them all.
+        self.assertEqual(self._arxiv_ids(decision="exclude"), ["2607.3001"])
+        # A value that is not a decision is an error, not the unfiltered list.
+        unknown = mcp_tools.get_collection("Review", decision="excluded")
+        self.assertEqual(unknown["error"], "invalid_decision")
+        self.assertEqual(unknown["allowed"], ["include", "maybe", "exclude", "unscreened"])
+        self.assertNotIn("papers", unknown)
+
+    def test_added_since_days_keeps_recent_additions(self):
+        long_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=10)
+        self._membership("2607.3000").added_at = long_ago
+        db.session.commit()
+
+        self.assertEqual(self._arxiv_ids(added_since_days=7), ["2607.3001", "2607.3002"])
+        self.assertEqual(len(self._arxiv_ids(added_since_days=30)), 3)
+        # The window is clamped, never an error, and the answer names the one applied.
+        for asked, applied in ((0, 1), (30, 30), (10**9, 3650)):
+            self.assertEqual(mcp_tools.get_collection("Review", added_since_days=asked)["added_since_days"], applied)
+        self.assertEqual(len(self._arxiv_ids(added_since_days=0)), 2)  # 0 is one day, not "no filter"
+        self.assertNotIn("added_since_days", mcp_tools.get_collection("Review"))
+        # Filters combine: added this week and tagged.
+        Paper.query.filter_by(arxiv_id="2607.3000").one().user_tags = ["seed"]
+        Paper.query.filter_by(arxiv_id="2607.3001").one().user_tags = ["seed"]
+        db.session.commit()
+        self.assertEqual(self._arxiv_ids(added_since_days=7, tag="seed"), ["2607.3001"])
+
+    def test_full_text_flag_costs_one_query_for_the_page(self):
+        with_text = Paper.query.filter_by(arxiv_id="2607.3000").one()
+        db.session.add(PaperSection(paper_id=with_text.id, section_type="method", text="Body.", order_index=0))
+        db.session.commit()
+        statements: list[str] = []
+
+        def record(conn, cursor, statement, params, context, executemany):
+            statements.append(statement)
+
+        event.listen(db.engine, "before_cursor_execute", record)
+        try:
+            result = mcp_tools.get_collection("Review")
+        finally:
+            event.remove(db.engine, "before_cursor_execute", record)
+
+        self.assertEqual(
+            {row["arxiv_id"]: row["has_full_text"] for row in result["papers"]},
+            {"2607.3000": True, "2607.3001": False, "2607.3002": False},
+        )
+        self.assertEqual(sum("paper_sections" in statement for statement in statements), 1)
+
+
+class WhatsNewTests(FlaskDBTestCase):
+    """whats_new: fresh papers that sit close to a collection and are filed in none."""
+
+    def setUp(self):
+        super().setUp()
+        reset_interest_profile_cache()
+        self.addCleanup(reset_interest_profile_cache)
+        self.rng = np.random.default_rng(0)
+        self.shared = self.rng.normal(size=768)  # what every abstract has in common; the scorer centres it away
+        self.topic = self.rng.normal(size=768)
+        self.vectors: dict[int, np.ndarray] = {}
+        self.added = 0
+        self.now = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.long_ago = self.now - timedelta(days=30)
+
+        self.collection_id = self._collection("Topic")
+        self.members = [self._add(self._embed(self.topic), scraped_at=self.long_ago) for _ in range(6)]
+        self._file(self.collection_id, *self.members)
+        for _ in range(210):  # papers in no collection: what "unrelated" looks like to the scorer
+            self._add(self._embed(), scraped_at=self.long_ago)
+        # The newcomer: on topic, and closer to the third member than to any other.
+        near_third = self._unit(self.vectors[self.members[2]] + 0.05 * self._embed(self.topic))
+        self.fresh = self._add(near_third, user_tags=["to-screen"])
+        self._add(self._embed(-self.topic))  # fresh, off topic
+        self.old = self._add(self._embed(self.topic), scraped_at=self.long_ago)
+        self._add(self._embed(self.topic), is_hidden=True)
+        # Two papers with the newcomer's own vector that are not its nearest member: a
+        # hidden member, and one turned down for the collection (fresh, so a candidate too).
+        self._file(self.collection_id, self._add(near_third, is_hidden=True, scraped_at=self.long_ago))
+        self._file(self.collection_id, self._add(near_third), decision="exclude")
+        self._add(None)  # fresh, not embedded yet
+        db.session.add_all(
+            [
+                ScrapeRun(status="error", started_at=self.long_ago, finished_at=self.long_ago),
+                ScrapeRun(status="success", started_at=self.now, finished_at=self.now),
+            ]
+        )
+        db.session.commit()
+
+    @staticmethod
+    def _unit(vector: np.ndarray) -> np.ndarray:
+        return (vector / np.linalg.norm(vector)).astype(np.float32)
+
+    def _embed(self, direction: np.ndarray | None = None) -> np.ndarray:
+        own = self.rng.normal(size=768) if direction is None else direction + 0.3 * self.rng.normal(size=768)
+        return self._unit(self.shared + own)
+
+    def _add(self, vector: np.ndarray | None, **overrides) -> int:
+        paper = _make_paper(self.added, **overrides)
+        self.added += 1
+        db.session.add(paper)
+        db.session.flush()
+        if vector is not None:
+            self.vectors[paper.id] = vector
+        return paper.id
+
+    def _collection(self, name: str) -> int:
+        collection = Collection(name=name)
+        db.session.add(collection)
+        db.session.flush()
+        return collection.id
+
+    def _file(self, collection_id: int, *paper_ids: int, decision: str | None = None) -> None:
+        db.session.add_all(
+            PaperCollection(paper_id=paper_id, collection_id=collection_id, decision=decision) for paper_id in paper_ids
+        )
+
+    def _whats_new(self, **kwargs) -> dict:
+        with patch("app.services.embeddings.get_embedding_service", return_value=_FakeEmbeddingService(self.vectors)):
+            return mcp_tools.whats_new(**kwargs)
+
+    def test_fresh_on_topic_non_member_is_attributed(self):
+        result = self._whats_new(since_days=7)
+
+        # Not the off-topic, the month-old, the hidden, the turned-down or the unembedded one.
+        self.assertEqual([row["id"] for row in result["results"]], [self.fresh])
+        hit = result["results"][0]
+        self.assertGreaterEqual(hit["z"], AFFINITY_Z_MIN)
+        self.assertEqual(hit["collection"], {"id": self.collection_id, "name": "Topic"})
+        nearest = db.session.get(Paper, self.members[2])
+        self.assertEqual(hit["nearest_member"], {"arxiv_id": nearest.arxiv_id, "title": nearest.title})
+        self.assertEqual(hit["user_tags"], ["to-screen"])
+        self.assertIs(hit["has_full_text"], False)
+        self.assertEqual(result["last_scrape"], {"status": "success", "finished_at": f"{self.now:%Y-%m-%dT%H:%M:%S}Z"})
+        # Arrived: the newcomer, the off-topic, the turned-down and the unembedded paper.
+        self.assertEqual((result["since_days"], result["arrived"], result["unscored"], result["count"]), (7, 4, 1, 1))
+        self.assertEqual(result["by_collection"], [{"id": self.collection_id, "name": "Topic", "passing": 1}])
+
+    def test_window_collection_filter_and_limit(self):
+        # A wider window reaches the month-old paper; the window is clamped, never an error.
+        self.assertEqual({row["id"] for row in self._whats_new(since_days=60)["results"]}, {self.fresh, self.old})
+        self.assertEqual(self._whats_new(since_days=10**9)["since_days"], 90)
+        self.assertEqual(self._whats_new(since_days=0)["since_days"], 7)
+
+        # A second collection. A paper turned down for Topic sits between the two, nearer
+        # to a member of Topic than to any of Other's, and is still offered to Other: an
+        # exclusion counts for its own collection only.
+        other_topic = self.rng.normal(size=768)
+        other_id = self._collection("Other")
+        others = [self._add(self._embed(other_topic), scraped_at=self.long_ago) for _ in range(6)]
+        self._file(other_id, *others)
+        # Unfiled papers around that topic, as setUp has for Topic: they widen the spread of
+        # "unrelated", so no bystander clears the floor for Other by the luck of the draw.
+        for direction in (other_topic, other_topic, other_topic, -other_topic):
+            self._add(self._embed(direction), scraped_at=self.long_ago)
+        between = self._add(self._unit(2 * self.vectors[self.members[0]] + self._embed(other_topic)))
+        self._file(self.collection_id, between, decision="exclude")
+        db.session.commit()
+
+        result = self._whats_new()
+        self.assertEqual(
+            {row["id"]: row["collection"]["name"] for row in result["results"]}, {self.fresh: "Topic", between: "Other"}
+        )
+        self.assertEqual({row["name"]: row["passing"] for row in result["by_collection"]}, {"Topic": 1, "Other": 1})
+        # The nearest member comes from the collection the paper is attributed to.
+        nearest = {row["id"]: row["nearest_member"]["arxiv_id"] for row in result["results"]}
+        self.assertIn(nearest[between], {db.session.get(Paper, paper_id).arxiv_id for paper_id in others})
+        # collection= keeps one collection's candidates, by exact name or by id; limit is a total.
+        for selector in ("Other", other_id, str(other_id)):
+            self.assertEqual(
+                [row["id"] for row in self._whats_new(collection=selector)["results"]], [between], selector
+            )
+        limited = self._whats_new(limit=1)
+        self.assertEqual(limited["count"], 1)
+        self.assertEqual(sum(row["passing"] for row in limited["by_collection"]), 2)
+        self.assertEqual(limited["results"][0]["z"], max(row["z"] for row in result["results"]))
+
+    def test_unknown_collection_and_missing_profile_are_answers_not_exceptions(self):
+        for selector in ("Nope", "²", "9" * 20):  # the last two: digits that are no row id
+            unknown = self._whats_new(collection=selector)
+            self.assertEqual((unknown["error"], unknown["resource"]), ("not_found", "collection"), selector)
+        self.assertEqual(Collection.query.count(), 1)
+
+        # An index that cannot be opened: the header from the database, and the reason.
+        with patch("app.services.embeddings.get_embedding_service", side_effect=ValueError("not an index")):
+            broken = mcp_tools.whats_new()
+        self.assertEqual((broken["arrived"], broken["unscored"], broken["results"]), (4, 4, []))
+        self.assertIn("vector index could not be read", broken["reason"])
+
+        # A collection too small for a centroid: known, but nothing can be scored against it.
+        small = self._collection("Small")
+        self._file(small, self.members[0])
+        db.session.commit()
+        self.assertIn("fewer than 5", self._whats_new(collection="Small")["reason"])
+
+        # No vectors at all, so no collection profile: an empty answer that says why.
+        self.vectors.clear()
+        empty = self._whats_new()
+        self.assertEqual((empty["arrived"], empty["unscored"], empty["results"]), (4, 4, []))
+        self.assertIn("No collection can be scored", empty["reason"])
+        self.assertEqual(empty["last_scrape"]["status"], "success")
+
+    def test_vector_saved_by_another_service_instance_gets_scored(self):
+        # The real service on its own directory: this process loads the index, then the
+        # scrape (another process, here another instance) embeds the newcomer and saves.
+        index_dir = Path(self._tmpdir.name) / "faiss_index"
+        self.app.config["FAISS_INDEX_DIR"] = str(index_dir)
+        reset_embedding_service()
+        self.addCleanup(reset_embedding_service)
+        late = self.vectors.pop(self.fresh)
+        seeded = EmbeddingService(index_dir)
+        seeded.add_papers(list(self.vectors), [""] * len(self.vectors), vectors=list(self.vectors.values()))
+        seeded.save()
+
+        before = mcp_tools.whats_new()
+        self.assertEqual((before["unscored"], before["results"]), (2, []))
+
+        add_papers_to_index(str(index_dir), [self.fresh], [""], vectors=[late])
+
+        after = mcp_tools.whats_new()
+        self.assertEqual(after["unscored"], 1)
+        self.assertEqual([row["id"] for row in after["results"]], [self.fresh])
+        self.assertIsNone(get_embedding_service()._model)  # stored vectors only: no encoder was loaded
 
 
 class GetPaperTextTests(FlaskDBTestCase):
@@ -372,25 +672,71 @@ class GetPaperTextTests(FlaskDBTestCase):
         self.assertEqual(result["resource"], "section")
 
 
+class FakeFastMCP:
+    """Stands in for the SDK's server class; ``tool`` takes exactly (name, description)."""
+
+    def __init__(self, name, **kwargs):
+        self.kwargs, self.tools, self.descriptions = kwargs, {}, {}
+
+    def tool(self, name, description):
+        def register(fn):
+            self.tools[name], self.descriptions[name] = fn, description
+            return fn
+
+        return register
+
+
 class BuildServerTests(FlaskDBTestCase):
     def test_registers_read_tools_and_instructions(self):
         from app.mcp_server import build_server
-
-        class FakeFastMCP:
-            def __init__(self, name, **kwargs):
-                self.kwargs, self.tools = kwargs, {}
-
-            def tool(self, name, description):
-                def register(fn):
-                    self.tools[name] = fn
-                    return fn
-
-                return register
 
         server = build_server(self.app, FakeFastMCP)
         self.assertIn("get_paper_text", server.kwargs["instructions"])
         self.assertIn("get_collection", server.tools)
         self.assertEqual(server.tools["get_paper_text"](str(424242))["error"], "not_found")
+        self.assertEqual(len(server.tools), 10)
+        # The wrappers hand every parameter on.
+        filtered = server.tools["get_collection"]("Nope", tag="seed", decision="maybe", added_since_days=7)
+        self.assertEqual(filtered["error"], "not_found")
+        self.assertEqual(server.tools["whats_new"](since_days=3, collection="Nope", limit=5)["resource"], "collection")
+        # whats_new is offered as candidates with a known error rate, not as recommendations.
+        description = server.descriptions["whats_new"]
+        self.assertTrue(description.startswith("Candidates to screen, not recommendations"))
+        self.assertIn("wrong about one time in five", description)
+
+    def test_read_only_server_registers_no_write_tool(self):
+        from app.mcp_server import build_server
+
+        full = build_server(self.app, FakeFastMCP)
+        read_only = build_server(self.app, FakeFastMCP, read_only=True)
+
+        self.assertEqual(set(full.tools) - set(read_only.tools), {"add_to_collection"})
+        self.assertEqual(len(read_only.tools), 9)
+
+    def test_run_serves_no_write_tool_under_read_only_flag(self):
+        from app import mcp_server
+
+        served = []
+
+        class Served(FakeFastMCP):
+            def run(self):
+                served.append(self)
+
+        with (
+            patch.object(mcp_server, "_load_fastmcp", return_value=Served),
+            patch("app.cli.serve.prepare_data_dir"),  # would point the process at a data dir
+            patch("app.create_app", return_value=self.app),
+            patch("app.services.scheduler.SCRAPE_SCHEDULER.stop") as stop_scheduler,
+        ):
+            self.assertEqual(mcp_server.run([]), 0)
+            stop_scheduler.assert_not_called()
+            self.assertEqual(mcp_server.run(["--read-only"]), 0)
+            # create_app() starts the built-in scheduler when the config enables it: a
+            # read-only server hands it back, so it never scrapes on a schedule.
+            stop_scheduler.assert_called_once_with()
+
+        self.assertIn("add_to_collection", served[0].tools)
+        self.assertNotIn("add_to_collection", served[1].tools)
 
     @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp extra not installed")
     def test_builds_with_the_installed_sdk(self):
@@ -405,7 +751,7 @@ class BuildServerTests(FlaskDBTestCase):
         # event loop running on the main thread, and asyncio.run() refuses to start there.
         with ThreadPoolExecutor(max_workers=1) as pool:
             names = {tool.name for tool in pool.submit(asyncio.run, server.list_tools()).result()}
-        self.assertTrue({"get_collection", "get_paper_text", "search_papers"} <= names)
+        self.assertTrue({"get_collection", "get_paper_text", "search_papers", "whats_new"} <= names)
 
 
 class AskPaperTests(FlaskDBTestCase):

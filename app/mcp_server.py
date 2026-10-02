@@ -54,11 +54,12 @@ def _load_fastmcp() -> Any:
     return FastMCP
 
 
-def build_server(app: Flask, fastmcp_cls: Any | None = None) -> Any:
+def build_server(app: Flask, fastmcp_cls: Any | None = None, *, read_only: bool = False) -> Any:
     """Build a ``FastMCP`` server exposing the corpus tools, bound to ``app``.
 
     Each tool runs inside ``app.app_context()`` so the logic layer can hit the DB.
     ``fastmcp_cls`` is injectable for tests; production loads it lazily.
+    ``read_only`` registers no write tool at all (the unattended weekly run).
     """
     fastmcp = fastmcp_cls or _load_fastmcp()
     server = fastmcp(SERVER_NAME, instructions=SERVER_INSTRUCTIONS)
@@ -122,14 +123,29 @@ def build_server(app: Flask, fastmcp_cls: Any | None = None) -> Any:
         description="A collection's papers (by id or exact name) with BibTeX cite keys matching the "
         "collection's Export .bib, plus the user's notes and screening decision (include/maybe/exclude, "
         "null = unscreened). Excluded papers are left out unless include_excluded=true. "
-        "Paged: offset/limit (max 50); follow next_offset.",
+        "Paged: offset/limit (max 50); follow next_offset. "
+        "Optional filters: tag (papers carrying exactly that user tag), decision (include, maybe, exclude "
+        "or unscreened) and added_since_days (papers filed in the collection in the last N days, e.g. "
+        "what a query refresh added this week).",
     )
     def get_collection(
-        collection_name_or_id: str, offset: int = 0, limit: int = 50, include_excluded: bool = False
+        collection_name_or_id: str,
+        offset: int = 0,
+        limit: int = 50,
+        include_excluded: bool = False,
+        tag: str | None = None,
+        decision: str | None = None,
+        added_since_days: int | None = None,
     ) -> dict[str, Any]:
         with app.app_context():
             return mcp_tools.get_collection(
-                collection_name_or_id, offset=offset, limit=limit, include_excluded=include_excluded
+                collection_name_or_id,
+                offset=offset,
+                limit=limit,
+                include_excluded=include_excluded,
+                tag=tag,
+                decision=decision,
+                added_since_days=added_since_days,
             )
 
     @server.tool(
@@ -143,6 +159,23 @@ def build_server(app: Flask, fastmcp_cls: Any | None = None) -> Any:
     ) -> dict[str, Any]:
         with app.app_context():
             return mcp_tools.get_paper_text(paper_id, order_index=order_index, offset=offset, max_chars=max_chars)
+
+    @server.tool(
+        name="whats_new",
+        description="Candidates to screen, not recommendations: papers that arrived in the last since_days "
+        "(default 7, max 90), are in no collection yet, and score close to one. Each is attributed to the "
+        "collection it is closest to; that attribution is wrong about one time in five, so read the abstract "
+        "before filing anything. Results carry z (2 or more; higher is closer) and nearest_member (the most "
+        "similar paper already in that collection), sorted by z; limit (max 50) is a total, so pass "
+        "collection (id or exact name) to see one collection's. The header gives last_scrape, arrived (new "
+        "papers considered), unscored (no stored embedding yet) and by_collection (how many pass per collection).",
+    )
+    def whats_new(since_days: int = 7, collection: str | None = None, limit: int = 20) -> dict[str, Any]:
+        with app.app_context():
+            return mcp_tools.whats_new(since_days=since_days, collection=collection, limit=limit)
+
+    if read_only:
+        return server
 
     # The single mutation, clearly separated from the read tools above.
     @server.tool(
@@ -171,6 +204,13 @@ def run(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="cv-arxiv-mcp", add_help=True)
     parser.add_argument("--data-dir", default=None, help="Data directory (DB, FAISS index, config, secrets).")
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="Register no write tools, for unattended runs. The app still starts as usual: it runs its "
+        "idempotent schema check (adds missing tables and columns) and closes scrape runs that a crash "
+        "left marked as running. The built-in scrape scheduler does not run in this process.",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     # Load the SDK first so a missing extra fails fast, before app bootstrap.
@@ -182,6 +222,13 @@ def run(argv: Sequence[str] | None = None) -> int:
     from app import create_app
 
     app = create_app()
-    server = build_server(app, fastmcp_cls)
+    if args.read_only:
+        # create_app() starts the built-in scheduler when the config enables it. A
+        # read-only server must not scrape (or mail the digest): stop it, which also
+        # frees the scheduler lock for a web server.
+        from app.services.scheduler import SCRAPE_SCHEDULER
+
+        SCRAPE_SCHEDULER.stop()
+    server = build_server(app, fastmcp_cls, read_only=args.read_only)
     server.run()  # stdio transport (Claude Desktop default)
     return 0

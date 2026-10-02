@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
 from app.models import Collection, Paper, PaperCollection, PaperFeedback, db
+from app.services.embeddings import EmbeddingService, add_papers_to_index, reset_embedding_service
 from app.services.interest_model import (
     AFFINITY_Z_MIN,
     MIN_POSITIVE_FEEDBACK,
@@ -15,6 +17,7 @@ from app.services.interest_model import (
     build_interest_profile,
     collection_affinity,
     fit_collection_profile,
+    nearest_member,
     recompute_interest_similarities,
     reset_interest_profile_cache,
     score_vector,
@@ -261,6 +264,16 @@ class InterestProfileTests(FlaskDBTestCase):
             centred /= np.linalg.norm(centred, axis=1, keepdims=True)
             by_hand = (centred @ profile.centroids.T - profile.bg_mean) / profile.bg_std
             np.testing.assert_allclose(scores, by_hand, atol=1e-3)
+            # The nearest member: each member is its own, and a non-finite row never wins.
+            pool = np.vstack([np.full(768, np.nan), *(vectors[pid] for pid in members["Alpha"])])
+            self.assertEqual(nearest_member(profile, pool[[4, 2]], pool).tolist(), [4, 2])
+            # Closest by direction once the corpus mean is taken off both sides. u and v are
+            # at right angles to the mean and to each other. Row 0 is nearly the mean, like
+            # the paper, so it is the closest before centring; row 2 is long, so it has the
+            # largest dot product; row 1 is the one that points the paper's way.
+            u, v = np.linalg.qr(np.column_stack([mean, _basis_vector(0), _basis_vector(1)]))[0].T[1:]
+            rows = np.vstack([mean + 0.01 * v, 0.3 * mean + u, mean + 5 * (u + v)])
+            self.assertEqual(nearest_member(profile, mean + 0.2 * u, rows).tolist(), [1])
 
             # The description (here: the paper itself, cosine 1) is not blended in: the signal
             # is the best z over 4 (AFFINITY_Z_SCALE), which makes the "> 0.5" explanation z > 2.
@@ -333,6 +346,42 @@ class InterestProfileTests(FlaskDBTestCase):
             for pid in background[51:]:
                 del service.vectors_by_id[pid]
             self.assertIsNone(build_interest_profile(self.app))
+
+    def test_member_embedded_by_another_process_reaches_the_profile(self):
+        """A long-running process picks up what the scrape (another process) embedded after it started."""
+        index_dir = Path(self._tmpdir.name) / "faiss_index"
+        self.app.config["FAISS_INDEX_DIR"] = str(index_dir)
+        reset_embedding_service()
+        self.addCleanup(reset_embedding_service)
+        rng = np.random.default_rng(0)
+        topic = rng.normal(size=768)
+
+        def add(vector: np.ndarray) -> tuple[int, np.ndarray]:
+            paper = _paper(f"2802.{10000 + Paper.query.count()}")
+            db.session.add(paper)
+            db.session.flush()
+            return paper.id, (vector / np.linalg.norm(vector)).astype(np.float32)
+
+        collection = Collection(name="Alpha")
+        db.session.add(collection)
+        db.session.flush()
+        members = [add(topic + 0.3 * rng.normal(size=768)) for _ in range(MIN_POSITIVE_FEEDBACK)]
+        db.session.add_all(PaperCollection(paper_id=pid, collection_id=collection.id) for pid, _ in members)
+        background = [add(rng.normal(size=768)) for _ in range(200)]
+        db.session.commit()
+        # When this process starts, the scrape has embedded every paper but one member.
+        (late_id, late_vector), *embedded = [*members, *background]
+        seeded = EmbeddingService(index_dir)
+        seeded.add_papers([pid for pid, _ in embedded], [""] * len(embedded), vectors=[vec for _, vec in embedded])
+        seeded.save()
+        self.assertIsNone(build_interest_profile(self.app))  # one embedded member short of a centroid
+
+        add_papers_to_index(str(index_dir), [late_id], [""], vectors=[late_vector])
+
+        self.assertEqual(recompute_interest_similarities(self.app), len(members) + len(background))
+        self.assertEqual(build_interest_profile(self.app).collection_ids, (collection.id,))
+        db.session.expire_all()
+        self.assertEqual(db.session.get(Paper, late_id).interest_similarity, 1.0)
 
 
 if __name__ == "__main__":
