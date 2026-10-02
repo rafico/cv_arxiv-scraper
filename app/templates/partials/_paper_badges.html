@@ -22,5 +22,5 @@
    a line of its own. The reason is agent-written text: autoescaped here, and never put into a script. #}
 {% if current_filters is defined and current_filters.collection and paper.collection_decision_note %}
 <span data-agent-note class="w-full min-w-0 overflow-hidden text-[11px] text-fg-muted"
-      title="From an agent, not confirmed by you. Click the same decision to confirm it, another to overrule it."><span class="badge badge-warn">Agent</span> {{ paper.collection_decision_note }}</span>
+      title="From an agent, not confirmed by you yet. Your decision takes this mark off: the same one confirms, another overrules."><span class="badge badge-warn">Agent</span> {{ paper.collection_decision_note }}</span>
 {% endif %}

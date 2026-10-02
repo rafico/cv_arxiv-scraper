@@ -733,13 +733,19 @@ def _one_line(text: object, most: int) -> str | None:
     return cleaned if 0 < len(cleaned) <= most and cleaned.isprintable() else None
 
 
+def _write_failed(exc: Exception) -> dict[str, Any]:
+    """Roll back and say so: a locked database must not raise out of a write tool."""
+    db.session.rollback()
+    return {"error": "write_failed", "cause": type(exc).__name__}
+
+
 def _commit_logged(tool: str, **entry: Any) -> dict[str, Any] | None:
     """Flush the pending write, append its line to the write log, commit; None when it went through.
 
     The line is written before the commit, so nothing is committed that the log does
     not show (a line whose commit then failed describes a write that did not happen).
-    Any failure rolls back and comes back as an error payload: a locked database, or a
-    log that cannot be written, must not raise out of a tool.
+    Any failure, a log that cannot be written included, rolls back and comes back as
+    an error payload.
     """
     try:
         db.session.flush()
@@ -751,8 +757,7 @@ def _commit_logged(tool: str, **entry: Any) -> dict[str, Any] | None:
             log.write(line + "\n")
         db.session.commit()
     except Exception as exc:  # noqa: BLE001 — a database error and an OS error alike
-        db.session.rollback()
-        return {"error": "write_failed", "cause": type(exc).__name__}
+        return _write_failed(exc)
     return None
 
 
@@ -802,8 +807,8 @@ def set_decision(collection: str | int, paper: str | int, decision: str, reason:
     }
     failed = _commit_logged(
         "set_decision",
-        collection_id=result["collection_id"],
-        paper_ids=[result["paper_id"]],
+        collection_id=target.id,
+        paper_ids=[found.id],
         previous=result["previous"],
         value=decision,
         created=result["created"],
@@ -812,7 +817,7 @@ def set_decision(collection: str | int, paper: str | int, decision: str, reason:
     return failed or result
 
 
-def tag_papers(papers: list[str | int], tag: str) -> dict[str, Any]:
+def tag_papers(papers: list[Any], tag: str) -> dict[str, Any]:
     """Add one user tag to up to 50 papers. Add-only: no tool removes a tag.
 
     ``tag`` must match ``[a-z0-9][a-z0-9 ._-]{0,31}`` in full: agents read tags back
@@ -847,7 +852,7 @@ def tag_papers(papers: list[str | int], tag: str) -> dict[str, Any]:
     }
     if not tagged:
         return result
-    return _commit_logged("tag_papers", paper_ids=[row["id"] for row in result["tagged"]], value=cleaned) or result
+    return _commit_logged("tag_papers", paper_ids=[found.id for found in tagged], value=cleaned) or result
 
 
 def add_to_collection(collection_name_or_id: str | int, paper_id: str | int, create: bool = False) -> dict[str, Any]:
@@ -870,7 +875,10 @@ def add_to_collection(collection_name_or_id: str | int, paper_id: str | int, cre
         # ponytail: the helper commits the new collection on its own, before the logged
         # write below; if that write then fails, an empty collection is left without a
         # log line. Upgrade: create it in the same transaction.
-        collection, created = _resolve_or_create_collection(collection_name_or_id)
+        try:
+            collection, created = _resolve_or_create_collection(collection_name_or_id)
+        except Exception as exc:  # noqa: BLE001 — as in _commit_logged
+            return _write_failed(exc)
     if collection is None:
         return {"error": "not_found", "resource": "collection", "identifier": str(collection_name_or_id)}
 
@@ -886,11 +894,7 @@ def add_to_collection(collection_name_or_id: str | int, paper_id: str | int, cre
         return result
     apply_decision(collection.id, [paper.id], None, note=_AGENT_ADDED_NOTE, create=True)
     failed = _commit_logged(
-        "add_to_collection",
-        collection_id=result["collection_id"],
-        paper_ids=[result["paper_id"]],
-        created=True,
-        created_collection=created,
+        "add_to_collection", collection_id=collection.id, paper_ids=[paper.id], created=True, created_collection=created
     )
     return failed or result
 

@@ -1,4 +1,4 @@
-"""Writing screening decisions: the one place a membership's decision and its agent mark change."""
+"""Screening decisions on collection memberships: the one writer of the agent mark (``decision_note``)."""
 
 from __future__ import annotations
 

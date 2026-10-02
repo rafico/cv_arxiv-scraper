@@ -320,7 +320,8 @@ class AddToCollectionTests(FlaskDBTestCase):
         result = mcp_tools.add_to_collection("Brand New Collection", self.paper_id)
         self.assertEqual((result["error"], result["resource"]), ("not_found", "collection"))
         # Asked for, a name still has to be one printable line.
-        for name in ("Two\nlines", "x" * 129, "zero​width"):
+        # (a number is an id, and is never created)
+        for name in ("Two\nlines", "x" * 129, "zero​width", "999999"):
             refused = mcp_tools.add_to_collection(name, self.paper_id, create=True)
             self.assertEqual((refused["error"], refused["resource"]), ("not_found", "collection"), name[:20])
         self.assertEqual(Collection.query.count(), 1)
@@ -372,7 +373,7 @@ class McpWriteGuardTests(FlaskDBTestCase):
         return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
 
     def test_writes_are_validated_logged_and_confined(self):
-        reason = "off-topic: LiDAR only"
+        reason = "off-topic: a survey, no method"
         # Turning a candidate down files it as excluded, marked with the agent's reason.
         result = mcp_tools.set_decision("Review", self.candidate, "exclude", f" {reason}\n")
         self.assertEqual(
@@ -437,8 +438,9 @@ class McpWriteGuardTests(FlaskDBTestCase):
         self.assertEqual(Collection.query.count(), 1)
 
         # Tags: a pattern rather than free text, add-only, and all or nothing.
-        tagged = mcp_tools.tag_papers([str(self.member), "2607.3000", self.candidate], " must-read 6.7 ")
-        self.assertEqual(tagged["tag"], "must-read 6.7")
+        tag = "to-read v1.2_a"  # every kind of character a tag may hold
+        tagged = mcp_tools.tag_papers([str(self.member), "2607.3000", self.candidate], f" {tag} ")
+        self.assertEqual(tagged["tag"], tag)
         self.assertEqual(  # the member was named twice, by row id and by arXiv id
             tagged["tagged"],
             [
@@ -446,16 +448,16 @@ class McpWriteGuardTests(FlaskDBTestCase):
                 {"id": self.candidate, "arxiv_id": "2607.3001", "title": "MCP Test Paper 1"},
             ],
         )
-        again = mcp_tools.tag_papers([self.member, self.other], "must-read 6.7")
+        again = mcp_tools.tag_papers([self.member, self.other], tag)
         self.assertEqual(([row["id"] for row in again["tagged"]], again["already_tagged"]), ([self.other], 1))
-        self.assertEqual(mcp_tools.tag_papers([self.member], "must-read 6.7")["tagged"], [])  # nothing to write
+        self.assertEqual(mcp_tools.tag_papers([self.member], tag)["tagged"], [])  # nothing to write
         unknown = mcp_tools.tag_papers([self.member, "9999.99999"], "seed")
         self.assertEqual((unknown["error"], unknown["identifiers"]), ("not_found", ["9999.99999"]))
         for bad in ("<b>x", "Must-Read", "-lead", "x" * 33, "two\nlines", "", None):
             self.assertEqual(mcp_tools.tag_papers([self.member], bad)["error"], "invalid_tag", bad)
         for bad in ([], [self.member] * 51, str(self.member), None):
             self.assertEqual(mcp_tools.tag_papers(bad, "seed")["error"], "invalid_papers", bad)
-        self.assertEqual(self._tags(self.member), ["must-read 6.7"])
+        self.assertEqual(self._tags(self.member), [tag])
 
         # Filing a paper is logged too. The log holds the writes that happened and no others.
         self.assertTrue(mcp_tools.add_to_collection(self.cid, self.other)["added"])
@@ -466,8 +468,8 @@ class McpWriteGuardTests(FlaskDBTestCase):
             [
                 ("set_decision", [self.candidate], "exclude"),
                 ("set_decision", [self.candidate], "maybe"),
-                ("tag_papers", [self.member, self.candidate], "must-read 6.7"),
-                ("tag_papers", [self.other], "must-read 6.7"),
+                ("tag_papers", [self.member, self.candidate], tag),
+                ("tag_papers", [self.other], tag),
                 ("add_to_collection", [self.other], None),
             ],
         )
@@ -486,6 +488,11 @@ class McpWriteGuardTests(FlaskDBTestCase):
             failed = mcp_tools.tag_papers([self.member], "seed")
         self.assertEqual(failed, {"error": "write_failed", "cause": "OperationalError"})
         self.assertEqual(self._tags(self.member), [])
+        # So does a new collection that cannot be committed.
+        with patch.object(db.session, "commit", side_effect=locked):
+            failed = mcp_tools.add_to_collection("Brand New", self.other, create=True)
+        self.assertEqual(failed, {"error": "write_failed", "cause": "OperationalError"})
+        self.assertEqual(Collection.query.count(), 1)
         self.assertEqual(self._logged(), [])
 
 

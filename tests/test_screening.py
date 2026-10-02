@@ -261,15 +261,15 @@ class ScreeningTests(FlaskDBTestCase):
         self.assertNotIn("Getting Started", default)
 
     def test_agent_decision_is_marked_until_the_owner_confirms(self):
-        self._mark_agent(self.included, note='near <b>dataset</b> "work"')
+        self._mark_agent(self.included, note='zq9: <b>bold</b> "quoted"')
 
         html = self._view()
         # The chip with the reason on that one card, whose buttons know that a click confirms.
         self.assertEqual(html.count("<span data-agent-note"), 1)
         self.assertEqual(html.count('data-agent="true"'), 3)
-        # Agent-written text: escaped where it is shown, and it reaches no script.
-        self.assertEqual(html.count("near &lt;b&gt;dataset&lt;/b&gt; &#34;work&#34;"), 1)
-        self.assertNotIn("<b>dataset</b>", html)
+        # Agent-written text: escaped where it is shown, and shown nowhere else (no script gets it).
+        self.assertIn("zq9: &lt;b&gt;bold&lt;/b&gt; &#34;quoted&#34;</span>", html)
+        self.assertEqual(html.count("zq9"), 1)
 
         self.client.put(
             f"/api/collections/{self.cid}/papers/{self.included}/decision",
