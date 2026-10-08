@@ -147,8 +147,8 @@
             const response = await fetch(`/api/collections/${SCREENING.collection}/papers/${paperId}/decision`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
-                // Clicking the active decision clears it back to unscreened.
-                body: JSON.stringify({ decision: button.dataset.active ? null : decision }),
+                // Clicking the active decision clears it back to unscreened; when an agent made it, the click confirms it instead.
+                body: JSON.stringify({ decision: button.dataset.active && !button.dataset.agent ? null : decision }),
             });
             if (!response.ok) return;
             data = await response.json();
@@ -164,10 +164,13 @@
         card.querySelectorAll(".decision-btn").forEach((btn) => {
             const on = btn.dataset.decision === data.decision;
             btn.dataset.active = on ? "true" : "";
+            btn.dataset.agent = "";
             btn.classList.remove(...INACTIVE_STYLES, ...Object.values(DECISION_STYLES).flat());
             btn.classList.add(...(on ? DECISION_STYLES[btn.dataset.decision] : INACTIVE_STYLES));
             if (on) label = btn.textContent.trim();
         });
+        // The decision is the owner's now: the server cleared the agent's note with this write.
+        card.querySelector("[data-agent-note]")?.remove();
         const badge = card.querySelector("[data-decision-badge]");
         if (badge) {
             badge.textContent = label;
@@ -729,8 +732,8 @@
                 const btn = cards[focusedCardIndex]?.querySelector(`.decision-btn[data-decision="${decision}"]`);
                 if (btn) {
                     e.preventDefault();
-                    // A key only sets its decision (clear it by clicking); ignore autorepeat so holding a key can't screen a run of cards.
-                    if (!e.repeat && !btn.dataset.active) btn.click();
+                    // A key only sets its decision, or confirms one an agent made (clear it by clicking); ignore autorepeat so holding a key can't screen a run of cards.
+                    if (!e.repeat && (!btn.dataset.active || btn.dataset.agent)) btn.click();
                 }
                 break;
             }
