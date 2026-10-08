@@ -247,6 +247,10 @@ class PaperCollection(db.Model):
     # Literature-review screening: one of SCREENING_DECISIONS, NULL = unscreened.
     # Validated in the app (no CHECK constraint, so SQLite can still drop the column).
     decision = db.Column(db.String(8), nullable=True)
+    # Non-NULL = touched by an agent over MCP and not yet confirmed by the owner: the
+    # agent's reason for its decision, or its mark on a row it added. Any owner write
+    # clears it; app.services.screening.apply_decision is the one place that writes it.
+    decision_note = db.Column(db.Text, nullable=True)
 
     paper = db.relationship("Paper")
     collection = db.relationship("Collection", back_populates="papers")

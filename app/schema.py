@@ -48,9 +48,10 @@ SYNC_STATE_COLUMN_DEFS = {
     "last_cursor_arxiv_id": "TEXT",
 }
 
-# Screening decision per membership; nullable with no default, so existing rows
-# read as unscreened and nothing is rewritten.
-PAPER_COLLECTION_COLUMN_DEFS = {"decision": "TEXT"}
+# Screening decision per membership, and the mark an agent's write leaves on it; both
+# nullable with no default, so existing rows read as unscreened, with no agent mark,
+# and nothing is rewritten.
+PAPER_COLLECTION_COLUMN_DEFS = {"decision": "TEXT", "decision_note": "TEXT"}
 
 FTS5_CREATE = """
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(

@@ -494,9 +494,9 @@
 {% endblock %}
 
 {% block content %}
-{# ── Onboarding (only for new users) ── #}
+{# ── Onboarding (only for new users, and only on the inbox: a collection link carries no view, so it reads as inbox) ── #}
 {% set incomplete_steps = dashboard_overview.onboarding_steps | selectattr('complete', 'equalto', false) | list %}
-{% if incomplete_steps and current_filters.view == 'inbox' %}
+{% if incomplete_steps and current_filters.view == 'inbox' and not current_filters.collection %}
 <div class="rounded-2xl border border-priority bg-priority-soft p-4 mb-5">
     <div class="flex items-center justify-between gap-3 mb-3">
         <div>

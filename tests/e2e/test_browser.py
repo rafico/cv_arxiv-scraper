@@ -304,6 +304,49 @@ def test_screening_keys_in_collection_view(e2e_page, live_server):
     expect(page.locator('[data-decision-count="unscreened"]')).to_have_text("2")
 
 
+def test_agent_decision_is_confirmed_by_the_same_click_or_key(e2e_page, live_server):
+    from app.models import PaperCollection
+    from app.models import db as _db
+
+    page, base_url = e2e_page
+    cid = _review_of_every_paper(live_server["app"])
+    with live_server["app"].app_context():
+        # Two decisions an agent made over MCP: each carries its reason as the note.
+        first, second = PaperCollection.query.filter_by(collection_id=cid).order_by(PaperCollection.paper_id)[:2]
+        first.decision, first.decision_note = "include", "on-topic: <b>dataset</b> paper"
+        second.decision, second.decision_note = "maybe", "borderline: a survey"
+        first_id, second_id = first.paper_id, second.paper_id
+        _db.session.commit()
+
+    page.goto(f"{base_url}/?collection={cid}&timeframe=all")
+    notes = page.locator("[data-agent-note]")
+    expect(notes).to_have_count(2)
+    first_card = page.locator(f'.paper-card[data-paper-id="{first_id}"]')
+    expect(first_card.locator("[data-agent-note]")).to_contain_text("on-topic: <b>dataset</b> paper")  # as text
+
+    # A click on the decision the agent made confirms it: it stays, and the mark goes.
+    include = first_card.locator('.decision-btn[data-decision="include"]')
+    include.click()
+    expect(first_card.locator("[data-agent-note]")).to_have_count(0)
+    expect(include).to_have_attribute("data-active", "true")
+    expect(include).to_have_attribute("data-agent", "")
+    # Now it is the owner's, and the same click clears it as it always did.
+    include.click()
+    expect(include).to_have_attribute("data-active", "")
+
+    # The key confirms too (on an owner's decision it does nothing).
+    second_card = page.locator(f'.paper-card[data-paper-id="{second_id}"]')
+    page.evaluate("(id) => focusCard(getCards().findIndex((card) => card.dataset.paperId === String(id)))", second_id)
+    page.keyboard.press("m")
+    expect(notes).to_have_count(0)
+    expect(second_card.locator('.decision-btn[data-decision="maybe"]')).to_have_attribute("data-active", "true")
+
+    page.reload()
+    expect(notes).to_have_count(0)
+    expect(page.locator('[data-decision-count="maybe"]')).to_have_text("1")
+    expect(page.locator('[data-decision-count="include"]')).to_have_text("0")
+
+
 def test_racing_decisions_keep_keyboard_focus_and_keys_only_set(e2e_page, live_server):
     page, base_url = e2e_page
     cid = _review_of_every_paper(live_server["app"])

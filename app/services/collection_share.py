@@ -44,6 +44,10 @@ def export_collection(collection_id: int) -> dict:
     collection = db.session.get(Collection, collection_id)
     if collection is None:
         raise ValueError("Collection not found")
+    # ponytail: a bundle carries each decision without decision_note (an agent's reason
+    # is for the owner only), so an agent's unconfirmed decision arrives on the other side
+    # looking like the owner's. Upgrade: export a per-paper agent flag, no free text, and
+    # mark the rows it fills on import.
     rows = (
         db.session.query(Paper, PaperCollection.decision)
         .join(PaperCollection, PaperCollection.paper_id == Paper.id)

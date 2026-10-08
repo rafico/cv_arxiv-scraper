@@ -1,12 +1,14 @@
 {# Feedback buttons + reading status. Shared by list rows and visual cards.
    Context: `paper`, `FEEDBACK`, `DECISIONS` (from dashboard.html). #}
 {% if current_filters is defined and current_filters.collection %}
-{# Screening decision in this collection; review-scoped, writes no feedback (an exclude leaves the collection's interest centroid). #}
+{# Screening decision in this collection; review-scoped, writes no feedback (an exclude leaves the collection's interest centroid).
+   data-agent: the row is an agent's and unconfirmed, so a click on the active decision confirms it instead of clearing it. #}
 {% for value, meta in DECISIONS.items() %}
 <button type="button"
         onclick="setDecision({{ paper.id }}, '{{ value }}', this)"
         data-decision="{{ value }}"
         data-active="{{ 'true' if paper.collection_decision == value else '' }}"
+        data-agent="{{ 'true' if paper.collection_decision_note else '' }}"
         title="{{ meta.label }} ({{ meta.key }})"
         class="decision-btn inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border transition-opacity
                {{ meta.active if paper.collection_decision == value else 'bg-surface text-fg-muted border-edge hover:bg-surface-2' }}">
