@@ -228,6 +228,9 @@ class Collection(db.Model):
     name = db.Column(db.String(128), nullable=False, unique=True)
     description = db.Column(db.Text, nullable=True, default="")
     color = db.Column(db.String(7), nullable=True)
+    # The Mendeley folder this collection was exported to, so a later export finds it
+    # again whatever either side has been renamed to (mirrors Paper.mendeley_doc_id).
+    mendeley_folder_id = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
@@ -247,6 +250,10 @@ class PaperCollection(db.Model):
     # Literature-review screening: one of SCREENING_DECISIONS, NULL = unscreened.
     # Validated in the app (no CHECK constraint, so SQLite can still drop the column).
     decision = db.Column(db.String(8), nullable=True)
+    # Non-NULL = touched by an agent over MCP and not yet confirmed by the owner: the
+    # agent's reason for its decision, or its mark on a row it added. Any owner write
+    # clears it; app.services.screening.apply_decision is the one place that writes it.
+    decision_note = db.Column(db.Text, nullable=True)
 
     paper = db.relationship("Paper")
     collection = db.relationship("Collection", back_populates="papers")

@@ -335,7 +335,8 @@ members 28/71; must-read papers with full text 21/111; `cites` edges 1,901
 33. **Scrape hygiene** — automatic pre-scrape snapshot (7 kept), `empty` run
     status, timestamped logs, and the never-read section embeddings removed.
 
-Items 27-30 ship as one pull request, 31-33 as a second.
+Items 27-30 shipped as one pull request and 31 on its own after it; 32 and 33
+are not built yet.
 
 ### Owner actions (zero code)
 

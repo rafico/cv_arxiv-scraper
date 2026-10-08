@@ -714,7 +714,7 @@ def mendeley_sync():
     validate_csrf_token()
 
     from app.models import PaperFeedback
-    from app.services.mendeley import MendeleyClient
+    from app.services.mendeley import WRITE_LOCK, MendeleyClient
 
     client = MendeleyClient()
     status = client.check_connection()
@@ -722,35 +722,38 @@ def mendeley_sync():
         flash(f"Mendeley not connected: {status['message']}", "error")
         return redirect(url_for("settings.view_settings", section="automation"))
 
-    saved_papers = (
-        Paper.query.join(
-            PaperFeedback,
-            db.and_(
-                PaperFeedback.paper_id == Paper.id,
-                PaperFeedback.action == "save",
-            ),
+    # Under the lock from the read of the links to their commit: a collection export running
+    # in another tab would otherwise create the papers the two have in common a second time.
+    with WRITE_LOCK:
+        saved_papers = (
+            Paper.query.join(
+                PaperFeedback,
+                db.and_(
+                    PaperFeedback.paper_id == Paper.id,
+                    PaperFeedback.action == "save",
+                ),
+            )
+            .distinct()
+            .all()
         )
-        .distinct()
-        .all()
-    )
 
-    papers_to_sync = [paper for paper in saved_papers if not paper.mendeley_doc_id]
-    skipped_count = len(saved_papers) - len(papers_to_sync)
+        papers_to_sync = [paper for paper in saved_papers if not paper.mendeley_doc_id]
+        skipped_count = len(saved_papers) - len(papers_to_sync)
 
-    success_count = 0
-    failure_count = 0
-    for paper in papers_to_sync:
-        result = client.add_document(paper)
-        if result["success"]:
-            doc_id = result.get("document_id")
-            if doc_id:
-                paper.mendeley_doc_id = str(doc_id)
-            success_count += 1
-        else:
-            failure_count += 1
+        success_count = 0
+        failure_count = 0
+        for paper in papers_to_sync:
+            result = client.add_document(paper)
+            if result["success"]:
+                doc_id = result.get("document_id")
+                if doc_id:
+                    paper.mendeley_doc_id = str(doc_id)
+                success_count += 1
+            else:
+                failure_count += 1
 
-    if success_count:
-        db.session.commit()
+        if success_count:
+            db.session.commit()
 
     message = f"Synced {success_count} new papers to Mendeley"
     if skipped_count:

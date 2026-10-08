@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
+import textwrap
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,7 +20,7 @@ import requests
 from app.services.secret_files import write_secret_file
 
 if TYPE_CHECKING:
-    from app.models import Paper
+    from app.models import Collection, Paper
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,6 +31,23 @@ DEFAULT_TOKEN_PATH = _PROJECT_ROOT / ".mendeley_token"
 MENDELEY_AUTH_URL = "https://api.mendeley.com/oauth/authorize"
 MENDELEY_TOKEN_URL = "https://api.mendeley.com/oauth/token"  # noqa: S105 — OAuth endpoint URL, not a secret
 MENDELEY_API_BASE = "https://api.mendeley.com"
+
+# Papers per export_collection call (up to two API calls each): small enough for the
+# collection page to show progress between calls.
+EXPORT_BATCH_SIZE = 10
+
+# Held by every route that creates Mendeley documents (the per-paper send, the saved-papers
+# sync, a collection's export batch) from its read of papers.mendeley_doc_id to its commit,
+# so that none of them creates a document another one is just creating. Process-local,
+# which is enough for this single-worker app.
+WRITE_LOCK = threading.Lock()
+
+
+def _explain(exc: Exception) -> str:
+    """``exc`` and, for a refused request, Mendeley's answer: the reason is in the body, which requests leaves out."""
+    response = getattr(exc, "response", None)
+    body = response.text.strip()[:200] if response is not None else ""
+    return f"{exc} ({body})" if body else str(exc)
 
 
 class MendeleyClient:
@@ -76,16 +96,47 @@ class MendeleyClient:
         write_secret_file(self.token_path, json.dumps(token_data))
         self._token_data = token_data
 
-    def _headers_for_access_token(self, access_token: str) -> dict:
-        return {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/vnd.mendeley-document.1+json",
-        }
+    def _request(self, method: str, url: str, media: str = "document", **kwargs) -> requests.Response:
+        """Authorized API call that raises on an error status.
 
-    def _get_headers(self) -> dict:
-        """Get authorization headers using the stored token."""
-        token = self._load_token()
-        return self._headers_for_access_token(token["access_token"])
+        A 401 refreshes the token and retries once. ``media`` names the versioned
+        Mendeley media type, sent as Accept on a GET and as Content-Type on a write.
+        """
+        # ponytail: one connection per call; share a requests.Session (and re-point the
+        # tests' requests.get/post patches) if large first exports feel slow.
+        send = getattr(requests, method)
+        media_header = "Accept" if method == "get" else "Content-Type"
+
+        def attempt() -> requests.Response:
+            headers = {
+                "Authorization": f"Bearer {self._load_token()['access_token']}",
+                media_header: f"application/vnd.mendeley-{media}.1+json",
+            }
+            return send(url, headers=headers, timeout=30, **kwargs)
+
+        resp = attempt()
+        if resp.status_code == 401:
+            try:
+                self._refresh_access_token()
+            except requests.HTTPError as exc:
+                # The token endpoint's 4xx is an auth failure, not a verdict on this request.
+                raise RuntimeError(f"Mendeley token could not be refreshed: {exc}") from exc
+            resp = attempt()
+        resp.raise_for_status()
+        return resp
+
+    def _paged(self, path: str, media: str = "document", **params: str) -> Iterator[dict]:
+        """Every item of a paginated collection, 500 (the API's maximum) per request."""
+        url: str | None = f"{MENDELEY_API_BASE}{path}"
+        query: dict | None = {"limit": 500, **params}
+        while url:
+            resp = self._request("get", url, media, params=query)
+            yield from resp.json()
+            # The API tells clients to follow its Link URLs, not to build the next page's.
+            url, query = resp.links.get("next", {}).get("url"), None
+            if url and not url.startswith(f"{MENDELEY_API_BASE}/"):
+                # The bearer token goes wherever this URL points.
+                raise ValueError(f"Mendeley pagination link leaves the API: {url}")
 
     def _refresh_access_token(self) -> dict:
         """Refresh the stored OAuth token using the refresh token."""
@@ -264,11 +315,8 @@ class MendeleyClient:
         except Exception as exc:
             return {"success": False, "message": f"Mendeley OAuth failed: {exc}"}
 
-    def add_document(self, paper: Paper) -> dict:
-        """Add a paper to the user's Mendeley library.
-
-        Returns dict with ``success``, ``message``, and optionally ``document_id``.
-        """
+    def _create_document(self, paper: Paper) -> dict:
+        """Create a library document for ``paper`` and return it as the API does; raises on failure."""
         doc = {
             "type": "journal",
             "title": paper.title,
@@ -294,27 +342,18 @@ class MendeleyClient:
             doc["year"] = paper.publication_dt.year
             doc["month"] = paper.publication_dt.month
 
+        return self._request("post", f"{MENDELEY_API_BASE}/documents", json=doc).json()
+
+    def add_document(self, paper: Paper) -> dict:
+        """Add a paper to the user's Mendeley library.
+
+        Returns dict with ``success``, ``message``, and optionally ``document_id``.
+        """
         try:
-            resp = requests.post(
-                f"{MENDELEY_API_BASE}/documents",
-                headers=self._get_headers(),
-                json=doc,
-                timeout=30,
-            )
-            if resp.status_code == 401:
-                self._refresh_access_token()
-                resp = requests.post(
-                    f"{MENDELEY_API_BASE}/documents",
-                    headers=self._get_headers(),
-                    json=doc,
-                    timeout=30,
-                )
-            resp.raise_for_status()
-            result = resp.json()
             return {
                 "success": True,
                 "message": "Document added to Mendeley.",
-                "document_id": result.get("id"),
+                "document_id": self._create_document(paper).get("id"),
             }
         except (requests.RequestException, RuntimeError, ValueError, KeyError, OSError) as exc:
             # A mid-batch 401 triggers _refresh_access_token, which raises RuntimeError
@@ -323,3 +362,121 @@ class MendeleyClient:
             # error escaped → caller 500s and an in-progress sync aborted before commit,
             # losing the mendeley_doc_id of already-synced papers (duplicate re-uploads).
             return {"success": False, "message": f"Failed to add document: {exc}"}
+
+    def export_collection(self, collection: Collection, after: int = 0, limit: int = EXPORT_BATCH_SIZE) -> dict:
+        """Send one batch of a collection's papers to its Mendeley folder; the caller holds ``WRITE_LOCK``.
+
+        The folder is the one remembered in ``mendeley_folder_id`` while Mendeley still has
+        it, else a library folder named like the collection that no other collection uses,
+        else a new one. Safe to repeat and to resume: papers already in the folder are
+        skipped, and a paper the library already holds (same arXiv id) is linked instead of
+        duplicated. Nothing is ever removed from Mendeley.
+
+        ``after`` is the last paper id the previous call tried, so that one pass over the
+        collection ends even when some papers keep failing. Returns ``total``, ``sent``,
+        ``failures`` (one message per paper Mendeley rejected), ``remaining`` and the next
+        ``after`` (``None`` once the pass is over). When Mendeley as a whole is failing
+        (network, auth, rate limit, server errors) it returns ``error`` with this call's
+        ``sent``; what was sent stays sent.
+        """
+        from app.models import Collection, Paper, PaperCollection, db, in_review_clause
+        from app.services.onboarding import normalize_arxiv_id
+
+        sent = 0
+        try:
+            # Checked against the listing on every call rather than trusted: the API does not
+            # say what it answers for the id of a folder that was deleted in Mendeley.
+            folders = {folder["id"]: folder.get("name") or "" for folder in self._paged("/folders", "folder")}
+            folder_id = collection.mendeley_folder_id
+            if folder_id not in folders:  # first export, or the folder is gone
+                # A folder of this name is taken over, unless it is another collection's: that
+                # one may have been renamed since, and its old name given to this one.
+                taken = {
+                    fid
+                    for (fid,) in db.session.query(Collection.mendeley_folder_id).filter(Collection.id != collection.id)
+                }
+                name = collection.name.strip().casefold()
+                folder_id = next(
+                    (fid for fid, theirs in folders.items() if fid not in taken and theirs.strip().casefold() == name),
+                    None,
+                )
+                if folder_id is None:
+                    created = self._request(
+                        "post", f"{MENDELEY_API_BASE}/folders", "folder", json={"name": collection.name}
+                    )
+                    folder_id = created.json()["id"]
+                collection.mendeley_folder_id = folder_id
+                db.session.commit()
+            # Trashed documents still belong to their folder. Counting them in leaves a paper
+            # that was thrown away in Mendeley alone instead of sending it again.
+            in_folder = {doc["id"] for doc in self._paged(f"/folders/{folder_id}/documents", include_trashed="true")}
+
+            # The papers "Export .bib" exports: the review's visible ones.
+            papers = (
+                Paper.query.join(PaperCollection, PaperCollection.paper_id == Paper.id)
+                .filter(PaperCollection.collection_id == collection.id, Paper.is_hidden.is_(False), in_review_clause())
+                .order_by(Paper.id)
+                .all()
+            )
+            if not after and any(not paper.mendeley_doc_id for paper in papers):
+                # Start of a pass: link what the library already holds instead of duplicating it.
+                library: dict[str, str] = {}
+                for doc in self._paged("/documents"):
+                    arxiv_id = normalize_arxiv_id((doc.get("identifiers") or {}).get("arxiv"))
+                    if arxiv_id:
+                        library.setdefault(arxiv_id, doc["id"])
+                for paper in papers:
+                    if not paper.mendeley_doc_id:
+                        paper.mendeley_doc_id = library.get(paper.arxiv_id)
+
+            pending = [paper for paper in papers if paper.id > after and paper.mendeley_doc_id not in in_folder]
+            batch, rest = pending[:limit], pending[limit:]
+            failures: list[str] = []
+            shaky = False  # the paper before this one drew a 403 or a 5xx
+            for paper in batch:
+                adding = False
+                try:
+                    if not paper.mendeley_doc_id:
+                        # ponytail: two calls per new paper. The API declares folder_uuids on
+                        # POST /documents, which would file a new document in one call: use it
+                        # once that is checked against the live API.
+                        paper.mendeley_doc_id = self._create_document(paper)["id"]
+                        # At once: a document whose id is lost here is created again next time.
+                        db.session.commit()
+                    adding = True
+                    self._request(
+                        "post", f"{MENDELEY_API_BASE}/folders/{folder_id}/documents", json={"id": paper.mendeley_doc_id}
+                    )
+                    sent += 1
+                    shaky = False
+                except requests.HTTPError as exc:
+                    status = exc.response.status_code if exc.response is not None else 0
+                    if adding and status == 409:  # "document already exists in folder"
+                        continue
+                    message = f"{textwrap.shorten(paper.title, 80, placeholder='…')}: {_explain(exc)}"
+                    unclear = status == 403 or not 400 <= status < 500
+                    # 401 and 429 are never one paper's fault. A 403 or a 5xx may be (the API does
+                    # not say), so the first is put down to its paper and a second in a row to
+                    # Mendeley: stop then, rather than fail every paper after it.
+                    if status in (401, 429) or (unclear and shaky):
+                        raise RuntimeError(message) from exc
+                    shaky = unclear
+                    if adding and status == 404:
+                        # "Folder or document not found", and the folder was listed a moment ago:
+                        # the linked document is gone from this library (deleted for good, or it
+                        # belonged to another account). Forget it, so that the next pass links or
+                        # creates the paper afresh.
+                        paper.mendeley_doc_id = None
+                        message += " (its Mendeley document is gone: the next run sends the paper again)"
+                    failures.append(message)
+            db.session.commit()  # links to documents the library already held, and links dropped above
+            return {
+                "total": len(papers),
+                "sent": sent,
+                "failures": failures,
+                "remaining": len(rest),
+                "after": batch[-1].id if rest else None,
+            }
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, OSError) as exc:
+            db.session.rollback()
+            return {"error": f"Mendeley export stopped: {_explain(exc)}", "sent": sent}

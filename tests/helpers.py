@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import copy
+import itertools
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
+import requests
 import yaml
 
 from app import create_app
@@ -179,3 +183,93 @@ def oai_response(verb: str, *records: str, token: str | None = None) -> bytes:
         '<?xml version="1.0" encoding="UTF-8"?>\n<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">'
         f"<{verb}>{''.join(records)}{resumption}</{verb}></OAI-PMH>"
     ).encode()
+
+
+class FakeMendeley:
+    """An in-memory api.mendeley.com, to patch over ``app.services.mendeley.requests.get``/``.post``.
+
+    Status codes follow the API's own declaration (api.mendeley.com/apidocs): a second
+    folder of the same name and a document already in the folder are 409, an unknown
+    folder or document is 404, and trashed documents are left out of listings unless
+    ``include_trashed=true``. It answers with real ``requests.Response`` objects, so status
+    checks, JSON decoding and the Link-header pagination are the library's own.
+
+    ``calls`` records ``(method, path)`` and ``headers`` the headers of each call;
+    ``intercept(method, path, body)`` may return an HTTP status to fail a call with, or raise.
+    """
+
+    BASE = "https://api.mendeley.com"
+
+    def __init__(self, page_size: int = 500):
+        self.page_size = page_size
+        self.folders: dict[str, str] = {}  # id -> name
+        self.documents: dict[str, dict] = {}  # id -> document
+        self.folder_documents: dict[str, list[str]] = {}  # folder id -> document ids
+        self.trashed: set[str] = set()  # document ids in the trash
+        self.calls: list[tuple[str, str]] = []
+        self.headers: list[dict] = []
+        self.intercept = lambda method, path, body: None
+        self._ids = itertools.count(1)
+
+    def get(self, url, **kwargs):
+        return self._handle("get", url, kwargs)
+
+    def post(self, url, **kwargs):
+        return self._handle("post", url, kwargs)
+
+    @staticmethod
+    def _response(status: int, body, url: str, next_url: str | None = None) -> requests.Response:
+        response = requests.Response()
+        response.status_code = status
+        response.url = url
+        response._content = b"" if body is None else json.dumps(body).encode()
+        if next_url:
+            response.headers["Link"] = f'<{next_url}>; rel="next"'
+        return response
+
+    def _handle(self, method: str, url: str, kwargs: dict) -> requests.Response:
+        parts = urlsplit(url)
+        path, body = parts.path, kwargs.get("json")
+        self.calls.append((method, path))
+        self.headers.append(kwargs.get("headers") or {})
+        status = self.intercept(method, path, body)
+        if status:
+            return self._response(status, {"message": "intercepted"}, url)
+
+        segments = path.strip("/").split("/")
+        in_folder = len(segments) == 3 and segments[0] == "folders" and segments[2] == "documents"
+        if method == "get":
+            query = {**parse_qs(parts.query), **{k: [str(v)] for k, v in (kwargs.get("params") or {}).items()}}
+            hidden = set() if query.get("include_trashed") == ["true"] else self.trashed
+            if segments == ["folders"]:
+                items = [{"id": folder_id, "name": name} for folder_id, name in self.folders.items()]
+            elif segments == ["documents"]:
+                items = [document for document in self.documents.values() if document["id"] not in hidden]
+            elif in_folder and segments[1] in self.folders:
+                items = [{"id": doc_id} for doc_id in self.folder_documents[segments[1]] if doc_id not in hidden]
+            else:
+                return self._response(404, {"message": "not found"}, url)
+            # The marker is opaque to clients: they must follow the Link URL as given.
+            limit = min(int(query.get("limit", ["20"])[0]), self.page_size)
+            start = int(query.get("marker", ["0"])[0])
+            more = start + limit < len(items)
+            carried = "&include_trashed=true" if query.get("include_trashed") == ["true"] else ""
+            next_url = f"{self.BASE}{path}?limit={limit}&marker={start + limit}{carried}" if more else None
+            return self._response(200, items[start : start + limit], url, next_url)
+        if segments == ["folders"]:
+            if body["name"] in self.folders.values():
+                return self._response(409, {"message": "A folder with the same name already exists"}, url)
+            folder_id = f"folder-{next(self._ids)}"
+            self.folders[folder_id] = body["name"]
+            self.folder_documents[folder_id] = []
+            return self._response(201, {"id": folder_id, "name": body["name"]}, url)
+        if segments == ["documents"]:
+            document = {**body, "id": f"doc-{next(self._ids)}"}
+            self.documents[document["id"]] = document
+            return self._response(201, document, url)
+        if in_folder and segments[1] in self.folders and body["id"] in self.documents:
+            if body["id"] in self.folder_documents[segments[1]]:
+                return self._response(409, {"message": "Document already exists in folder"}, url)
+            self.folder_documents[segments[1]].append(body["id"])
+            return self._response(201, None, url)
+        return self._response(404, {"message": "Folder or document not found"}, url)

@@ -304,6 +304,49 @@ def test_screening_keys_in_collection_view(e2e_page, live_server):
     expect(page.locator('[data-decision-count="unscreened"]')).to_have_text("2")
 
 
+def test_agent_decision_is_confirmed_by_the_same_click_or_key(e2e_page, live_server):
+    from app.models import PaperCollection
+    from app.models import db as _db
+
+    page, base_url = e2e_page
+    cid = _review_of_every_paper(live_server["app"])
+    with live_server["app"].app_context():
+        # Two decisions an agent made over MCP: each carries its reason as the note.
+        first, second = PaperCollection.query.filter_by(collection_id=cid).order_by(PaperCollection.paper_id)[:2]
+        first.decision, first.decision_note = "include", "on-topic: <b>dataset</b> paper"
+        second.decision, second.decision_note = "maybe", "borderline: a survey"
+        first_id, second_id = first.paper_id, second.paper_id
+        _db.session.commit()
+
+    page.goto(f"{base_url}/?collection={cid}&timeframe=all")
+    notes = page.locator("[data-agent-note]")
+    expect(notes).to_have_count(2)
+    first_card = page.locator(f'.paper-card[data-paper-id="{first_id}"]')
+    expect(first_card.locator("[data-agent-note]")).to_contain_text("on-topic: <b>dataset</b> paper")  # as text
+
+    # A click on the decision the agent made confirms it: it stays, and the mark goes.
+    include = first_card.locator('.decision-btn[data-decision="include"]')
+    include.click()
+    expect(first_card.locator("[data-agent-note]")).to_have_count(0)
+    expect(include).to_have_attribute("data-active", "true")
+    expect(include).to_have_attribute("data-agent", "")
+    # Now it is the owner's, and the same click clears it as it always did.
+    include.click()
+    expect(include).to_have_attribute("data-active", "")
+
+    # The key confirms too (on an owner's decision it does nothing).
+    second_card = page.locator(f'.paper-card[data-paper-id="{second_id}"]')
+    page.evaluate("(id) => focusCard(getCards().findIndex((card) => card.dataset.paperId === String(id)))", second_id)
+    page.keyboard.press("m")
+    expect(notes).to_have_count(0)
+    expect(second_card.locator('.decision-btn[data-decision="maybe"]')).to_have_attribute("data-active", "true")
+
+    page.reload()
+    expect(notes).to_have_count(0)
+    expect(page.locator('[data-decision-count="maybe"]')).to_have_text("1")
+    expect(page.locator('[data-decision-count="include"]')).to_have_text("0")
+
+
 def test_racing_decisions_keep_keyboard_focus_and_keys_only_set(e2e_page, live_server):
     page, base_url = e2e_page
     cid = _review_of_every_paper(live_server["app"])
@@ -380,3 +423,59 @@ def test_skip_and_remove_keep_screening_chips_live(e2e_page, live_server):
     expect(cards).to_have_count(1)
     expect(unscreened).to_have_text("1")
     expect(page.locator('[data-decision-count="all"]')).to_have_text("1")
+
+
+def test_send_collection_to_mendeley_runs_every_batch(e2e_page, live_server):
+    from unittest.mock import patch
+
+    from app.models import db as _db
+    from app.services.mendeley import EXPORT_BATCH_SIZE
+    from tests.e2e.conftest import _make_paper
+    from tests.helpers import FakeMendeley
+
+    page, base_url = e2e_page
+    app = live_server["app"]
+    total = EXPORT_BATCH_SIZE + 2  # the three seeded papers and enough more for a second batch
+    with app.app_context():
+        _db.session.add_all(_make_paper(i) for i in range(3, total))
+        _db.session.commit()
+    cid = _review_of_every_paper(app)
+    mendeley = FakeMendeley()
+    status_cache = app.extensions.pop("mendeley_status_cache", None)  # holds "not connected" from earlier pages
+    try:
+        with (
+            patch("app.services.mendeley.requests.get", mendeley.get),
+            patch("app.services.mendeley.requests.post", mendeley.post),
+            patch("app.services.mendeley.MendeleyClient._load_token", lambda _client: {"access_token": "token"}),
+            patch(
+                "app.services.mendeley.MendeleyClient.check_connection",
+                return_value={"status": "connected", "message": "Mendeley is connected."},
+            ),
+        ):
+            page.goto(f"{base_url}/?collection={cid}&timeframe=all")
+            button = page.locator("#collection-mendeley-btn")
+            status = page.locator("#collection-mendeley-status")
+
+            # Mendeley starts refusing after three papers: the run stops and says how far it got.
+            mendeley.intercept = lambda method, path, body: (
+                429 if method == "post" and len(mendeley.folder_documents.get("folder-1", [])) == 3 else None
+            )
+            button.click()
+            expect(status).to_contain_text("429")
+            expect(status).to_contain_text("3 sent so far; click again to resume.")
+            expect(button).to_be_enabled()
+
+            mendeley.intercept = lambda method, path, body: None
+            button.click()  # resumes: the three are not sent again
+            expect(status).to_have_text(f"{total} of {total} papers are in the Mendeley folder ({total - 3} new).")
+            expect(button).to_be_enabled()
+
+            button.click()  # again: everything is there already
+            expect(status).to_have_text(f"{total} of {total} papers are in the Mendeley folder (0 new).")
+    finally:
+        app.extensions.pop("mendeley_status_cache", None)
+        if status_cache is not None:
+            app.extensions["mendeley_status_cache"] = status_cache
+
+    assert mendeley.folders == {"folder-1": "E2E Review"}
+    assert len(mendeley.folder_documents["folder-1"]) == total
