@@ -43,6 +43,8 @@ SAVED_SEARCH_COLUMN_DEFS = {
     "notify_on_match": "INTEGER NOT NULL DEFAULT 0",
 }
 
+COLLECTION_COLUMN_DEFS = {"mendeley_folder_id": "TEXT"}
+
 SYNC_STATE_COLUMN_DEFS = {
     "last_cursor_page": "INTEGER",
     "last_cursor_arxiv_id": "TEXT",
@@ -237,6 +239,15 @@ def ensure_schema() -> None:
             _validate_column_name(col_name)
             db.session.execute(
                 text(f"ALTER TABLE paper_collections ADD COLUMN {col_name} {col_type}")  # noqa: S608
+            )
+    db.session.commit()
+
+    collection_columns = {col["name"] for col in inspect(db.engine).get_columns("collections")}
+    for col_name, col_type in COLLECTION_COLUMN_DEFS.items():
+        if col_name not in collection_columns:
+            _validate_column_name(col_name)
+            db.session.execute(
+                text(f"ALTER TABLE collections ADD COLUMN {col_name} {col_type}")  # noqa: S608
             )
     db.session.commit()
 

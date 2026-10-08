@@ -273,6 +273,16 @@
             Graph
         </a>
     </div>
+    {% if mendeley_connected %}
+    <div class="mt-2 px-2">
+        <button id="collection-mendeley-btn" type="button"
+                title="Copy this collection's papers into a Mendeley folder; papers already in it are skipped"
+                class="w-full px-2 py-1.5 text-xs rounded-lg border border-edge text-fg-muted hover:bg-surface-2">
+            Send to Mendeley
+        </button>
+        <p id="collection-mendeley-status" role="status" class="mt-1 text-[11px] text-fg-muted"></p>
+    </div>
+    {% endif %}
     <div class="mt-2 px-2 flex gap-2">
         <a id="collection-ask-link" href="{{ url_for('discover.index', collection=current_filters.collection) }}#chat-panel"
            title="Ask a question answered from this collection's papers"
@@ -464,6 +474,38 @@
             importStatus.textContent = "Error: request failed";
         } finally {
             importBtn.disabled = false;
+        }
+    };
+
+    const mendeleyBtn = document.getElementById("collection-mendeley-btn");
+    const mendeleyStatus = document.getElementById("collection-mendeley-status");
+    if (mendeleyBtn) mendeleyBtn.onclick = async function () {
+        mendeleyBtn.disabled = true;
+        mendeleyStatus.textContent = "Sending…";
+        let after = 0, sent = 0, total = 0, failures = [];
+        try {
+            // One batch per request, so progress shows; the server skips what the folder
+            // already holds, so a stopped run resumes from where it was.
+            while (after != null) {
+                const res = await fetch("/api/collections/" + collectionId + "/mendeley", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+                    body: JSON.stringify({ after }),
+                });
+                const data = await res.json();
+                sent += data.sent || 0;  // a batch that stopped half-way says how far it got
+                if (!res.ok) throw new Error(data.error || "request failed");
+                ({ after, total } = data);
+                failures = failures.concat(data.failures);
+                mendeleyStatus.textContent = "Sending… " + (total - data.remaining) + " of " + total;
+            }
+            mendeleyStatus.textContent = (total - failures.length) + " of " + total
+                + " papers are in the Mendeley folder (" + sent + " new)."
+                + (failures.length ? " Failed: " + failures.slice(0, 3).join("; ") + (failures.length > 3 ? "; …" : "") : "");
+        } catch (e) {
+            mendeleyStatus.textContent = e.message + " — " + sent + " sent so far; click again to resume.";
+        } finally {
+            mendeleyBtn.disabled = false;
         }
     };
 

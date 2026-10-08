@@ -109,6 +109,30 @@ def export_collection_bundle(collection_id: int):
     return response
 
 
+@api_bp.route("/collections/<int:collection_id>/mendeley", methods=["POST"])
+def export_collection_mendeley(collection_id: int):
+    """Send one batch of the collection to its Mendeley folder.
+
+    The collection page repeats the call with the returned ``after`` until it is null.
+    """
+    from app.services.mendeley import WRITE_LOCK, MendeleyClient
+
+    validate_csrf_token()
+    after = (request.get_json(silent=True) or {}).get("after", 0)
+    if not isinstance(after, int) or isinstance(after, bool) or after < 0:
+        return jsonify({"error": "'after' must be a paper id"}), 400
+    # One batch at a time: two tabs exporting collections that share a paper would create it twice.
+    with WRITE_LOCK:
+        collection = db.session.get(Collection, collection_id) or abort(404)
+        client = MendeleyClient()
+        if not after:  # once per pass; a token that expires later is refreshed by the client
+            status = client.check_connection()
+            if status["status"] != "connected":
+                return jsonify({"error": f"Mendeley not connected: {status['message']}"}), 400
+        result = client.export_collection(collection, after=after)
+    return jsonify(result), 502 if "error" in result else 200
+
+
 _CSV_COLUMNS = (
     "arxiv_id",
     "title",

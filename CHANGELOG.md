@@ -30,6 +30,19 @@ Wave 6: collections become the interest model (see `ROADMAP.md` and
   that later joined a collection in its scrape day's top 10?), `checkpoint`
   (share of new collection papers the feed had already stored) and
   `--self-test`.
+- **Send a whole collection to Mendeley.** With Mendeley connected, an open
+  collection's sidebar has **Send to Mendeley**: the papers that Export .bib
+  exports (visible, not excluded) go into a Mendeley folder named after the
+  collection, ten at a time with a running count. It can be stopped and run
+  again: papers already in the folder are skipped (one you moved to
+  Mendeley's trash stays there), a paper your library already holds under the
+  same arXiv id is reused instead of created twice, and nothing is ever
+  removed from Mendeley. A paper Mendeley rejects is reported with Mendeley's
+  reason and skipped; when Mendeley itself is failing (network, sign-in, rate
+  limit) the run stops and the next click resumes it. The folder is
+  remembered in the new `collections.mendeley_folder_id` column (added to an
+  existing database at start-up), so renaming the collection or the folder
+  does not start a second one. Also `POST /api/collections/<id>/mendeley`.
 - **MCP tool `whats_new`**: the papers that arrived in the last `since_days`
   (default 7), are in review in no collection and clear the collection scorer's
   floor (z >= 2), best first, each with its z, the collection it is closest to
@@ -129,6 +142,11 @@ Wave 6: collections become the interest model (see `ROADMAP.md` and
 - Test suite with the `mcp` extra installed: `test_builds_with_the_installed_sdk`
   called `asyncio.run()` on the main thread and failed whenever it ran after the
   browser tests, because Playwright keeps an event loop running there.
+- **The per-paper Send to Mendeley no longer creates a second document** for a
+  paper that is linked already: a card drawn before the link was made (by the
+  saved-papers sync, a collection export or another tab) still offered to send
+  it. The three Mendeley senders now also take turns, so two of them running
+  at once cannot create the same paper twice.
 
 ## [0.7.0] — 2026-09-28
 

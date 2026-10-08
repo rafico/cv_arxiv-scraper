@@ -423,3 +423,59 @@ def test_skip_and_remove_keep_screening_chips_live(e2e_page, live_server):
     expect(cards).to_have_count(1)
     expect(unscreened).to_have_text("1")
     expect(page.locator('[data-decision-count="all"]')).to_have_text("1")
+
+
+def test_send_collection_to_mendeley_runs_every_batch(e2e_page, live_server):
+    from unittest.mock import patch
+
+    from app.models import db as _db
+    from app.services.mendeley import EXPORT_BATCH_SIZE
+    from tests.e2e.conftest import _make_paper
+    from tests.helpers import FakeMendeley
+
+    page, base_url = e2e_page
+    app = live_server["app"]
+    total = EXPORT_BATCH_SIZE + 2  # the three seeded papers and enough more for a second batch
+    with app.app_context():
+        _db.session.add_all(_make_paper(i) for i in range(3, total))
+        _db.session.commit()
+    cid = _review_of_every_paper(app)
+    mendeley = FakeMendeley()
+    status_cache = app.extensions.pop("mendeley_status_cache", None)  # holds "not connected" from earlier pages
+    try:
+        with (
+            patch("app.services.mendeley.requests.get", mendeley.get),
+            patch("app.services.mendeley.requests.post", mendeley.post),
+            patch("app.services.mendeley.MendeleyClient._load_token", lambda _client: {"access_token": "token"}),
+            patch(
+                "app.services.mendeley.MendeleyClient.check_connection",
+                return_value={"status": "connected", "message": "Mendeley is connected."},
+            ),
+        ):
+            page.goto(f"{base_url}/?collection={cid}&timeframe=all")
+            button = page.locator("#collection-mendeley-btn")
+            status = page.locator("#collection-mendeley-status")
+
+            # Mendeley starts refusing after three papers: the run stops and says how far it got.
+            mendeley.intercept = lambda method, path, body: (
+                429 if method == "post" and len(mendeley.folder_documents.get("folder-1", [])) == 3 else None
+            )
+            button.click()
+            expect(status).to_contain_text("429")
+            expect(status).to_contain_text("3 sent so far; click again to resume.")
+            expect(button).to_be_enabled()
+
+            mendeley.intercept = lambda method, path, body: None
+            button.click()  # resumes: the three are not sent again
+            expect(status).to_have_text(f"{total} of {total} papers are in the Mendeley folder ({total - 3} new).")
+            expect(button).to_be_enabled()
+
+            button.click()  # again: everything is there already
+            expect(status).to_have_text(f"{total} of {total} papers are in the Mendeley folder (0 new).")
+    finally:
+        app.extensions.pop("mendeley_status_cache", None)
+        if status_cache is not None:
+            app.extensions["mendeley_status_cache"] = status_cache
+
+    assert mendeley.folders == {"folder-1": "E2E Review"}
+    assert len(mendeley.folder_documents["folder-1"]) == total

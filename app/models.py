@@ -228,6 +228,9 @@ class Collection(db.Model):
     name = db.Column(db.String(128), nullable=False, unique=True)
     description = db.Column(db.Text, nullable=True, default="")
     color = db.Column(db.String(7), nullable=True)
+    # The Mendeley folder this collection was exported to, so a later export finds it
+    # again whatever either side has been renamed to (mirrors Paper.mendeley_doc_id).
+    mendeley_folder_id = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 

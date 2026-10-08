@@ -64,7 +64,11 @@ from here — add logic here, not there.
 
 **Outputs / integrations**
 - `email_digest.py` (Gmail OAuth + digest send; `DEFAULT_CREDENTIALS_PATH`),
-  `export.py` (HTML report), `bibtex.py`, `zotero.py`, `mendeley.py`,
+  `export.py` (HTML report), `bibtex.py`, `zotero.py`, `mendeley.py`
+  (`export_collection` sends one batch of a collection to its Mendeley folder
+  per call and is safe to repeat; the collection page loops over it. Every
+  route that creates Mendeley documents holds `WRITE_LOCK` from reading
+  `papers.mendeley_doc_id` to committing it),
   `thumbnail_generator.py`, `backup.py` (one-click backup/restore: consistent
   SQLite snapshot + vector index + config tarball. Restore is **staged-then-
   committed** — every component is copied onto its target filesystem first so the

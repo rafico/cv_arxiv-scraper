@@ -28,23 +28,31 @@ _TAG_WRITE_LOCK = threading.Lock()
 @api_bp.route("/papers/<int:paper_id>/mendeley", methods=["POST"])
 def single_paper_mendeley(paper_id: int):
     validate_csrf_token()
-    paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
 
-    from app.services.mendeley import MendeleyClient
+    from app.services.mendeley import WRITE_LOCK, MendeleyClient
 
-    client = MendeleyClient()
-    status = client.check_connection()
-    if status["status"] != "connected":
-        return jsonify({"error": f"Mendeley not connected: {status['message']}"}), 400
+    with WRITE_LOCK:
+        paper = db.session.get(Paper, paper_id) or abort(404, description="Paper not found")
+        if paper.mendeley_doc_id:
+            # Sent already: the button was drawn before an export of the paper's collection
+            # (or a send from another tab) linked it. A second document would be a duplicate.
+            return jsonify(
+                {"paper_id": paper.id, "message": "Already in Mendeley.", "document_id": paper.mendeley_doc_id}
+            )
 
-    result = client.add_document(paper)
-    if not result["success"]:
-        return jsonify({"error": result["message"]}), 502
+        client = MendeleyClient()
+        status = client.check_connection()
+        if status["status"] != "connected":
+            return jsonify({"error": f"Mendeley not connected: {status['message']}"}), 400
 
-    doc_id = result.get("document_id")
-    if doc_id:
-        paper.mendeley_doc_id = str(doc_id)
-        db.session.commit()
+        result = client.add_document(paper)
+        if not result["success"]:
+            return jsonify({"error": result["message"]}), 502
+
+        doc_id = result.get("document_id")
+        if doc_id:
+            paper.mendeley_doc_id = str(doc_id)
+            db.session.commit()
 
     return jsonify(
         {
