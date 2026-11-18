@@ -62,6 +62,9 @@ Wave 6: collections become the interest model (see `ROADMAP.md` and
   `./run.sh`, `make run` and the Docker image work as before.
 
 ### Fixed
+- The help's cron example ran two scrapes a day (`cv-arxiv-digest` scrapes
+  before it sends), and its arXiv-refusal notes gave the id-lookup pace as one
+  per second; it is one request per 3 seconds.
 - **A long-running server sees the papers a later scrape embeds.** The vector
   index was read once per process, so a web or MCP server started before the
   daily scrape (another process) never saw the new vectors: semantic search
