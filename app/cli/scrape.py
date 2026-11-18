@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
+
 from app import create_app
+from app.cli.serve import CLI_DATA_DIR_HELP, prepare_cli_data_dir
 from app.ingest.scrape_engine import run_scrape
 from app.models import Paper
 
@@ -46,7 +49,12 @@ def _print_paper(index, paper):
     print("-" * 50)
 
 
-def main():
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Run one arXiv scrape and print the matched papers")
+    parser.add_argument("--data-dir", help=CLI_DATA_DIR_HELP)
+    args = parser.parse_args(argv)
+    prepare_cli_data_dir(args.data_dir)
+
     app = create_app()
     result = run_scrape(app)
 

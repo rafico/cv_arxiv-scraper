@@ -11,7 +11,7 @@ import io
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 try:
     import tomllib  # Python 3.11+ stdlib
@@ -133,6 +133,63 @@ class ServeDataDirResolutionTests(unittest.TestCase):
 
     def test_unknown_command_returns_2(self):
         self.assertEqual(serve.main(["bogus"]), 2)
+
+
+class CliDataDirTests(unittest.TestCase):
+    """The batch CLIs (scrape, digest, sync, backfill) open the data dir their server uses."""
+
+    def test_installed_package_defaults_to_the_serve_data_dir(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            default = Path(tmp) / "data"
+            env: dict[str, str] = {}
+            with (
+                patch.object(serve, "DEFAULT_DATA_DIR", default),
+                patch.object(serve, "_is_source_checkout", return_value=False),
+            ):
+                serve.prepare_cli_data_dir(None, environ=env)
+
+            self.assertEqual(env["CV_ARXIV_INSTANCE_PATH"], str(default.resolve()))
+            self.assertTrue((default / "config.yaml").is_file())
+
+    def test_checkout_or_explicit_instance_path_keeps_the_app_lookup(self):
+        for checkout, env in ((True, {}), (False, {"CV_ARXIV_INSTANCE_PATH": "/srv/instance"})):
+            before = dict(env)
+            with patch.object(serve, "_is_source_checkout", return_value=checkout):
+                serve.prepare_cli_data_dir(None, environ=env)
+            self.assertEqual(env, before)
+
+    def test_flag_or_env_beats_the_checkout_default(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for flag, env in ((f"{tmp}/flag", {}), (None, {"CV_ARXIV_DATA_DIR": f"{tmp}/env"})):
+                with patch.object(serve, "_is_source_checkout", return_value=True):
+                    serve.prepare_cli_data_dir(flag, environ=env)
+                expected = Path(flag or env["CV_ARXIV_DATA_DIR"]).resolve()
+                self.assertEqual(env["CV_ARXIV_INSTANCE_PATH"], str(expected))
+
+    def test_every_batch_cli_prepares_the_data_dir_before_create_app(self):
+        import importlib
+
+        jobs = {
+            "app.cli.scrape": [],
+            "app.cli.digest": [],
+            "app.cli.sync": ["--from", "2024-01-01", "--to", "2024-01-02", "--category", "cs.CV"],
+            "app.cli.backfill": ["embeddings"],
+        }
+        for module, argv in jobs.items():
+            calls = MagicMock()
+            calls.create_app.side_effect = RuntimeError("stop before any real work")
+            with (
+                patch(f"{module}.prepare_cli_data_dir", calls.prepare),
+                patch(f"{module}.create_app", calls.create_app),
+                self.assertRaises(RuntimeError),
+            ):
+                importlib.import_module(module).main(["--data-dir", "/d", *argv])
+            self.assertEqual([name for name, _, _ in calls.mock_calls], ["prepare", "create_app"], module)
+            calls.prepare.assert_called_once_with("/d")
 
 
 class VersionTests(unittest.TestCase):

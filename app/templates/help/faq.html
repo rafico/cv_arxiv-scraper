@@ -37,6 +37,10 @@
             <p class="mt-2 text-sm text-fg-muted">Yes. Add extra feed sources under Settings &rarr; Research Setup &rarr; Feed Sources &mdash; pick an arXiv category or paste a custom RSS URL &mdash; or use the <code>/api/feed-sources</code> API.</p>
         </div>
         <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
+            <h3 class="text-base font-bold text-fg">Can it scrape on its own every day?</h3>
+            <p class="mt-2 text-sm text-fg-muted">Yes. Turn on the built-in scheduler under Settings &rarr; Automation &rarr; Scheduling. It scrapes at a set time each day (UTC) while the app is running, and can email you the digest afterwards. See <a href="{{ url_for('help.view_page', page='cli') }}#scheduled-scrapes" class="font-medium text-blue-600 hover:text-blue-800">Scheduled Scrapes</a> for details and the cron alternative.</p>
+        </div>
+        <div class="rounded-xl border border-edge bg-surface p-5 shadow-sm">
             <h3 class="text-base font-bold text-fg">How do I backfill old papers?</h3>
             <p class="mt-2 text-sm text-fg-muted">Use the <strong>Discover</strong> page, or run <code>cv-arxiv-sync --category cs.CV --from 2024-01-01 --to 2024-03-31</code> from the CLI.</p>
         </div>

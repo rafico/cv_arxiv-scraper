@@ -62,6 +62,18 @@ Wave 6: collections become the interest model (see `ROADMAP.md` and
   `./run.sh`, `make run` and the Docker image work as before.
 
 ### Fixed
+- **`cv-arxiv-scrape`, `-digest`, `-sync` and `-backfill` open the server's
+  data directory.** Installed from a wheel (`uvx`, `pip install .`, the Docker
+  image), they ignored the server's data dir and wrote to a separate, empty
+  database under the Python prefix. They now take `--data-dir` and read
+  `$CV_ARXIV_DATA_DIR`, defaulting to `~/.local/share/cv-arxiv` like
+  `cv-arxiv serve`. A source checkout keeps its `instance/` (the one
+  `python run.py` serves), and an explicit `CV_ARXIV_INSTANCE_PATH` is still
+  honored. The Docker image sets `CV_ARXIV_DATA_DIR=/app/instance`, so a command run in the
+  container uses its volume.
+- The help's cron example ran two scrapes a day (`cv-arxiv-digest` scrapes
+  before it sends), and its arXiv-refusal notes gave the id-lookup pace as one
+  per second; it is one request per 3 seconds.
 - **A long-running server sees the papers a later scrape embeds.** The vector
   index was read once per process, so a web or MCP server started before the
   daily scrape (another process) never saw the new vectors: semantic search

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from app import create_app
+from app.cli.serve import CLI_DATA_DIR_HELP, prepare_cli_data_dir
 from app.ingest.http_client import create_session
 from app.models import Paper, db
 from app.search_.text import now_utc
@@ -923,6 +924,7 @@ def run_all_backfills(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run selective enrichment backfills")
+    parser.add_argument("--data-dir", help=CLI_DATA_DIR_HELP + " (put it before the job name)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     embeddings = subparsers.add_parser("embeddings", help="Backfill missing embeddings")
@@ -969,6 +971,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    prepare_cli_data_dir(args.data_dir)
     app = create_app()
 
     try:

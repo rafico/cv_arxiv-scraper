@@ -6,17 +6,20 @@ import argparse
 import sys
 
 from app import create_app
+from app.cli.serve import CLI_DATA_DIR_HELP, prepare_cli_data_dir
 from app.ingest.scrape_engine import run_scrape
 from app.web.email_digest import send_digest
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="ArXiv CV daily email digest")
     parser.add_argument("--dry-run", action="store_true", help="Build the email but do not actually send it")
     parser.add_argument(
         "--send-only", action="store_true", help="Skip scraping; send digest from papers already in the database"
     )
-    args = parser.parse_args()
+    parser.add_argument("--data-dir", help=CLI_DATA_DIR_HELP)
+    args = parser.parse_args(argv)
+    prepare_cli_data_dir(args.data_dir)
 
     app = create_app()
 
