@@ -35,6 +35,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CV_ARXIV_CONFIG=/app/config.yaml \
+    CV_ARXIV_DATA_DIR=/app/instance \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}"
 

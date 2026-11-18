@@ -101,6 +101,32 @@ def prepare_data_dir(data_dir: Path, *, environ: dict[str, str] | None = None) -
     return config_path
 
 
+# --data-dir help for the batch CLIs (scrape, digest, sync, backfill).
+CLI_DATA_DIR_HELP = (
+    f"Data directory, as for 'cv-arxiv serve': --data-dir, else ${DATA_DIR_ENV_VAR}, else "
+    "~/.local/share/cv-arxiv. A source checkout defaults to its instance/, like run.py"
+)
+
+
+def _is_source_checkout() -> bool:
+    """True when ``app/`` sits in a repo checkout (editable install), not in site-packages."""
+    return (Path(__file__).resolve().parents[2] / "pyproject.toml").is_file()
+
+
+def prepare_cli_data_dir(cli_data_dir: str | None = None, *, environ: dict[str, str] | None = None) -> None:
+    """Point a batch CLI at the data directory its server uses.
+
+    ``--data-dir`` > ``$CV_ARXIV_DATA_DIR`` > the default, as for ``serve``. With neither
+    given, an explicit ``$CV_ARXIV_INSTANCE_PATH`` or a source checkout keeps the app's own
+    lookup: in a checkout that is ``instance/``, which ``python run.py`` serves.
+    """
+    env = os.environ if environ is None else environ
+    explicit = (cli_data_dir or "").strip() or env.get(DATA_DIR_ENV_VAR, "").strip()
+    if not explicit and (env.get("CV_ARXIV_INSTANCE_PATH", "").strip() or _is_source_checkout()):
+        return
+    prepare_data_dir(resolve_data_dir(cli_data_dir, environ=environ), environ=environ)
+
+
 def _serve_help() -> str:
     from app.cli import webserver
 

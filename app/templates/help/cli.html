@@ -107,6 +107,7 @@
     <p class="text-sm text-fg-muted mt-4">Prefer external automation (server not always running)? Point cron or a systemd timer at the console scripts and leave the built-in scheduler off, or you get two scrapes (and two digests) a day. Use one line, not both, because <code>cv-arxiv-digest</code> runs a scrape before it sends. Cron uses the machine&rsquo;s local time, not UTC:</p>
     <pre class="bg-surface-2 rounded-lg p-3 text-xs text-fg-muted overflow-x-auto mt-2"><code>0 8 * * * cv-arxiv-scrape    # scrape only
 0 8 * * * cv-arxiv-digest    # scrape, then email the digest</code></pre>
+    <p class="text-sm text-fg-muted mt-4">The scripts open the same data directory as <code>cv-arxiv serve</code>: <code>--data-dir</code>, else <code>$CV_ARXIV_DATA_DIR</code>, else <code>~/.local/share/cv-arxiv</code>. In a source checkout they default to its <code>instance/</code> folder instead, the one <code>python run.py</code> serves; pass <code>--data-dir</code> there if you serve with <code>cv-arxiv serve</code>.</p>
 </section>
 
 <!-- arXiv refusals -->

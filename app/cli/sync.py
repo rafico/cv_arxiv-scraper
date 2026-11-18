@@ -11,6 +11,7 @@ from datetime import date, datetime, time, timedelta
 import requests
 
 from app import create_app
+from app.cli.serve import CLI_DATA_DIR_HELP, prepare_cli_data_dir
 from app.ingest.scrape_engine import execute_historical_scrape
 from app.models import SyncState, db
 from app.search_.text import now_utc
@@ -242,6 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-results", type=int, default=1000, help="Cap on --query results (newest first), defaults to 1000"
     )
+    parser.add_argument("--data-dir", help=CLI_DATA_DIR_HELP)
     return parser
 
 
@@ -256,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     elif not (args.start_dt and args.end_dt and args.category):
         parser.error("--from, --to and --category are required (or use --query)")
 
+    prepare_cli_data_dir(args.data_dir)
     app = create_app()
     try:
         if args.query:

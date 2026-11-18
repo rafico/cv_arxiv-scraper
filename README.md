@@ -211,6 +211,10 @@ After `pip install -e .`:
 | `cv-arxiv-sync` | Historical sync (`--from`, `--to`, `--category`), or `--query` + `--collection` to import an arXiv search into a collection |
 | `cv-arxiv-backfill` | Enrichment backfills (`embeddings`, `citations`, `citation-edges`, `openalex`, `thumbnails`, `all`) |
 
+`cv-arxiv-scrape`, `-digest`, `-sync` and `-backfill` open the same data directory as
+`cv-arxiv serve` (`--data-dir`, else `$CV_ARXIV_DATA_DIR`, else `~/.local/share/cv-arxiv`). In a
+source checkout they default to its `instance/`, the one `python run.py` serves.
+
 Standalone scripts (`python scrape_cli.py`, `python export_cli.py`, etc.) also work without
 installing once the environment is active.
 

@@ -191,7 +191,7 @@ class ScrapeCliQaTests(FlaskDBTestCase):
         from app.cli.scrape import main
 
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
-            main()
+            main([])
 
         output = stdout.getvalue()
         self.assertIn("===== Matched Articles =====", output)
